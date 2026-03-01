@@ -1,5 +1,6 @@
 const SLOT_IDS = ['slot1', 'slot2', 'slot3', 'slot4', 'slot5', 'slot6', 'slot7', 'slot8'];
 const MAP_DRAFT_STORAGE_PREFIX = 'pinball_v2_map_draft:';
+const FILE_PROTOCOL = window.location.protocol === 'file:';
 
 const elements = {
   mapJsonInput: document.getElementById('mapJsonInput'),
@@ -38,6 +39,9 @@ const elements = {
 
 function setStatus(message, kind = 'ok') {
   const text = String(message ?? '');
+  if (!elements.statusBox) {
+    return;
+  }
   elements.statusBox.textContent = text;
   if (kind === 'error') {
     elements.statusBox.style.color = '#ff9898';
@@ -46,6 +50,13 @@ function setStatus(message, kind = 'ok') {
   } else {
     elements.statusBox.style.color = '#7df4bc';
   }
+}
+
+function bindEvent(element, eventName, handler) {
+  if (!element || typeof element.addEventListener !== 'function') {
+    return;
+  }
+  element.addEventListener(eventName, handler);
 }
 
 function setBusy(isBusy) {
@@ -263,6 +274,9 @@ function getEngineApi() {
 }
 
 async function waitForEngineApi(timeoutMs = 20000) {
+  if (FILE_PROTOCOL) {
+    throw new Error('file:// 경로에서는 엔진 모듈이 차단될 수 있습니다. 로컬 서버로 열어주세요 (예: python -m http.server 8080)');
+  }
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     const api = getEngineApi();
@@ -302,6 +316,9 @@ async function refreshSnapshotList() {
 }
 
 async function loadEngineFrame() {
+  if (!elements.engineFrame || !elements.engineUrlText) {
+    throw new Error('엔진 프레임 요소를 찾지 못했습니다. 페이지를 새로고침하세요');
+  }
   const engineUrl = `../assets/ui/pinball/index_v2.html?editor=1&nocache=${Date.now()}`;
   elements.engineUrlText.textContent = engineUrl;
   elements.engineFrame.src = engineUrl;
@@ -607,7 +624,7 @@ function selectedSlot() {
 }
 
 function setupEvents() {
-  elements.mapIdInput.addEventListener('change', () => {
+  bindEvent(elements.mapIdInput, 'change', () => {
     const mapId = String(elements.mapIdInput.value || '').trim();
     if (!mapId || !elements.mapFileNameInput) {
       return;
@@ -617,15 +634,15 @@ function setupEvents() {
     }
   });
 
-  elements.pullMapButton.addEventListener('click', async () => {
+  bindEvent(elements.pullMapButton, 'click', async () => {
     await pullMapJsonFromEngine();
   });
 
-  elements.applyJsonButton.addEventListener('click', async () => {
+  bindEvent(elements.applyJsonButton, 'click', async () => {
     await applyMapJsonFromEditor();
   });
 
-  elements.downloadMapButton.addEventListener('click', async () => {
+  bindEvent(elements.downloadMapButton, 'click', async () => {
     try {
       await downloadMapJsonFile();
     } catch (error) {
@@ -633,11 +650,11 @@ function setupEvents() {
     }
   });
 
-  elements.uploadMapButton.addEventListener('click', () => {
+  bindEvent(elements.uploadMapButton, 'click', () => {
     triggerMapFileDialog();
   });
 
-  elements.saveDraftButton.addEventListener('click', () => {
+  bindEvent(elements.saveDraftButton, 'click', () => {
     try {
       saveMapDraftToStorage();
     } catch (error) {
@@ -645,7 +662,7 @@ function setupEvents() {
     }
   });
 
-  elements.loadDraftButton.addEventListener('click', () => {
+  bindEvent(elements.loadDraftButton, 'click', () => {
     try {
       loadMapDraftFromStorage();
     } catch (error) {
@@ -653,7 +670,7 @@ function setupEvents() {
     }
   });
 
-  elements.installMapButton.addEventListener('click', async () => {
+  bindEvent(elements.installMapButton, 'click', async () => {
     try {
       await installMapIntoProjectMapsFolder();
     } catch (error) {
@@ -661,7 +678,7 @@ function setupEvents() {
     }
   });
 
-  elements.copyManifestEntryButton.addEventListener('click', async () => {
+  bindEvent(elements.copyManifestEntryButton, 'click', async () => {
     try {
       await copyManifestEntryToClipboard();
     } catch (error) {
@@ -669,7 +686,7 @@ function setupEvents() {
     }
   });
 
-  elements.mapFileInput.addEventListener('change', async () => {
+  bindEvent(elements.mapFileInput, 'change', async () => {
     const files = elements.mapFileInput.files;
     const file = files && files.length > 0 ? files[0] : null;
     if (!file) {
@@ -684,7 +701,7 @@ function setupEvents() {
     }
   });
 
-  elements.reloadButton.addEventListener('click', async () => {
+  bindEvent(elements.reloadButton, 'click', async () => {
     setBusy(true);
     try {
       await loadEngineFrame();
@@ -695,11 +712,11 @@ function setupEvents() {
     }
   });
 
-  elements.applyButton.addEventListener('click', async () => {
+  bindEvent(elements.applyButton, 'click', async () => {
     await applyMapAndCandidates();
   });
 
-  elements.startButton.addEventListener('click', async () => {
+  bindEvent(elements.startButton, 'click', async () => {
     await withEngineAction(async (api) => {
       const result = await api.start();
       if (!result || result.ok !== true) {
@@ -709,7 +726,7 @@ function setupEvents() {
     });
   });
 
-  elements.pauseButton.addEventListener('click', async () => {
+  bindEvent(elements.pauseButton, 'click', async () => {
     await withEngineAction(async (api) => {
       const result = await api.pause();
       if (!result || result.ok !== true) {
@@ -719,7 +736,7 @@ function setupEvents() {
     });
   });
 
-  elements.resetButton.addEventListener('click', async () => {
+  bindEvent(elements.resetButton, 'click', async () => {
     await withEngineAction(async (api) => {
       const result = await api.reset();
       if (!result || result.ok !== true) {
@@ -729,14 +746,14 @@ function setupEvents() {
     });
   });
 
-  elements.stateButton.addEventListener('click', async () => {
+  bindEvent(elements.stateButton, 'click', async () => {
     await withEngineAction(async (api) => {
       const state = api.getState();
       setStatus(JSON.stringify(state, null, 2));
     });
   });
 
-  elements.quickSaveButton.addEventListener('click', async () => {
+  bindEvent(elements.quickSaveButton, 'click', async () => {
     await withEngineAction(async (api) => {
       const result = await api.saveSnapshot('quick');
       if (!result || result.ok !== true) {
@@ -747,7 +764,7 @@ function setupEvents() {
     });
   });
 
-  elements.quickLoadButton.addEventListener('click', async () => {
+  bindEvent(elements.quickLoadButton, 'click', async () => {
     await withEngineAction(async (api) => {
       const result = await api.loadSnapshot('quick', { autoResume: false });
       if (!result || result.ok !== true) {
@@ -758,7 +775,7 @@ function setupEvents() {
     });
   });
 
-  elements.saveSlotButton.addEventListener('click', async () => {
+  bindEvent(elements.saveSlotButton, 'click', async () => {
     await withEngineAction(async (api) => {
       const slotId = selectedSlot();
       const result = await api.saveSnapshot(slotId);
@@ -770,7 +787,7 @@ function setupEvents() {
     });
   });
 
-  elements.loadSlotButton.addEventListener('click', async () => {
+  bindEvent(elements.loadSlotButton, 'click', async () => {
     await withEngineAction(async (api) => {
       const slotId = selectedSlot();
       const result = await api.loadSnapshot(slotId, { autoResume: false });
@@ -782,7 +799,7 @@ function setupEvents() {
     });
   });
 
-  elements.deleteSlotButton.addEventListener('click', async () => {
+  bindEvent(elements.deleteSlotButton, 'click', async () => {
     await withEngineAction(async (api) => {
       const slotId = selectedSlot();
       const result = api.deleteSnapshot(slotId);
@@ -794,7 +811,7 @@ function setupEvents() {
     });
   });
 
-  elements.refreshSlotsButton.addEventListener('click', async () => {
+  bindEvent(elements.refreshSlotsButton, 'click', async () => {
     await withEngineAction(async () => {
       await refreshSnapshotList();
       setStatus('스냅샷 목록을 새로고침했습니다');
@@ -808,6 +825,10 @@ async function boot() {
   const initialMap = buildDefaultMapJson(String(elements.mapIdInput.value || '').trim() || 'v2_custom_map');
   writeMapJsonEditor(initialMap);
   syncMapFileNameInputFromMapJson(initialMap);
+  if (FILE_PROTOCOL) {
+    setStatus('현재 file:// 경로입니다. 버튼 동작을 위해 로컬 서버로 열어주세요: python -m http.server 8080 후 http://localhost:8080/tools/pinball_map_maker_v2.html', 'warn');
+    return;
+  }
   setBusy(true);
   try {
     await loadEngineFrame();
