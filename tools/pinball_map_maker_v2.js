@@ -1014,6 +1014,10 @@ function toolDisplayName(tool) {
   }
 }
 
+function objectTypeDisplayName(type) {
+  return toolDisplayName(type);
+}
+
 function defaultColorForObjectType(type) {
   switch (String(type || '')) {
     case 'wall_polyline':
@@ -1080,6 +1084,33 @@ function resetPendingWall() {
 
 function resetPendingPortal() {
   editorState.pendingPortalOid = '';
+}
+
+function linkPortalPairBidirectional(firstPortal, secondPortal) {
+  if (!firstPortal || !secondPortal || firstPortal === secondPortal) {
+    return false;
+  }
+  const aOid = String(firstPortal.oid || '').trim();
+  const bOid = String(secondPortal.oid || '').trim();
+  if (!aOid || !bOid) {
+    return false;
+  }
+  const objects = getObjects();
+  for (let index = 0; index < objects.length; index += 1) {
+    const obj = objects[index];
+    if (!obj || obj.type !== 'portal') {
+      continue;
+    }
+    const oid = String(obj.oid || '').trim();
+    if (oid !== aOid && oid !== bOid) {
+      if (String(obj.pair || '').trim() === aOid || String(obj.pair || '').trim() === bOid) {
+        obj.pair = '';
+      }
+    }
+  }
+  firstPortal.pair = bOid;
+  secondPortal.pair = aOid;
+  return true;
 }
 
 function resetPendingHammer() {
@@ -1166,7 +1197,8 @@ function createObjectByTool(tool, x, y) {
       triggerRadius: 1.05,
       pair: '',
       cooldownMs: 900,
-      exitImpulse: 2.4,
+      preserveVelocity: true,
+      exitImpulse: 0,
       exitDirDeg: 0,
       color: OBJECT_COLOR_PRESET.portal,
     };
@@ -1240,9 +1272,9 @@ function clearObjectEditor() {
   if (elements.objHitDistanceInput) elements.objHitDistanceInput.disabled = true;
   if (elements.objHitDistanceLabel) elements.objHitDistanceLabel.textContent = '이동거리';
   if (elements.reverseRotationButton) elements.reverseRotationButton.disabled = true;
-  if (elements.objDirLabel) elements.objDirLabel.textContent = 'dirDeg';
-  if (elements.objForceLabel) elements.objForceLabel.textContent = 'force';
-  if (elements.objIntervalLabel) elements.objIntervalLabel.textContent = 'interval';
+  if (elements.objDirLabel) elements.objDirLabel.textContent = '방향 각도(도)';
+  if (elements.objForceLabel) elements.objForceLabel.textContent = '힘';
+  if (elements.objIntervalLabel) elements.objIntervalLabel.textContent = '간격(ms)';
 }
 
 function populateObjectEditor() {
@@ -1278,7 +1310,7 @@ function populateObjectEditor() {
     if (obj.type === 'rotor') {
       elements.objForceInput.value = String(round2(toFinite(obj.angularVelocity, 2.2)));
     } else if (obj.type === 'portal') {
-      elements.objForceInput.value = String(round1(toFinite(obj.exitImpulse, 2.4)));
+      elements.objForceInput.value = String(round1(toFinite(obj.exitImpulse, 0)));
     } else {
       elements.objForceInput.value = String(round1(toFinite(obj.force, 4.2)));
     }
@@ -1320,18 +1352,18 @@ function populateObjectEditor() {
   }
   if (elements.objDirLabel) {
     elements.objDirLabel.textContent = obj.type === 'rotor'
-      ? 'dirDeg(미사용)'
-      : (obj.type === 'portal' ? 'exitDir' : (obj.type === 'burst_bumper' ? 'layers' : 'dirDeg'));
+      ? '방향 각도(미사용)'
+      : (obj.type === 'portal' ? '출구 각도(도)' : (obj.type === 'burst_bumper' ? '레이어 수' : '방향 각도(도)'));
   }
   if (elements.objForceLabel) {
     elements.objForceLabel.textContent = obj.type === 'rotor'
-      ? 'angVel'
-      : (obj.type === 'portal' ? 'exitImp' : 'force');
+      ? '회전 속도'
+      : (obj.type === 'portal' ? '출구 가속(impulse)' : '힘');
   }
   if (elements.objIntervalLabel) {
     elements.objIntervalLabel.textContent = obj.type === 'rotor'
-      ? 'interval(미사용)'
-      : (obj.type === 'portal' || obj.type === 'burst_bumper' ? 'cooldown' : 'interval');
+      ? '간격(미사용)'
+      : (obj.type === 'portal' || obj.type === 'burst_bumper' ? '쿨다운(ms)' : '간격(ms)');
   }
 
   if (obj.type === 'wall_polyline') {
@@ -1349,38 +1381,38 @@ function populateObjectEditor() {
     if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
     if (elements.objExtra1Input) elements.objExtra1Input.value = String(round1(toFinite(obj.triggerRadius, toFinite(obj.radius, 0.7) + 0.45)));
     if (elements.objExtra2Input) elements.objExtra2Input.value = String(round1(toFinite(obj.restitution, 3.2)));
-    if (elements.objExtra1Label) elements.objExtra1Label.textContent = 'triggerR';
-    if (elements.objExtra2Label) elements.objExtra2Label.textContent = 'bounce';
+    if (elements.objExtra1Label) elements.objExtra1Label.textContent = '트리거 반경';
+    if (elements.objExtra2Label) elements.objExtra2Label.textContent = '탄성';
   } else if (obj.type === 'hammer') {
     if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
     if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
     if (elements.objExtra1Input) elements.objExtra1Input.value = String(round1(toFinite(obj.triggerRadius, 1.2)));
     if (elements.objExtra2Input) elements.objExtra2Input.value = String(Math.round(toFinite(obj.cooldownMs, 320)));
-    if (elements.objExtra1Label) elements.objExtra1Label.textContent = 'triggerR';
-    if (elements.objExtra2Label) elements.objExtra2Label.textContent = 'cooldown';
+    if (elements.objExtra1Label) elements.objExtra1Label.textContent = '트리거 반경';
+    if (elements.objExtra2Label) elements.objExtra2Label.textContent = '쿨다운(ms)';
   } else if (obj.type === 'portal') {
     if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
     if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
     if (elements.objExtra1Input) elements.objExtra1Input.value = String(round1(toFinite(obj.triggerRadius, toFinite(obj.radius, 0.6) + 0.45)));
     if (elements.objExtra2Input) elements.objExtra2Input.value = String(Math.round(toFinite(obj.cooldownMs, 900)));
-    if (elements.objExtra1Label) elements.objExtra1Label.textContent = 'triggerR';
-    if (elements.objExtra2Label) elements.objExtra2Label.textContent = 'cooldown';
+    if (elements.objExtra1Label) elements.objExtra1Label.textContent = '트리거 반경';
+    if (elements.objExtra2Label) elements.objExtra2Label.textContent = '쿨다운(ms)';
   } else if (obj.type === 'rotor') {
     if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
     if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
     if (elements.objExtra1Input) elements.objExtra1Input.value = String(round1(toFinite(obj.width, 3.2)));
     if (elements.objExtra2Input) elements.objExtra2Input.value = String(round1(toFinite(obj.height, 0.12)));
-    if (elements.objExtra1Label) elements.objExtra1Label.textContent = 'width';
-    if (elements.objExtra2Label) elements.objExtra2Label.textContent = 'height';
+    if (elements.objExtra1Label) elements.objExtra1Label.textContent = '가로 반길이';
+    if (elements.objExtra2Label) elements.objExtra2Label.textContent = '세로 반길이';
   } else {
     if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
     if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
     if (elements.objExtra1Input) elements.objExtra1Input.value = String(round1(toFinite(obj.width, 1.2)));
     if (elements.objExtra2Input) elements.objExtra2Input.value = String(round1(toFinite(obj.height, 0.2)));
-    if (elements.objExtra1Label) elements.objExtra1Label.textContent = 'width';
-    if (elements.objExtra2Label) elements.objExtra2Label.textContent = 'height';
+    if (elements.objExtra1Label) elements.objExtra1Label.textContent = '가로 반길이';
+    if (elements.objExtra2Label) elements.objExtra2Label.textContent = '세로 반길이';
   }
-  updateMakerHint(`선택됨: ${obj.oid} (${obj.type})`);
+  updateMakerHint(`선택됨: ${obj.oid} (${objectTypeDisplayName(obj.type)})`);
 }
 
 function syncObjectList() {
@@ -1489,14 +1521,24 @@ function applyObjectEditorValues() {
       toFinite(obj.cooldownMs, 900),
     ));
     obj.pair = String(elements.objPairInput && elements.objPairInput.value ? elements.objPairInput.value : obj.pair || '').trim();
+    if (!Object.prototype.hasOwnProperty.call(obj, 'preserveVelocity')) {
+      obj.preserveVelocity = true;
+    }
     obj.exitDirDeg = Math.round(toFinite(
       elements.objDirInput ? elements.objDirInput.value : obj.exitDirDeg,
       toFinite(obj.exitDirDeg, 0),
     ));
     obj.exitImpulse = round1(toFinite(
       elements.objForceInput ? elements.objForceInput.value : obj.exitImpulse,
-      toFinite(obj.exitImpulse, 2.4),
+      toFinite(obj.exitImpulse, 0),
     ));
+    if (obj.pair) {
+      const objects = getObjects();
+      const target = objects.find((item) => item && item.type === 'portal' && String(item.oid || '').trim() === obj.pair);
+      if (target && target !== obj) {
+        linkPortalPairBidirectional(obj, target);
+      }
+    }
     refreshCurrentJsonViewer();
     return;
   }
@@ -3286,9 +3328,7 @@ function finishDrag() {
           updateMakerHint(`포털 A 생성: ${created.oid} → 다음 포털 배치 시 자동 연결`);
         } else {
           const firstPortal = objects.find((item) => item && item.oid === firstPortalOid);
-          if (firstPortal && firstPortal !== created) {
-            firstPortal.pair = created.oid;
-            created.pair = firstPortal.oid;
+          if (firstPortal && firstPortal !== created && linkPortalPairBidirectional(firstPortal, created)) {
             updateMakerHint(`포털 연결 완료: ${firstPortal.oid} ↔ ${created.oid}`);
           }
           editorState.pendingPortalOid = '';
@@ -3579,9 +3619,7 @@ function addObjectAt(tool, x, y, options = {}) {
       updateMakerHint(`포털 A 생성: ${created.oid} → 다음 클릭 위치에 포털 B를 생성해 자동 연결`);
     } else {
       const firstPortal = objects.find((item) => item && item.oid === firstPortalOid);
-      if (firstPortal && firstPortal !== created) {
-        firstPortal.pair = created.oid;
-        created.pair = firstPortal.oid;
+      if (firstPortal && firstPortal !== created && linkPortalPairBidirectional(firstPortal, created)) {
         updateMakerHint(`포털 연결 완료: ${firstPortal.oid} ↔ ${created.oid}`);
       } else {
         updateMakerHint('포털 연결 대상이 없어 새 포털 A를 기준으로 다시 시작합니다.');

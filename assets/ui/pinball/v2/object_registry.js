@@ -243,42 +243,80 @@ function compileObject(rawObject, entityId) {
         }),
         behavior: null,
       };
-    case 'burst_bumper':
+    case 'burst_bumper': {
+      const totalLayers = Math.max(1, Math.floor(toFiniteNumber(rawObject.layers, 3)));
+      const hpPerLayer = Math.max(1, Math.floor(toFiniteNumber(rawObject.hpPerLayer, toFiniteNumber(rawObject.hp, 1))));
+      const damagePerHit = Math.max(1, Math.floor(toFiniteNumber(rawObject.damagePerHit, 1)));
+      const baseRadius = Math.max(0.08, toFiniteNumber(rawObject.radius, 0.68));
+      const baseTriggerRadius = Math.max(0.14, toFiniteNumber(rawObject.triggerRadius, baseRadius + 0.45));
+      const color = typeof rawObject.color === 'string' ? rawObject.color : DEFAULT_OBJECT_COLORS.burst;
+      const entities = [];
+      const layerEntityIds = [];
+      const layerRadii = [];
+
+      for (let layerIndex = 0; layerIndex < totalLayers; layerIndex += 1) {
+        const ratio = (totalLayers - layerIndex) / totalLayers;
+        const layerRadius = Math.max(0.06, baseRadius * ratio);
+        const compiledLayer = compileCircle(
+          {
+            ...rawObject,
+            radius: layerRadius,
+            life: -1,
+            restitution: toFiniteNumber(rawObject.restitution, 3.2),
+            color,
+          },
+          entityId + layerIndex,
+          {
+            radius: layerRadius,
+            restitution: 3.2,
+            density: 1,
+            life: -1,
+            x: toFiniteNumber(rawObject.x, 11.75),
+            y: toFiniteNumber(rawObject.y, 72),
+            color,
+          },
+        );
+        if (!compiledLayer) {
+          continue;
+        }
+        compiledLayer.shape.__v2burstLayer = totalLayers - layerIndex;
+        compiledLayer.shape.__v2burstLayerIndex = layerIndex;
+        entities.push(compiledLayer);
+        layerEntityIds.push(entityId + layerIndex);
+        layerRadii.push(layerRadius);
+      }
+
       return {
-        entity: compileCircle(rawObject, entityId, {
-          radius: 0.68,
-          restitution: 3.2,
-          density: 1,
-          life: -1,
-          x: 11.75,
-          y: 72,
-          color: DEFAULT_OBJECT_COLORS.burst,
-        }),
+        entity: entities[0] || null,
+        entities,
         behavior: {
           kind: 'burst_bumper',
           oid: toId(rawObject.oid, `burst_${entityId}`),
           entityId,
+          entityIds: layerEntityIds,
+          layerRadii,
           x: toFiniteNumber(rawObject.x, 11.75),
           y: toFiniteNumber(rawObject.y, 72),
-          radius: Math.max(0.08, toFiniteNumber(rawObject.radius, 0.68)),
-          triggerRadius: Math.max(0.14, toFiniteNumber(rawObject.triggerRadius, toFiniteNumber(rawObject.radius, 0.68) + 0.45)),
+          radius: baseRadius,
+          triggerRadius: baseTriggerRadius,
           force: Math.max(0.1, toFiniteNumber(rawObject.force, toFiniteNumber(rawObject.burstForce, 6.2))),
           cooldownMs: Math.max(20, toFiniteNumber(rawObject.cooldownMs, toFiniteNumber(rawObject.intervalMs, 420))),
           upwardBoost: Math.max(0, toFiniteNumber(rawObject.upwardBoost, 0)),
-          layers: Math.max(1, Math.floor(toFiniteNumber(rawObject.layers, 3))),
-          hpPerLayer: Math.max(1, Math.floor(toFiniteNumber(rawObject.hpPerLayer, toFiniteNumber(rawObject.hp, 1)))),
-          damagePerHit: Math.max(1, Math.floor(toFiniteNumber(rawObject.damagePerHit, 1))),
+          layers: totalLayers,
+          hpPerLayer,
+          damagePerHit,
           maxHp: Math.max(
             1,
             Math.floor(
               toFiniteNumber(
                 rawObject.maxHp,
-                Math.max(1, Math.floor(toFiniteNumber(rawObject.layers, 3))) * Math.max(1, Math.floor(toFiniteNumber(rawObject.hpPerLayer, toFiniteNumber(rawObject.hp, 1)))),
+                totalLayers * hpPerLayer,
               ),
             ),
           ),
         },
       };
+    }
     case 'rotor':
       return {
         entity: compileBox(
@@ -316,7 +354,7 @@ function compileObject(rawObject, entityId) {
             toFiniteNumber(rawObject.triggerRadius, toFiniteNumber(rawObject.radius, 0.45) + 0.45),
           ),
           cooldownMs: Math.max(0, toFiniteNumber(rawObject.cooldownMs, 900)),
-          preserveVelocity: toBoolean(rawObject.preserveVelocity, false),
+          preserveVelocity: toBoolean(rawObject.preserveVelocity, true),
           exitImpulse: Math.max(0, toFiniteNumber(rawObject.exitImpulse, 0)),
           exitDirDeg: toFiniteNumber(rawObject.exitDirDeg, 0),
         },
@@ -373,17 +411,51 @@ export function compileMap(mapJson) {
     const rawObject = objects[index];
     const oid = toId(rawObject && rawObject.oid, `obj_${index + 1}`);
     const compiled = compileObject(rawObject, entityIdCursor);
-    if (compiled.entity) {
+    const createdEntityIds = [];
+    const compiledEntities = Array.isArray(compiled && compiled.entities)
+      ? compiled.entities.filter((entity) => !!entity)
+      : [];
+    if (compiledEntities.length > 0) {
+      for (let entityIndex = 0; entityIndex < compiledEntities.length; entityIndex += 1) {
+        const entity = compiledEntities[entityIndex];
+        entities.push(entity);
+        objectIndex.push({
+          oid,
+          type: toId(rawObject.type, ''),
+          entityId: entityIdCursor,
+        });
+        createdEntityIds.push(entityIdCursor);
+        entityIdCursor += 1;
+      }
+    } else if (compiled.entity) {
       entities.push(compiled.entity);
       objectIndex.push({
         oid,
         type: toId(rawObject.type, ''),
         entityId: entityIdCursor,
       });
+      createdEntityIds.push(entityIdCursor);
       entityIdCursor += 1;
     }
     if (compiled.behavior) {
-      behaviorDefs.push(compiled.behavior);
+      const behavior = { ...compiled.behavior };
+      if (createdEntityIds.length > 0 && !Number.isFinite(toFiniteNumber(behavior.entityId, NaN))) {
+        behavior.entityId = createdEntityIds[0];
+      }
+      if (behavior.kind === 'burst_bumper') {
+        if (!Array.isArray(behavior.entityIds) || behavior.entityIds.length === 0) {
+          behavior.entityIds = createdEntityIds.slice();
+        }
+        if (!Array.isArray(behavior.layerRadii) || behavior.layerRadii.length === 0) {
+          const layerRadii = [];
+          for (let entityIndex = 0; entityIndex < compiledEntities.length; entityIndex += 1) {
+            const entity = compiledEntities[entityIndex];
+            layerRadii.push(Math.max(0.06, toFiniteNumber(entity && entity.shape && entity.shape.radius, behavior.radius)));
+          }
+          behavior.layerRadii = layerRadii;
+        }
+      }
+      behaviorDefs.push(behavior);
     }
   }
 
@@ -421,10 +493,12 @@ function createPortalBehavior(def, portalByOid, env) {
   }
 
   function setCooldown(marbleId, expiresAt) {
-    cooldownByMarble[getKey(marbleId)] = expiresAt;
-    const pair = getPairPortal();
-    if (pair) {
-      cooldownByMarble[`${pair.oid}:${marbleId}`] = expiresAt;
+    const safeExpiresAt = Math.max(0, toFiniteNumber(expiresAt, 0));
+    for (const portal of portalByOid.values()) {
+      if (!portal || !portal.oid) {
+        continue;
+      }
+      cooldownByMarble[`${portal.oid}:${marbleId}`] = safeExpiresAt;
     }
   }
 
@@ -470,6 +544,9 @@ function createPortalBehavior(def, portalByOid, env) {
           body.SetLinearVelocity(new box2d.b2Vec2(0, 0));
         }
       }
+      if (typeof body.SetAngularVelocity === 'function') {
+        body.SetAngularVelocity(0);
+      }
       const impulse = Math.max(0, toFiniteNumber(target.exitImpulse, 0));
       if (impulse > 0 && typeof body.ApplyLinearImpulseToCenter === 'function') {
         const rad = degToRad(toFiniteNumber(target.exitDirDeg, 0));
@@ -477,12 +554,14 @@ function createPortalBehavior(def, portalByOid, env) {
         const iy = Math.sin(rad) * impulse;
         body.ApplyLinearImpulseToCenter(new box2d.b2Vec2(ix, iy), true);
       }
+      marble.x = targetX;
+      marble.y = targetY;
     } catch (_) {
       return;
     }
 
     const cooldownMs = Math.max(
-      0,
+      80,
       Math.max(toFiniteNumber(source.cooldownMs, 900), toFiniteNumber(target.cooldownMs, 900)),
     );
     setCooldown(marble.id, now + cooldownMs);
@@ -563,70 +642,121 @@ function createPortalBehavior(def, portalByOid, env) {
 
 function createBurstBumperBehavior(def, env) {
   const cooldownByMarble = {};
-  const totalLayers = Math.max(1, Math.floor(toFiniteNumber(def.layers, 3)));
+  const layerEntityIds = Array.isArray(def.entityIds) && def.entityIds.length > 0
+    ? def.entityIds
+        .map((value) => Math.floor(toFiniteNumber(value, NaN)))
+        .filter((value) => Number.isFinite(value))
+    : [Math.floor(toFiniteNumber(def.entityId, NaN))].filter((value) => Number.isFinite(value));
+  const totalLayers = Math.max(
+    1,
+    Math.max(
+      Math.floor(toFiniteNumber(def.layers, 3)),
+      layerEntityIds.length,
+    ),
+  );
   const hpPerLayer = Math.max(1, Math.floor(toFiniteNumber(def.hpPerLayer, 1)));
   const damagePerHit = Math.max(1, Math.floor(toFiniteNumber(def.damagePerHit, 1)));
-  const maxHp = Math.max(1, Math.floor(toFiniteNumber(def.maxHp, totalLayers * hpPerLayer)));
-  let hp = maxHp;
+  const baseRadius = Math.max(0.06, toFiniteNumber(def.radius, 0.68));
+  const configuredLayerRadii = Array.isArray(def.layerRadii)
+    ? def.layerRadii.map((value) => Math.max(0.06, toFiniteNumber(value, baseRadius)))
+    : [];
+  const layerRadii = Array.from({ length: totalLayers }, (_, index) => {
+    if (Number.isFinite(toFiniteNumber(configuredLayerRadii[index], NaN))) {
+      return Math.max(0.06, toFiniteNumber(configuredLayerRadii[index], baseRadius));
+    }
+    return Math.max(0.06, baseRadius * ((totalLayers - index) / totalLayers));
+  });
+  const layerHp = Array.from({ length: totalLayers }, () => hpPerLayer);
+  const offscreenX = -9999;
+  const offscreenY = -9999;
   let destroyed = false;
-  let activeLayers = Math.max(1, Math.ceil(hp / hpPerLayer));
+  let activeLayerIndex = 0;
 
-  function getEntry() {
+  function getEntryByLayerIndex(layerIndex) {
+    const entityId = layerEntityIds[layerIndex];
+    if (!Number.isFinite(toFiniteNumber(entityId, NaN))) {
+      return null;
+    }
     const roulette = env.getRoulette();
     const physics = roulette && roulette.physics ? roulette.physics : null;
     const entities = physics && Array.isArray(physics.entities) ? physics.entities : [];
     for (let index = 0; index < entities.length; index += 1) {
       const entry = entities[index];
-      const entityId = toFiniteNumber(entry && entry.shape && entry.shape.__v2eid, NaN);
-      if (Number.isFinite(entityId) && entityId === toFiniteNumber(def.entityId, -1)) {
+      const entryEid = toFiniteNumber(entry && entry.shape && entry.shape.__v2eid, NaN);
+      if (Number.isFinite(entryEid) && entryEid === entityId) {
         return entry;
       }
     }
     return null;
   }
 
-  function updateVisualFromHp() {
-    const entry = getEntry();
+  function setEntryEnabled(layerIndex, enabled) {
+    const entry = getEntryByLayerIndex(layerIndex);
     if (!entry || !entry.shape || entry.shape.type !== 'circle') {
       return;
     }
-    const originRadius = Math.max(0.08, toFiniteNumber(def.radius, 0.68));
-    const minScale = 0.4;
-    const nextLayers = Math.max(0, Math.ceil(hp / hpPerLayer));
-    activeLayers = nextLayers;
-    const ratio = Math.max(minScale, Math.min(1, nextLayers / totalLayers));
-    entry.shape.radius = destroyed ? 0.01 : originRadius * ratio;
-  }
-
-  function disableEntryBody() {
     const box2d = env.getBox2D();
-    const entry = getEntry();
-    if (!entry || !entry.body || !box2d || typeof box2d.b2Vec2 !== 'function') {
+    const body = entry.body;
+    const radius = Math.max(0.06, toFiniteNumber(layerRadii[layerIndex], baseRadius));
+    if (!body || !box2d || typeof box2d.b2Vec2 !== 'function') {
+      if (enabled) {
+        entry.x = toFiniteNumber(def.x, 0);
+        entry.y = toFiniteNumber(def.y, 0);
+        entry.shape.radius = radius;
+      } else {
+        entry.x = offscreenX;
+        entry.y = offscreenY;
+      }
       return;
     }
     try {
-      if (typeof entry.body.SetEnabled === 'function') {
-        entry.body.SetEnabled(false);
+      if (typeof body.SetEnabled === 'function') {
+        body.SetEnabled(enabled);
       }
-      if (typeof entry.body.SetAwake === 'function') {
-        entry.body.SetAwake(false);
+      if (typeof body.SetAwake === 'function') {
+        body.SetAwake(enabled);
       }
-      if (typeof entry.body.SetLinearVelocity === 'function') {
-        entry.body.SetLinearVelocity(new box2d.b2Vec2(0, 0));
+      if (typeof body.SetLinearVelocity === 'function') {
+        body.SetLinearVelocity(new box2d.b2Vec2(0, 0));
       }
-      if (typeof entry.body.SetAngularVelocity === 'function') {
-        entry.body.SetAngularVelocity(0);
+      if (typeof body.SetAngularVelocity === 'function') {
+        body.SetAngularVelocity(0);
       }
-      if (typeof entry.body.SetTransform === 'function') {
-        const angle = typeof entry.body.GetAngle === 'function' ? entry.body.GetAngle() : 0;
-        entry.body.SetTransform(new box2d.b2Vec2(-9999, -9999), angle);
+      if (typeof body.SetTransform === 'function') {
+        const angle = typeof body.GetAngle === 'function' ? body.GetAngle() : 0;
+        if (enabled) {
+          body.SetTransform(new box2d.b2Vec2(toFiniteNumber(def.x, 0), toFiniteNumber(def.y, 0)), angle);
+        } else {
+          body.SetTransform(new box2d.b2Vec2(offscreenX, offscreenY), angle);
+        }
       }
     } catch (_) {
     }
-    entry.x = -9999;
-    entry.y = -9999;
-    if (entry.shape && typeof entry.shape === 'object') {
-      entry.shape.radius = 0.01;
+    if (enabled) {
+      entry.x = toFiniteNumber(def.x, 0);
+      entry.y = toFiniteNumber(def.y, 0);
+      entry.shape.radius = radius;
+    } else {
+      entry.x = offscreenX;
+      entry.y = offscreenY;
+    }
+  }
+
+  function recomputeActiveLayer() {
+    activeLayerIndex = -1;
+    for (let index = 0; index < totalLayers; index += 1) {
+      if (toFiniteNumber(layerHp[index], 0) > 0) {
+        activeLayerIndex = index;
+        break;
+      }
+    }
+    destroyed = activeLayerIndex < 0;
+  }
+
+  function syncLayerVisuals() {
+    for (let index = 0; index < totalLayers; index += 1) {
+      const enabled = toFiniteNumber(layerHp[index], 0) > 0;
+      setEntryEnabled(index, enabled);
     }
   }
 
@@ -653,8 +783,9 @@ function createBurstBumperBehavior(def, env) {
     if (!body || typeof body.ApplyLinearImpulseToCenter !== 'function') {
       return;
     }
-    let dx = toFiniteNumber(marble.x, def.x) - def.x;
-    let dy = toFiniteNumber(marble.y, def.y) - def.y;
+    const bodyPosition = typeof body.GetPosition === 'function' ? body.GetPosition() : null;
+    let dx = (bodyPosition ? toFiniteNumber(bodyPosition.x, marble.x) : toFiniteNumber(marble.x, def.x)) - def.x;
+    let dy = (bodyPosition ? toFiniteNumber(bodyPosition.y, marble.y) : toFiniteNumber(marble.y, def.y)) - def.y;
     let distance = Math.hypot(dx, dy);
     if (distance <= 0.0001) {
       const rng = typeof env.getRng === 'function' ? env.getRng() : null;
@@ -681,14 +812,16 @@ function createBurstBumperBehavior(def, env) {
       return;
     }
     setCooldown(marble.id, now);
-    hp = Math.max(0, hp - damagePerHit);
-    if (hp <= 0) {
-      destroyed = true;
-      disableEntryBody();
+    if (!Number.isFinite(toFiniteNumber(activeLayerIndex, NaN)) || activeLayerIndex < 0 || activeLayerIndex >= totalLayers) {
       return;
     }
-    updateVisualFromHp();
+    layerHp[activeLayerIndex] = Math.max(0, Math.floor(toFiniteNumber(layerHp[activeLayerIndex], hpPerLayer) - damagePerHit));
+    recomputeActiveLayer();
+    syncLayerVisuals();
   }
+
+  recomputeActiveLayer();
+  syncLayerVisuals();
 
   return {
     kind: 'burst_bumper',
@@ -696,9 +829,6 @@ function createBurstBumperBehavior(def, env) {
     tick(now) {
       if (env.isPaused()) {
         return;
-      }
-      if (!destroyed) {
-        updateVisualFromHp();
       }
       const roulette = env.getRoulette();
       if (!roulette) {
@@ -708,10 +838,15 @@ function createBurstBumperBehavior(def, env) {
       if (marbles.length === 0 || destroyed) {
         return;
       }
-      const baseTriggerRadius = Math.max(0.12, toFiniteNumber(def.triggerRadius, toFiniteNumber(def.radius, 0.68) + 0.45));
-      const layerRatio = Math.max(0.2, Math.min(1, activeLayers / totalLayers));
-      const radius = baseTriggerRadius * layerRatio;
-      const radiusSq = radius * radius;
+      const physics = roulette && roulette.physics ? roulette.physics : null;
+      const marbleMap = physics && physics.marbleMap ? physics.marbleMap : null;
+      const currentLayerRadius = Math.max(0.06, toFiniteNumber(layerRadii[activeLayerIndex], baseRadius));
+      const configuredTriggerRadius = Math.max(
+        currentLayerRadius + 0.2,
+        toFiniteNumber(def.triggerRadius, currentLayerRadius + 0.45),
+      );
+      const triggerRadius = Math.min(configuredTriggerRadius, currentLayerRadius + 0.55);
+      const radiusSq = triggerRadius * triggerRadius;
       for (let index = 0; index < marbles.length; index += 1) {
         const marble = marbles[index];
         if (!marble || typeof marble.id !== 'number') {
@@ -720,8 +855,14 @@ function createBurstBumperBehavior(def, env) {
         if (!canTrigger(marble.id, now)) {
           continue;
         }
-        const dx = toFiniteNumber(marble.x, NaN) - def.x;
-        const dy = toFiniteNumber(marble.y, NaN) - def.y;
+        const body = marbleMap ? marbleMap[marble.id] : null;
+        const bodyPosition = body && typeof body.GetPosition === 'function'
+          ? body.GetPosition()
+          : null;
+        const px = bodyPosition ? toFiniteNumber(bodyPosition.x, toFiniteNumber(marble.x, NaN)) : toFiniteNumber(marble.x, NaN);
+        const py = bodyPosition ? toFiniteNumber(bodyPosition.y, toFiniteNumber(marble.y, NaN)) : toFiniteNumber(marble.y, NaN);
+        const dx = px - def.x;
+        const dy = py - def.y;
         if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
           continue;
         }
@@ -733,12 +874,12 @@ function createBurstBumperBehavior(def, env) {
     },
     serializeState() {
       return {
-        hp,
-        maxHp,
+        layerHp: layerHp.slice(),
         hpPerLayer,
         totalLayers,
-        activeLayers,
+        activeLayerIndex,
         destroyed,
+        layerRadii: layerRadii.slice(),
         cooldownByMarble: { ...cooldownByMarble },
       };
     },
@@ -747,20 +888,27 @@ function createBurstBumperBehavior(def, env) {
         delete cooldownByMarble[key];
       }
       const safeState = rawState && typeof rawState === 'object' ? rawState : {};
-      hp = Math.max(0, Math.floor(toFiniteNumber(safeState.hp, maxHp)));
-      destroyed = safeState.destroyed === true || hp <= 0;
-      activeLayers = Math.max(0, Math.ceil(hp / hpPerLayer));
+      const restoredLayerHp = Array.isArray(safeState.layerHp)
+        ? safeState.layerHp
+        : [];
+      for (let index = 0; index < totalLayers; index += 1) {
+        const nextHp = Math.floor(toFiniteNumber(restoredLayerHp[index], hpPerLayer));
+        layerHp[index] = Math.max(0, nextHp);
+      }
       const nextCooldown = safeState.cooldownByMarble && typeof safeState.cooldownByMarble === 'object'
         ? safeState.cooldownByMarble
         : {};
       for (const key of Object.keys(nextCooldown)) {
         cooldownByMarble[key] = toFiniteNumber(nextCooldown[key], 0);
       }
-      if (destroyed) {
-        disableEntryBody();
-      } else {
-        updateVisualFromHp();
+      recomputeActiveLayer();
+      if (safeState.destroyed === true) {
+        for (let index = 0; index < totalLayers; index += 1) {
+          layerHp[index] = 0;
+        }
+        recomputeActiveLayer();
       }
+      syncLayerVisuals();
     },
   };
 }
@@ -858,6 +1006,11 @@ function createHammerBehavior(def, env) {
       }
     } catch (_) {
     }
+    entry.x = targetX;
+    entry.y = targetY;
+    if (entry.shape && typeof entry.shape === 'object') {
+      entry.shape.rotation = targetAngle;
+    }
     lastOffset = linearOffset;
     lastTickAt = now;
   }
@@ -870,7 +1023,7 @@ function createHammerBehavior(def, env) {
         return;
       }
       if (lastScheduledAt <= 0) {
-        lastScheduledAt = now;
+        lastScheduledAt = now - Math.max(60, toFiniteNumber(def.intervalMs, 1200));
       }
       if (now - lastScheduledAt >= def.intervalMs) {
         lastScheduledAt = now;

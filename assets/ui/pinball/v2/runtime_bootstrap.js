@@ -126,6 +126,20 @@ function getBox2D() {
   return physics && physics.Box2D ? physics.Box2D : null;
 }
 
+function suppressMarbleCooldownIndicator() {
+  const roulette = getRoulette();
+  const marbles = roulette && Array.isArray(roulette._marbles) ? roulette._marbles : [];
+  const sample = marbles.find((marble) => marble && typeof marble._renderCoolTime === 'function');
+  if (!sample) {
+    return;
+  }
+  const proto = Object.getPrototypeOf(sample);
+  if (proto && typeof proto._renderCoolTime === 'function' && proto.__v2HideCoolTimePatched !== true) {
+    proto._renderCoolTime = function noopRenderCoolTime() {};
+    proto.__v2HideCoolTimePatched = true;
+  }
+}
+
 function setSkillsEnabled(enabled) {
   const nextEnabled = enabled === true;
   if (window.options && typeof window.options === 'object') {
@@ -341,6 +355,7 @@ function startTickLoop() {
   control.tickStarted = true;
   const tick = () => {
     const now = Date.now();
+    suppressMarbleCooldownIndicator();
     updateSkillPolicy(now);
     if (control.behaviorRuntime && typeof control.behaviorRuntime.tick === 'function') {
       control.behaviorRuntime.tick(now);
@@ -435,6 +450,7 @@ async function applyMapJson(rawMapJson) {
 
   if (control.candidates.length > 0) {
     roulette.setMarbles(control.candidates.slice());
+    suppressMarbleCooldownIndicator();
     alignSpawnToStage();
   }
   setStatus(`map loaded: ${control.mapId}`);
@@ -488,6 +504,7 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
   }
   if ((!Array.isArray(roulette._marbles) || roulette._marbles.length === 0) && control.candidates.length > 0) {
     roulette.setMarbles(control.candidates.slice());
+    suppressMarbleCooldownIndicator();
     alignSpawnToStage();
   } else if (!preserveMarbles) {
     alignSpawnToStage();
@@ -538,6 +555,7 @@ async function setCandidates(rawCandidates) {
     return { ok: true, count: 0 };
   }
   roulette.setMarbles(candidates.slice());
+  suppressMarbleCooldownIndicator();
   alignSpawnToStage();
   setWinningRank(control.winningRank);
   setStatus(`candidates set: ${candidates.length}`);
