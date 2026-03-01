@@ -273,19 +273,88 @@ function getEngineApi() {
   return api;
 }
 
+function readEngineFrameDiagnostics() {
+  const frameWindow = getFrameWindow();
+  if (!frameWindow) {
+    return {
+      hasFrameWindow: false,
+      hasApi: false,
+      hasRoulette: false,
+      readyState: '',
+      statusText: '',
+      bootError: '',
+      href: '',
+    };
+  }
+  let readyState = '';
+  let statusText = '';
+  let href = '';
+  try {
+    readyState = frameWindow.document && frameWindow.document.readyState
+      ? String(frameWindow.document.readyState)
+      : '';
+    const statusElement = frameWindow.document
+      ? frameWindow.document.getElementById('v2Status')
+      : null;
+    statusText = statusElement && typeof statusElement.textContent === 'string'
+      ? statusElement.textContent.trim()
+      : '';
+    href = frameWindow.location && frameWindow.location.href
+      ? String(frameWindow.location.href)
+      : '';
+  } catch (_) {
+  }
+  let bootError = '';
+  try {
+    bootError = frameWindow.__v2BootError ? String(frameWindow.__v2BootError) : '';
+  } catch (_) {
+  }
+  return {
+    hasFrameWindow: true,
+    hasApi: !!(frameWindow.__appPinballV2 && typeof frameWindow.__appPinballV2 === 'object'),
+    hasRoulette: !!(frameWindow.roulette && typeof frameWindow.roulette === 'object'),
+    readyState,
+    statusText,
+    bootError,
+    href,
+  };
+}
+
+function formatEngineDiagnostics(diagnostics) {
+  const safe = diagnostics && typeof diagnostics === 'object' ? diagnostics : {};
+  const parts = [];
+  if (safe.readyState) {
+    parts.push(`readyState=${safe.readyState}`);
+  }
+  parts.push(`api=${safe.hasApi ? 'yes' : 'no'}`);
+  parts.push(`roulette=${safe.hasRoulette ? 'yes' : 'no'}`);
+  if (safe.statusText) {
+    parts.push(`iframeStatus="${safe.statusText}"`);
+  }
+  if (safe.bootError) {
+    parts.push(`bootError="${safe.bootError}"`);
+  }
+  return parts.join(', ');
+}
+
 async function waitForEngineApi(timeoutMs = 20000) {
   if (FILE_PROTOCOL) {
     throw new Error('file:// 경로에서는 엔진 모듈이 차단될 수 있습니다. 로컬 서버로 열어주세요 (예: python -m http.server 8080)');
   }
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
+    const diagnostics = readEngineFrameDiagnostics();
+    if (diagnostics.bootError) {
+      throw new Error(`엔진 부팅 오류: ${diagnostics.bootError}`);
+    }
     const api = getEngineApi();
     if (api && typeof api.init === 'function') {
       return api;
     }
     await new Promise((resolve) => setTimeout(resolve, 60));
   }
-  throw new Error('엔진 API가 준비되지 않았습니다');
+  const diagnostics = readEngineFrameDiagnostics();
+  throw new Error(`엔진 API 대기 시간 초과. ${formatEngineDiagnostics(diagnostics)}`);
 }
 
 function renderSnapshotList(items) {
@@ -321,11 +390,29 @@ async function loadEngineFrame() {
   }
   const engineUrl = `../assets/ui/pinball/index_v2.html?editor=1&nocache=${Date.now()}`;
   elements.engineUrlText.textContent = engineUrl;
+  setStatus('엔진 iframe 불러오는 중...');
   elements.engineFrame.src = engineUrl;
-  await new Promise((resolve) => {
-    elements.engineFrame.onload = () => resolve();
+  await new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      elements.engineFrame.onload = null;
+      elements.engineFrame.onerror = null;
+      reject(new Error('엔진 iframe 로딩 시간 초과'));
+    }, 15000);
+    elements.engineFrame.onload = () => {
+      window.clearTimeout(timeout);
+      elements.engineFrame.onload = null;
+      elements.engineFrame.onerror = null;
+      resolve();
+    };
+    elements.engineFrame.onerror = () => {
+      window.clearTimeout(timeout);
+      elements.engineFrame.onload = null;
+      elements.engineFrame.onerror = null;
+      reject(new Error('엔진 iframe 로딩 실패'));
+    };
   });
-  const api = await waitForEngineApi();
+  setStatus('엔진 iframe 로드 완료. API 연결 대기 중...');
+  const api = await waitForEngineApi(30000);
   const payload = readPayload();
   const initResult = await api.init(payload);
   if (!initResult || initResult.ok !== true) {

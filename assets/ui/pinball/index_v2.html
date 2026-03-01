@@ -56,6 +56,28 @@
 </head>
 <body>
   <div id="v2Status" class="status">v2 booting...</div>
+  <script>
+    window.__v2BootError = '';
+    window.addEventListener('error', (event) => {
+      const message = event && event.message ? String(event.message) : 'Unknown script error';
+      window.__v2BootError = message;
+      const element = document.getElementById('v2Status');
+      if (element) {
+        element.textContent = `v2 error: ${message}`;
+      }
+    });
+    window.addEventListener('unhandledrejection', (event) => {
+      const reason = event && event.reason ? event.reason : 'Unhandled promise rejection';
+      const message = typeof reason === 'string'
+        ? reason
+        : (reason && reason.message ? String(reason.message) : 'Unhandled promise rejection');
+      window.__v2BootError = message;
+      const element = document.getElementById('v2Status');
+      if (element) {
+        element.textContent = `v2 error: ${message}`;
+      }
+    });
+  </script>
   <script src="./roulette.99856b00.js"></script>
   <script type="module" src="./v2/runtime_bootstrap.js"></script>
 </body>
