@@ -26,6 +26,7 @@
       background: radial-gradient(circle at 12% 10%, #15274f 0%, var(--bg) 54%);
       color: var(--text);
       font-family: Segoe UI, Arial, sans-serif;
+      padding-bottom: 82px;
     }
     .layout {
       display: grid;
@@ -114,6 +115,9 @@
       display: grid;
       grid-template-columns: repeat(2, 1fr);
       gap: 8px;
+    }
+    .btn-row.single {
+      grid-template-columns: 1fr;
     }
     button {
       border: 1px solid #3e578e;
@@ -210,10 +214,54 @@
       flex: 1;
       min-height: 0;
     }
+    .floating-controls {
+      position: fixed;
+      left: 50%;
+      bottom: 14px;
+      transform: translateX(-50%);
+      z-index: 1200;
+      display: flex;
+      gap: 8px;
+      padding: 8px;
+      border-radius: 12px;
+      border: 1px solid #3b4f7b;
+      background: rgba(12, 20, 38, 0.92);
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.42);
+      backdrop-filter: blur(3px);
+    }
+    .floating-controls button {
+      min-width: 120px;
+    }
+    .transport-toggle {
+      min-width: 148px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .transport-icon {
+      width: 18px;
+      text-align: center;
+      font-size: 15px;
+      line-height: 1;
+    }
+    .transport-toggle[aria-pressed="true"] {
+      border-color: #ff9f67;
+      background: linear-gradient(180deg, #9a5e30 0%, #744621 100%);
+    }
     @media (max-width: 1140px) {
       .layout {
         grid-template-columns: 1fr;
         grid-template-rows: auto 1fr;
+      }
+      .floating-controls {
+        width: calc(100% - 24px);
+        left: 12px;
+        transform: none;
+      }
+      .floating-controls button {
+        min-width: 0;
+        flex: 1;
       }
     }
   </style>
@@ -277,20 +325,8 @@
             <label for="candidatesInput">후보 목록</label>
             <textarea id="candidatesInput" placeholder="선택 사항입니다. 한 줄에 후보 1개씩 입력하세요. 비워두면 볼 개수 기준으로 자동 생성됩니다."></textarea>
           </div>
-          <div class="btn-row">
+          <div class="btn-row single">
             <button id="applyButton" class="primary">맵 적용</button>
-            <button id="stateButton">상태 읽기</button>
-          </div>
-        </div>
-        <div class="group">
-          <div class="group-title">2) 테스트 실행 제어</div>
-          <div class="btn-row">
-            <button id="startButton" class="primary">시작</button>
-            <button id="pauseButton">일시정지</button>
-          </div>
-          <div class="btn-row">
-            <button id="resetButton">리셋</button>
-            <button id="reloadButton">엔진 다시 불러오기</button>
           </div>
         </div>
         <div class="group">
@@ -315,7 +351,7 @@
         </div>
         <div id="statusBox" class="status">엔진 연결을 기다리는 중...</div>
         <div class="inline-note">
-          작업 순서: 맵 설정 입력 → 맵 적용 → 시작/일시정지로 테스트 → 저장 지점에서 빠른 저장/슬롯 저장 → 불러오기 후 시작으로 재개
+          작업 순서: 맵 설정 입력 → 맵 적용 → 하단 고정 바의 시작/일시정지로 테스트 → 저장 지점에서 빠른 저장/슬롯 저장 → 불러오기 후 시작으로 재개
         </div>
         <div class="inline-note">
           불러오기는 기본적으로 일시정지 상태로 복원됩니다.
@@ -327,6 +363,14 @@
       <div class="engine-head">엔진 iframe: <code id="engineUrlText">불러오는 중...</code></div>
       <iframe id="engineFrame" title="pinball-v2-engine"></iframe>
     </section>
+  </div>
+  <div class="floating-controls">
+    <button id="playPauseToggleButton" class="transport-toggle primary" aria-pressed="false">
+      <span id="playPauseIcon" class="transport-icon">▶</span>
+      <span id="playPauseText">시작</span>
+    </button>
+    <button id="resetButton">리셋</button>
+    <button id="reloadButton">엔진 다시 불러오기</button>
   </div>
   <script src="./pinball_map_maker_v2.js"></script>
 </body>

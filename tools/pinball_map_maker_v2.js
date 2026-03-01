@@ -24,10 +24,10 @@ const elements = {
   candidatesInput: document.getElementById('candidatesInput'),
   applyButton: document.getElementById('applyButton'),
   reloadButton: document.getElementById('reloadButton'),
-  startButton: document.getElementById('startButton'),
-  pauseButton: document.getElementById('pauseButton'),
+  playPauseToggleButton: document.getElementById('playPauseToggleButton'),
+  playPauseIcon: document.getElementById('playPauseIcon'),
+  playPauseText: document.getElementById('playPauseText'),
   resetButton: document.getElementById('resetButton'),
-  stateButton: document.getElementById('stateButton'),
   quickSaveButton: document.getElementById('quickSaveButton'),
   quickLoadButton: document.getElementById('quickLoadButton'),
   slotSelect: document.getElementById('slotSelect'),
@@ -78,6 +78,28 @@ function setMapsDirStatus(message, kind = 'ok') {
   elements.mapsDirStatus.style.background = '#0e1f1b';
 }
 
+function setPlayPauseUi(isRunning) {
+  if (!elements.playPauseToggleButton) {
+    return;
+  }
+  const running = isRunning === true;
+  elements.playPauseToggleButton.setAttribute('aria-pressed', running ? 'true' : 'false');
+  if (elements.playPauseIcon) {
+    elements.playPauseIcon.textContent = running ? '⏸' : '▶';
+  }
+  if (elements.playPauseText) {
+    elements.playPauseText.textContent = running ? '일시정지' : '시작';
+  }
+}
+
+function readEngineRunning(api) {
+  if (!api || typeof api.getState !== 'function') {
+    return false;
+  }
+  const state = api.getState();
+  return !!(state && state.running === true);
+}
+
 function bindEvent(element, eventName, handler) {
   if (!element || typeof element.addEventListener !== 'function') {
     return;
@@ -96,10 +118,8 @@ function setBusy(isBusy) {
     elements.applyJsonButton,
     elements.applyButton,
     elements.reloadButton,
-    elements.startButton,
-    elements.pauseButton,
+    elements.playPauseToggleButton,
     elements.resetButton,
-    elements.stateButton,
     elements.quickSaveButton,
     elements.quickLoadButton,
     elements.saveSlotButton,
@@ -522,6 +542,7 @@ async function loadEngineFrame() {
     throw new Error(initResult && initResult.reason ? initResult.reason : '초기화에 실패했습니다');
   }
   await syncMapJsonEditorFromEngine(api);
+  setPlayPauseUi(readEngineRunning(api));
   await refreshSnapshotList();
   setStatus(`엔진 준비 완료: 맵=${payload.mapId}, 볼=${payload.candidates.length}`);
 }
@@ -554,6 +575,7 @@ async function applyMapAndCandidates() {
     if (!candidateResult || candidateResult.ok !== true) {
       throw new Error(candidateResult && candidateResult.reason ? candidateResult.reason : '후보 설정에 실패했습니다');
     }
+    setPlayPauseUi(readEngineRunning(api));
     if (elements.mapSelect && mapCatalog.some((entry) => entry.id === payload.mapId)) {
       elements.mapSelect.value = payload.mapId;
     }
@@ -583,6 +605,7 @@ async function applyMapJsonFromEditor() {
     if (!candidateResult || candidateResult.ok !== true) {
       throw new Error(candidateResult && candidateResult.reason ? candidateResult.reason : '후보 설정에 실패했습니다');
     }
+    setPlayPauseUi(readEngineRunning(api));
     setStatus(`JSON 맵 적용 완료: 맵=${mapJson.id}, 후보=${payload.candidates.length}`);
   });
 }
@@ -864,23 +887,24 @@ function setupEvents() {
     await applyMapAndCandidates();
   });
 
-  bindEvent(elements.startButton, 'click', async () => {
+  bindEvent(elements.playPauseToggleButton, 'click', async () => {
     await withEngineAction(async (api) => {
-      const result = await api.start();
-      if (!result || result.ok !== true) {
-        throw new Error(result && result.reason ? result.reason : '시작에 실패했습니다');
+      const running = readEngineRunning(api);
+      if (running) {
+        const pauseResult = await api.pause();
+        if (!pauseResult || pauseResult.ok !== true) {
+          throw new Error(pauseResult && pauseResult.reason ? pauseResult.reason : '일시정지에 실패했습니다');
+        }
+        setPlayPauseUi(false);
+        setStatus('일시정지되었습니다');
+        return;
       }
+      const startResult = await api.start();
+      if (!startResult || startResult.ok !== true) {
+        throw new Error(startResult && startResult.reason ? startResult.reason : '시작에 실패했습니다');
+      }
+      setPlayPauseUi(true);
       setStatus('시작되었습니다');
-    });
-  });
-
-  bindEvent(elements.pauseButton, 'click', async () => {
-    await withEngineAction(async (api) => {
-      const result = await api.pause();
-      if (!result || result.ok !== true) {
-        throw new Error(result && result.reason ? result.reason : '일시정지에 실패했습니다');
-      }
-      setStatus('일시정지되었습니다');
     });
   });
 
@@ -890,14 +914,8 @@ function setupEvents() {
       if (!result || result.ok !== true) {
         throw new Error(result && result.reason ? result.reason : '리셋에 실패했습니다');
       }
+      setPlayPauseUi(false);
       setStatus('리셋이 완료되었습니다');
-    });
-  });
-
-  bindEvent(elements.stateButton, 'click', async () => {
-    await withEngineAction(async (api) => {
-      const state = api.getState();
-      setStatus(JSON.stringify(state, null, 2));
     });
   });
 
@@ -919,6 +937,7 @@ function setupEvents() {
         throw new Error(result && result.reason ? result.reason : '빠른 불러오기에 실패했습니다');
       }
       await refreshSnapshotList();
+      setPlayPauseUi(false);
       setStatus('진행상황 스냅샷으로 복원되었습니다 (일시정지)');
     });
   });
@@ -943,6 +962,7 @@ function setupEvents() {
         throw new Error(result && result.reason ? result.reason : `불러오기에 실패했습니다 (${slotId})`);
       }
       await refreshSnapshotList();
+      setPlayPauseUi(false);
       setStatus('진행상황 스냅샷으로 복원되었습니다 (일시정지)');
     });
   });
@@ -974,6 +994,7 @@ async function boot() {
   writeMapJsonEditor(initialMap);
   seedNewMapInputsFromCurrentMap(initialMap);
   updateMapsDirConnectedStatus();
+  setPlayPauseUi(false);
   if (FILE_PROTOCOL) {
     setStatus('현재 file:// 경로입니다. 버튼 동작을 위해 로컬 서버로 열어주세요: python -m http.server 8080 후 http://localhost:8080/tools/pinball_map_maker_v2.html', 'warn');
     return;
