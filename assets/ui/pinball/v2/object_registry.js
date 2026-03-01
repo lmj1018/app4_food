@@ -257,13 +257,17 @@ function compileObject(rawObject, entityId) {
       for (let layerIndex = 0; layerIndex < totalLayers; layerIndex += 1) {
         const ratio = (totalLayers - layerIndex) / totalLayers;
         const layerRadius = Math.max(0.06, baseRadius * ratio);
+        const defaultLayerColor = `rgba(93,255,122,${Math.max(0.28, 0.18 + ratio * 0.82)})`;
+        const layerColor = typeof rawObject.color === 'string' && rawObject.color.trim()
+          ? rawObject.color
+          : defaultLayerColor;
         const compiledLayer = compileCircle(
           {
             ...rawObject,
             radius: layerRadius,
             life: -1,
             restitution: toFiniteNumber(rawObject.restitution, 3.2),
-            color,
+            color: layerColor,
           },
           entityId + layerIndex,
           {
@@ -273,7 +277,7 @@ function compileObject(rawObject, entityId) {
             life: -1,
             x: toFiniteNumber(rawObject.x, 11.75),
             y: toFiniteNumber(rawObject.y, 72),
-            color,
+            color: layerColor,
           },
         );
         if (!compiledLayer) {
@@ -463,6 +467,7 @@ export function compileMap(mapJson) {
     title: toId(safeMap.title, toId(safeMap.id, 'V2 Map')),
     goalY: Math.max(20, toFiniteNumber(stageRaw.goalY, DEFAULT_STAGE.goalY)),
     zoomY: Math.max(0, toFiniteNumber(stageRaw.zoomY, DEFAULT_STAGE.zoomY)),
+    disableSkills: stageRaw.disableSkills === true,
     spawn: {
       x: toFiniteNumber(spawnRaw.x, DEFAULT_STAGE.spawn.x),
       y: toFiniteNumber(spawnRaw.y, DEFAULT_STAGE.spawn.y),
@@ -671,6 +676,7 @@ function createBurstBumperBehavior(def, env) {
   const offscreenY = -9999;
   let destroyed = false;
   let activeLayerIndex = 0;
+  let nextTriggerAt = 0;
 
   function getEntryByLayerIndex(layerIndex) {
     const entityId = layerEntityIds[layerIndex];
@@ -769,6 +775,79 @@ function createBurstBumperBehavior(def, env) {
     cooldownByMarble[String(marbleId)] = now + def.cooldownMs;
   }
 
+  function emitWeakBurstEffect(now, nx, ny) {
+    const roulette = env.getRoulette();
+    const physics = roulette && roulette.physics ? roulette.physics : null;
+    const box2d = env.getBox2D();
+    if (!roulette || !physics || !physics.marbleMap || !box2d || typeof box2d.b2Vec2 !== 'function') {
+      return;
+    }
+    const pushRange = Math.max(1.2, Math.min(4.6, Math.max(0.5, toFiniteNumber(def.triggerRadius, baseRadius + 0.45)) * 2.1));
+    const pushRangeSq = pushRange * pushRange;
+    const pushPower = Math.max(0.08, toFiniteNumber(def.force, 6.2) * 0.22);
+    const marbles = Array.isArray(roulette._marbles) ? roulette._marbles : [];
+    for (let index = 0; index < marbles.length; index += 1) {
+      const other = marbles[index];
+      if (!other || typeof other.id !== 'number') {
+        continue;
+      }
+      const otherBody = physics.marbleMap[other.id];
+      if (!otherBody || typeof otherBody.GetPosition !== 'function' || typeof otherBody.ApplyLinearImpulseToCenter !== 'function') {
+        continue;
+      }
+      const p = otherBody.GetPosition();
+      const dx = toFiniteNumber(p && p.x, NaN) - def.x;
+      const dy = toFiniteNumber(p && p.y, NaN) - def.y;
+      if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
+        continue;
+      }
+      const distSq = dx * dx + dy * dy;
+      if (distSq <= 0.00001 || distSq > pushRangeSq) {
+        continue;
+      }
+      const dist = Math.sqrt(distSq);
+      const falloff = Math.max(0, 1 - dist / pushRange);
+      const impulse = pushPower * (0.35 + falloff * 0.65);
+      const ux = dx / dist;
+      const uy = dy / dist;
+      try {
+        otherBody.ApplyLinearImpulseToCenter(new box2d.b2Vec2(ux * impulse, uy * impulse), true);
+      } catch (_) {
+      }
+    }
+    if (Array.isArray(roulette._effects)) {
+      roulette._effects.push({
+        elapsed: 0,
+        duration: 220,
+        isDestroy: false,
+        update(deltaMs) {
+          this.elapsed += toFiniteNumber(deltaMs, 0);
+          if (this.elapsed >= this.duration) {
+            this.isDestroy = true;
+          }
+        },
+        render(ctx, zoomScale) {
+          if (!ctx) {
+            return;
+          }
+          const ratio = Math.max(0, Math.min(1, this.elapsed / this.duration));
+          const radius = Math.max(0.05, (baseRadius + 0.06) + ratio * 0.72);
+          const alpha = Math.max(0, 0.4 * (1 - ratio));
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          ctx.strokeStyle = 'rgba(93,255,122,0.95)';
+          ctx.lineWidth = Math.max(1 / Math.max(1, toFiniteNumber(zoomScale, 1)), 1.4 / Math.max(1, toFiniteNumber(zoomScale, 1)));
+          ctx.beginPath();
+          ctx.arc(def.x, def.y, radius, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        },
+      });
+    }
+    const safeNow = toFiniteNumber(now, Date.now());
+    nextTriggerAt = safeNow + Math.max(30, toFiniteNumber(def.cooldownMs, 420));
+  }
+
   function triggerBurst(marble, now) {
     if (destroyed) {
       return;
@@ -812,6 +891,7 @@ function createBurstBumperBehavior(def, env) {
       return;
     }
     setCooldown(marble.id, now);
+    emitWeakBurstEffect(now, nx, ny);
     if (!Number.isFinite(toFiniteNumber(activeLayerIndex, NaN)) || activeLayerIndex < 0 || activeLayerIndex >= totalLayers) {
       return;
     }
@@ -832,6 +912,9 @@ function createBurstBumperBehavior(def, env) {
       }
       const roulette = env.getRoulette();
       if (!roulette) {
+        return;
+      }
+      if (toFiniteNumber(nextTriggerAt, 0) > now) {
         return;
       }
       const marbles = Array.isArray(roulette._marbles) ? roulette._marbles : [];
@@ -870,6 +953,7 @@ function createBurstBumperBehavior(def, env) {
           continue;
         }
         triggerBurst(marble, now);
+        break;
       }
     },
     serializeState() {
@@ -880,6 +964,7 @@ function createBurstBumperBehavior(def, env) {
         activeLayerIndex,
         destroyed,
         layerRadii: layerRadii.slice(),
+        nextTriggerAt: toFiniteNumber(nextTriggerAt, 0),
         cooldownByMarble: { ...cooldownByMarble },
       };
     },
@@ -901,6 +986,7 @@ function createBurstBumperBehavior(def, env) {
       for (const key of Object.keys(nextCooldown)) {
         cooldownByMarble[key] = toFiniteNumber(nextCooldown[key], 0);
       }
+      nextTriggerAt = Math.max(0, toFiniteNumber(safeState.nextTriggerAt, 0));
       recomputeActiveLayer();
       if (safeState.destroyed === true) {
         for (let index = 0; index < totalLayers; index += 1) {

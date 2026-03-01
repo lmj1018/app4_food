@@ -83,6 +83,7 @@ const control = {
   spinStartedAt: 0,
   skillWarmupMs: 5000,
   skillDisabled: true,
+  mapDisableSkills: false,
 };
 
 function setStatus(text) {
@@ -161,6 +162,10 @@ function setSkillsEnabled(enabled) {
 function updateSkillPolicy(nowMs) {
   const roulette = getRoulette();
   if (!roulette) {
+    setSkillsEnabled(false);
+    return;
+  }
+  if (control.mapDisableSkills) {
     setSkillsEnabled(false);
     return;
   }
@@ -435,6 +440,7 @@ async function applyMapJson(rawMapJson) {
   control.mapId = compiled.mapId;
   control.mapJson = mapJson;
   control.compiledMap = compiled;
+  control.mapDisableSkills = compiled && compiled.stage && compiled.stage.disableSkills === true;
   control.allEntityIds = compiled.objectIndex
     .map((entry) => toFiniteNumber(entry.entityId, NaN))
     .filter((value) => Number.isFinite(value));
@@ -485,6 +491,7 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
   control.mapId = compiled.mapId;
   control.mapJson = mapJson;
   control.compiledMap = compiled;
+  control.mapDisableSkills = compiled && compiled.stage && compiled.stage.disableSkills === true;
   control.allEntityIds = compiled.objectIndex
     .map((entry) => toFiniteNumber(entry.entityId, NaN))
     .filter((value) => Number.isFinite(value));

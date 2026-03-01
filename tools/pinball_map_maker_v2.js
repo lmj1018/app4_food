@@ -2,7 +2,7 @@ const SLOT_IDS = ['slot1', 'slot2', 'slot3'];
 const FILE_PROTOCOL = window.location.protocol === 'file:';
 const DEFAULT_MARBLE_COUNT = 32;
 const DEFAULT_WINNING_RANK = 1;
-const WORLD_WIDTH = 24;
+const WORLD_WIDTH = 36;
 const MIN_MARBLE_COUNT = 1;
 const MAX_MARBLE_COUNT = 256;
 const LIVE_APPLY_DEBOUNCE_MS = 120;
@@ -80,6 +80,9 @@ const elements = {
   marbleSizeInput: document.getElementById('marbleSizeInput'),
   stageGoalInput: document.getElementById('stageGoalInput'),
   stageZoomInput: document.getElementById('stageZoomInput'),
+  stageLeftWallInput: document.getElementById('stageLeftWallInput'),
+  stageRightWallInput: document.getElementById('stageRightWallInput'),
+  stageDisableSkillsInput: document.getElementById('stageDisableSkillsInput'),
   applyViewZoomButton: document.getElementById('applyViewZoomButton'),
   applyMarbleSizeButton: document.getElementById('applyMarbleSizeButton'),
   fitStageButton: document.getElementById('fitStageButton'),
@@ -427,10 +430,92 @@ function buildDefaultMapJson(mapId = 'v2_custom_map') {
     stage: {
       goalY: 210,
       zoomY: 200,
+      leftWallX: 2.5,
+      rightWallX: 21,
+      disableSkills: false,
       spawn: { x: 10.25, y: 0, columns: 10, spacingX: 0.6, visibleRows: 5 },
     },
     objects: [],
   };
+}
+
+function readVerticalWallX(obj) {
+  if (!obj || obj.type !== 'wall_polyline') {
+    return NaN;
+  }
+  const points = Array.isArray(obj.points) ? obj.points : [];
+  if (points.length < 2) {
+    return NaN;
+  }
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  let sumX = 0;
+  let count = 0;
+  for (let index = 0; index < points.length; index += 1) {
+    const px = toFinite(points[index] && points[index][0], NaN);
+    const py = toFinite(points[index] && points[index][1], NaN);
+    if (!Number.isFinite(px) || !Number.isFinite(py)) {
+      continue;
+    }
+    minX = Math.min(minX, px);
+    maxX = Math.max(maxX, px);
+    minY = Math.min(minY, py);
+    maxY = Math.max(maxY, py);
+    sumX += px;
+    count += 1;
+  }
+  if (count < 2) {
+    return NaN;
+  }
+  const xSpan = maxX - minX;
+  const ySpan = maxY - minY;
+  if (xSpan > 0.45 || ySpan < 12) {
+    return NaN;
+  }
+  return round1(sumX / count);
+}
+
+function inferStageWallBounds(mapJson) {
+  const source = mapJson && typeof mapJson === 'object' ? mapJson : {};
+  const stage = source.stage && typeof source.stage === 'object' ? source.stage : {};
+  const objects = Array.isArray(source.objects) ? source.objects : [];
+  const leftByOid = objects.find((obj) => obj && obj.type === 'wall_polyline' && String(obj.oid || '') === 'wall-left');
+  const rightByOid = objects.find((obj) => obj && obj.type === 'wall_polyline' && String(obj.oid || '') === 'wall-right');
+  const leftByOidX = readVerticalWallX(leftByOid);
+  const rightByOidX = readVerticalWallX(rightByOid);
+  if (Number.isFinite(leftByOidX) && Number.isFinite(rightByOidX) && rightByOidX > leftByOidX + 1.5) {
+    return {
+      leftX: round1(clamp(leftByOidX, 0.1, WORLD_WIDTH - 2.1)),
+      rightX: round1(clamp(rightByOidX, leftByOidX + 2, WORLD_WIDTH - 0.1)),
+    };
+  }
+  const fromStageLeft = toFinite(stage.leftWallX, NaN);
+  const fromStageRight = toFinite(stage.rightWallX, NaN);
+  if (Number.isFinite(fromStageLeft) && Number.isFinite(fromStageRight) && fromStageRight > fromStageLeft + 1.5) {
+    return {
+      leftX: round1(clamp(fromStageLeft, 0.1, WORLD_WIDTH - 2.1)),
+      rightX: round1(clamp(fromStageRight, fromStageLeft + 2, WORLD_WIDTH - 0.1)),
+    };
+  }
+  let leftX = Number.POSITIVE_INFINITY;
+  let rightX = Number.NEGATIVE_INFINITY;
+  for (let index = 0; index < objects.length; index += 1) {
+    const vx = readVerticalWallX(objects[index]);
+    if (!Number.isFinite(vx)) {
+      continue;
+    }
+    leftX = Math.min(leftX, vx);
+    rightX = Math.max(rightX, vx);
+  }
+  if (Number.isFinite(leftX) && Number.isFinite(rightX) && rightX > leftX + 1.5) {
+    return {
+      leftX: round1(clamp(leftX, 0.1, WORLD_WIDTH - 2.1)),
+      rightX: round1(clamp(rightX, leftX + 2, WORLD_WIDTH - 0.1)),
+    };
+  }
+  return { leftX: 2.5, rightX: 21 };
 }
 
 function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
@@ -467,6 +552,12 @@ function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
   if (!Array.isArray(source.objects)) {
     source.objects = [];
   }
+  const bounds = inferStageWallBounds(source);
+  const safeLeft = round1(clamp(toFinite(source.stage.leftWallX, bounds.leftX), 0.1, WORLD_WIDTH - 2.1));
+  const safeRight = round1(clamp(toFinite(source.stage.rightWallX, bounds.rightX), safeLeft + 2, WORLD_WIDTH - 0.1));
+  source.stage.leftWallX = safeLeft;
+  source.stage.rightWallX = safeRight;
+  source.stage.disableSkills = source.stage.disableSkills === true;
   return source;
 }
 
@@ -478,6 +569,7 @@ function setWorkingMapJson(rawMapJson, fallbackMapId = '') {
   resetPendingPortal();
   resetPendingHammer();
   resetActiveDrag();
+  applyStageWallBoundsToMap();
   refreshCurrentJsonViewer();
   return deepClone(normalized);
 }
@@ -568,6 +660,64 @@ function syncStageInputsFromMap() {
   if (elements.stageZoomInput) {
     elements.stageZoomInput.value = String(round1(toFinite(mapJson.stage.zoomY, 206)));
   }
+  const bounds = inferStageWallBounds(mapJson);
+  if (elements.stageLeftWallInput) {
+    elements.stageLeftWallInput.value = String(round1(toFinite(mapJson.stage.leftWallX, bounds.leftX)));
+  }
+  if (elements.stageRightWallInput) {
+    elements.stageRightWallInput.value = String(round1(toFinite(mapJson.stage.rightWallX, bounds.rightX)));
+  }
+  if (elements.stageDisableSkillsInput) {
+    elements.stageDisableSkillsInput.checked = mapJson.stage && mapJson.stage.disableSkills === true;
+  }
+}
+
+function upsertStageBoundaryWall(oid, x) {
+  const mapJson = getMutableMap();
+  const objects = getObjects();
+  let wall = objects.find((obj) => obj && obj.type === 'wall_polyline' && String(obj.oid || '') === oid);
+  if (!wall) {
+    wall = {
+      oid,
+      type: 'wall_polyline',
+      points: [],
+      color: '#43df7d',
+    };
+    objects.push(wall);
+  }
+  const topY = 2;
+  const bottomY = round1(Math.max(30, toFinite(mapJson.stage && mapJson.stage.goalY, 210) + 2));
+  wall.points = [
+    [round1(x), topY],
+    [round1(x), bottomY],
+  ];
+  wall.color = '#43df7d';
+}
+
+function applyStageWallBoundsToMap() {
+  const mapJson = getMutableMap();
+  const inferred = inferStageWallBounds(mapJson);
+  let leftX = round1(toFinite(
+    elements.stageLeftWallInput ? elements.stageLeftWallInput.value : mapJson.stage.leftWallX,
+    toFinite(mapJson.stage.leftWallX, inferred.leftX),
+  ));
+  let rightX = round1(toFinite(
+    elements.stageRightWallInput ? elements.stageRightWallInput.value : mapJson.stage.rightWallX,
+    toFinite(mapJson.stage.rightWallX, inferred.rightX),
+  ));
+  leftX = round1(clamp(leftX, 0.1, WORLD_WIDTH - 2.1));
+  rightX = round1(clamp(rightX, leftX + 2, WORLD_WIDTH - 0.1));
+  mapJson.stage.leftWallX = leftX;
+  mapJson.stage.rightWallX = rightX;
+  upsertStageBoundaryWall('wall-left', leftX);
+  upsertStageBoundaryWall('wall-right', rightX);
+}
+
+function syncStageWallBoundsFromObjects() {
+  const mapJson = getMutableMap();
+  const bounds = inferStageWallBounds(mapJson);
+  mapJson.stage.leftWallX = round1(clamp(bounds.leftX, 0.1, WORLD_WIDTH - 2.1));
+  mapJson.stage.rightWallX = round1(clamp(bounds.rightX, mapJson.stage.leftWallX + 2, WORLD_WIDTH - 0.1));
 }
 
 function updateMakerHint(text) {
@@ -1683,6 +1833,8 @@ function applyStageInputsToDraft() {
   const mapJson = getMutableMap();
   mapJson.stage.goalY = Math.max(20, toFinite(elements.stageGoalInput ? elements.stageGoalInput.value : mapJson.stage.goalY, mapJson.stage.goalY));
   mapJson.stage.zoomY = Math.max(10, toFinite(elements.stageZoomInput ? elements.stageZoomInput.value : mapJson.stage.zoomY, mapJson.stage.zoomY));
+  mapJson.stage.disableSkills = !!(elements.stageDisableSkillsInput && elements.stageDisableSkillsInput.checked);
+  applyStageWallBoundsToMap();
   syncStageInputsFromMap();
   refreshCurrentJsonViewer();
 }
@@ -1870,6 +2022,19 @@ function drawMiniMap(mainLayout = null) {
   ctx.strokeStyle = 'rgba(106, 148, 221, 0.34)';
   ctx.lineWidth = 1;
   ctx.strokeRect(layout.offsetX, layout.offsetY, layout.drawW, layout.drawH);
+  const bounds = inferStageWallBounds(getMutableMap());
+  const leftGuide = worldToMiniMap(layout, bounds.leftX, 0);
+  const leftGuideBottom = worldToMiniMap(layout, bounds.leftX, layout.stageGoalY);
+  const rightGuide = worldToMiniMap(layout, bounds.rightX, 0);
+  const rightGuideBottom = worldToMiniMap(layout, bounds.rightX, layout.stageGoalY);
+  ctx.strokeStyle = 'rgba(67, 223, 125, 0.95)';
+  ctx.lineWidth = 1.25;
+  ctx.beginPath();
+  ctx.moveTo(leftGuide.x, leftGuide.y);
+  ctx.lineTo(leftGuideBottom.x, leftGuideBottom.y);
+  ctx.moveTo(rightGuide.x, rightGuide.y);
+  ctx.lineTo(rightGuideBottom.x, rightGuideBottom.y);
+  ctx.stroke();
 
   const goalY = getGoalYWorld();
   const goalP1 = worldToMiniMap(layout, 0, goalY);
@@ -2058,6 +2223,10 @@ function setGoalYWorld(nextGoalY) {
   const mapJson = getMutableMap();
   mapJson.stage.goalY = round1(clamp(toFinite(nextGoalY, mapJson.stage.goalY), 20, 2000));
   mapJson.stage.zoomY = round1(clamp(toFinite(mapJson.stage.zoomY, mapJson.stage.goalY - 4), 10, 2000));
+  if (Number.isFinite(toFinite(mapJson.stage.leftWallX, NaN)) && Number.isFinite(toFinite(mapJson.stage.rightWallX, NaN))) {
+    upsertStageBoundaryWall('wall-left', toFinite(mapJson.stage.leftWallX, 2.5));
+    upsertStageBoundaryWall('wall-right', toFinite(mapJson.stage.rightWallX, 21));
+  }
 }
 
 function getObjectAnchorWorld(obj) {
@@ -2192,6 +2361,21 @@ function getCircleHandlesWorld(obj) {
   return handles;
 }
 
+function getHammerDirectionHandleWorld(obj) {
+  if (!obj || obj.type !== 'hammer') {
+    return null;
+  }
+  const cx = toFinite(obj.x, 0);
+  const cy = toFinite(obj.y, 0);
+  const dir = (Math.PI / 180) * normalizeDeg(toFinite(obj.dirDeg, 90));
+  const distance = Math.max(0.2, toFinite(obj.hitDistance, 0.95));
+  return {
+    kind: 'hammer_dir',
+    x: round1(cx + Math.cos(dir) * distance),
+    y: round1(cy + Math.sin(dir) * distance),
+  };
+}
+
 function drawRingHandle(ctx, x, y, radiusPx, style = {}) {
   const fill = style.fill || '#0b1530';
   const stroke = style.stroke || '#ffd44d';
@@ -2246,6 +2430,15 @@ function findSelectedHandle(point, layout) {
     const dist = Math.hypot(point.x - handle.x, point.y - handle.y);
     if (dist <= thresholdWorld) {
       return { kind: handle.kind };
+    }
+  }
+  if (type === 'hammer') {
+    const hammerHandle = getHammerDirectionHandleWorld(obj);
+    if (hammerHandle) {
+      const dist = Math.hypot(point.x - hammerHandle.x, point.y - hammerHandle.y);
+      if (dist <= thresholdWorld) {
+        return { kind: 'hammer_dir' };
+      }
     }
   }
   if (type === 'rotor') {
@@ -2415,6 +2608,26 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
         fill: 'rgba(8,16,36,0.95)',
         stroke: '#ffd44d',
       });
+    }
+  }
+  if (selected && obj.type === 'hammer') {
+    const hammerHandle = getHammerDirectionHandleWorld(obj);
+    if (hammerHandle) {
+      const hp = worldToCanvas(layout, hammerHandle.x, hammerHandle.y);
+      ctx.save();
+      ctx.strokeStyle = '#9fd7ff';
+      ctx.lineWidth = 1.6;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(center.x, center.y);
+      ctx.lineTo(hp.x, hp.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      drawRingHandle(ctx, hp.x, hp.y, 5.2, {
+        fill: 'rgba(8,16,36,0.95)',
+        stroke: '#9fd7ff',
+      });
+      ctx.restore();
     }
   }
   if (selected && obj.type === 'rotor') {
@@ -2595,6 +2808,20 @@ function drawMakerCanvas() {
   ctx.strokeStyle = '#62a5ff';
   ctx.lineWidth = 2;
   ctx.strokeRect(layout.offsetX, layout.offsetY, layout.drawW, layout.drawH);
+
+  const stageBounds = inferStageWallBounds(getMutableMap());
+  const leftGuide = worldToCanvas(layout, stageBounds.leftX, 0);
+  const leftGuideBottom = worldToCanvas(layout, stageBounds.leftX, layout.stageGoalY);
+  const rightGuide = worldToCanvas(layout, stageBounds.rightX, 0);
+  const rightGuideBottom = worldToCanvas(layout, stageBounds.rightX, layout.stageGoalY);
+  ctx.strokeStyle = 'rgba(67, 223, 125, 0.98)';
+  ctx.lineWidth = 2.8;
+  ctx.beginPath();
+  ctx.moveTo(leftGuide.x, leftGuide.y);
+  ctx.lineTo(leftGuideBottom.x, leftGuideBottom.y);
+  ctx.moveTo(rightGuide.x, rightGuide.y);
+  ctx.lineTo(rightGuideBottom.x, rightGuideBottom.y);
+  ctx.stroke();
 
   const goalY = getGoalYWorld();
   const goalP1 = worldToCanvas(layout, 0, goalY);
@@ -2935,6 +3162,14 @@ function beginHandleDrag(index, handle) {
     };
     return true;
   }
+  if (handle.kind === 'hammer_dir') {
+    editorState.dragState = {
+      type: 'hammer_dir',
+      index,
+      moved: false,
+    };
+    return true;
+  }
   if (handle.kind === 'rotor_end') {
     editorState.dragState = {
       type: 'rotor_end',
@@ -3257,6 +3492,17 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
     }
     return false;
   }
+  if (drag.type === 'hammer_dir') {
+    if (obj.type !== 'hammer') {
+      return false;
+    }
+    const updated = setHammerDirectionAndDistance(obj, point, !!(event && event.shiftKey));
+    if (!updated) {
+      return false;
+    }
+    drag.moved = true;
+    return true;
+  }
   if (drag.type === 'rotation') {
     const cx = toFinite(obj.x, 0);
     const cy = toFinite(obj.y, 0);
@@ -3359,6 +3605,7 @@ function finishDrag() {
   resetActiveDrag();
   if (moved) {
     syncObjectList();
+    syncStageWallBoundsFromObjects();
     syncStageInputsFromMap();
     refreshCurrentJsonViewer();
     if (dragType === 'goal_move') {
@@ -3439,6 +3686,8 @@ function handleMakerCanvasPointerDown(event) {
       updateMakerHint('벽 끝점 드래그 편집중');
     } else if (selectedHandle.kind === 'rotor_end') {
       updateMakerHint('회전바 끝점 드래그 길이/각도 편집중');
+    } else if (selectedHandle.kind === 'hammer_dir') {
+      updateMakerHint('해머 타격 방향/거리 드래그 편집중');
     } else if (selectedHandle.kind === 'radius') {
       updateMakerHint('반지름 핸들 드래그 편집중');
     } else if (selectedHandle.kind === 'trigger_radius') {
@@ -4373,9 +4622,11 @@ function setupEvents() {
   bindEvent(elements.applyStageButton, 'click', () => {
     rememberUndoState('스테이지 값 변경');
     applyStageInputsToDraft();
+    applyViewZoomToEngine(true);
+    applyMarbleSizeToEngines();
     queueLiveDraftApply('스테이지 값 변경');
     drawMakerCanvas();
-    setStatus('스테이지 값 반영 완료 (드래프트)');
+    setStatus('스테이지 적용 완료 (뷰 줌/공 크기/스킬 옵션 포함)');
   });
 
   bindEvent(elements.applyViewZoomButton, 'click', () => {

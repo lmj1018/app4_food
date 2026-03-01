@@ -326,6 +326,12 @@
       font-size: 11px;
       font-weight: 700;
     }
+    .maker-row input[type="checkbox"] {
+      width: auto;
+      justify-self: start;
+      margin: 0;
+      transform: scale(1.15);
+    }
     .maker-canvas-wrap {
       border: 1px solid #395281;
       border-radius: 8px;
@@ -796,15 +802,22 @@
                 <label for="stageZoomInput">zoomY</label>
                 <input id="stageZoomInput" type="number" min="10" max="2000" step="0.5" value="200">
               </div>
-              <div class="maker-toolbar">
-                <button id="applyViewZoomButton">뷰 줌 적용</button>
-                <button id="applyMarbleSizeButton">공 크기 적용</button>
+              <div class="maker-row">
+                <label for="stageLeftWallInput">좌측 벽 X</label>
+                <input id="stageLeftWallInput" type="number" min="0.1" max="35.5" step="0.1" value="2.5">
+              </div>
+              <div class="maker-row">
+                <label for="stageRightWallInput">우측 벽 X</label>
+                <input id="stageRightWallInput" type="number" min="0.1" max="35.9" step="0.1" value="21">
+              </div>
+              <div class="maker-row">
+                <label for="stageDisableSkillsInput">스킬 금지</label>
+                <input id="stageDisableSkillsInput" type="checkbox">
               </div>
               <div class="maker-toolbar">
                 <button id="fitStageButton">스테이지 자동맞춤</button>
-                <span></span>
+                <button id="applyStageButton" class="primary">스테이지 적용(뷰/공크기 포함)</button>
               </div>
-              <button id="applyStageButton" class="primary">스테이지 값 적용</button>
             </div>
 
             <div class="maker-group">
