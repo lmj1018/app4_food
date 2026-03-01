@@ -1,20 +1,17 @@
 const SLOT_IDS = ['slot1', 'slot2', 'slot3'];
 const FILE_PROTOCOL = window.location.protocol === 'file:';
+const DEFAULT_MARBLE_COUNT = 32;
+const DEFAULT_WINNING_RANK = 1;
 
 let mapCatalog = [];
 let workingMapJson = null;
 
 const elements = {
-  mapsDirStatus: document.getElementById('mapsDirStatus'),
   mapSelect: document.getElementById('mapSelect'),
+  mapNameInput: document.getElementById('mapNameInput'),
   refreshMapListButton: document.getElementById('refreshMapListButton'),
   saveSelectedMapButton: document.getElementById('saveSelectedMapButton'),
   saveAsNewMapButton: document.getElementById('saveAsNewMapButton'),
-  mapIdInput: document.getElementById('mapIdInput'),
-  marbleCountInput: document.getElementById('marbleCountInput'),
-  winningRankInput: document.getElementById('winningRankInput'),
-  candidatesInput: document.getElementById('candidatesInput'),
-  applyButton: document.getElementById('applyButton'),
   reloadButton: document.getElementById('reloadButton'),
   playPauseToggleButton: document.getElementById('playPauseToggleButton'),
   playPauseIcon: document.getElementById('playPauseIcon'),
@@ -45,28 +42,6 @@ function setStatus(message, kind = 'ok') {
     return;
   }
   elements.statusBox.style.color = '#7df4bc';
-}
-
-function setMapsDirStatus(message, kind = 'ok') {
-  if (!elements.mapsDirStatus) {
-    return;
-  }
-  elements.mapsDirStatus.textContent = String(message ?? '');
-  if (kind === 'error') {
-    elements.mapsDirStatus.style.color = '#ff9f9f';
-    elements.mapsDirStatus.style.borderColor = '#7a3e3e';
-    elements.mapsDirStatus.style.background = '#2a1212';
-    return;
-  }
-  if (kind === 'warn') {
-    elements.mapsDirStatus.style.color = '#ffd597';
-    elements.mapsDirStatus.style.borderColor = '#7b633d';
-    elements.mapsDirStatus.style.background = '#261f14';
-    return;
-  }
-  elements.mapsDirStatus.style.color = '#8fe7be';
-  elements.mapsDirStatus.style.borderColor = '#3d6a56';
-  elements.mapsDirStatus.style.background = '#0e1f1b';
 }
 
 function setPlayPauseUi(isRunning) {
@@ -101,10 +76,10 @@ function bindEvent(element, eventName, handler) {
 function setBusy(isBusy) {
   const controls = [
     elements.mapSelect,
+    elements.mapNameInput,
     elements.refreshMapListButton,
     elements.saveSelectedMapButton,
     elements.saveAsNewMapButton,
-    elements.applyButton,
     elements.reloadButton,
     elements.playPauseToggleButton,
     elements.resetButton,
@@ -119,32 +94,40 @@ function setBusy(isBusy) {
 }
 
 function buildAutoCandidates() {
-  const count = Math.max(1, Math.min(200, Number(elements.marbleCountInput.value) || 1));
   const list = [];
-  for (let index = 0; index < count; index += 1) {
+  for (let index = 0; index < DEFAULT_MARBLE_COUNT; index += 1) {
     list.push(`후보 ${String(index + 1).padStart(2, '0')}`);
   }
   return list;
 }
 
-function readCandidates() {
-  const lines = String(elements.candidatesInput.value || '')
-    .split(/\r?\n/g)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-  if (lines.length > 0) {
-    return lines;
+function selectedMapIdFromDropdown() {
+  const value = String(elements.mapSelect && elements.mapSelect.value ? elements.mapSelect.value : '').trim();
+  return value || '';
+}
+
+function sanitizeMapId(value) {
+  const raw = String(value || '').trim();
+  const cleaned = raw.replace(/[^a-zA-Z0-9._-]/g, '_');
+  return cleaned || `v2_map_${Date.now()}`;
+}
+
+function resolveCurrentMapId() {
+  const selected = selectedMapIdFromDropdown();
+  if (selected) {
+    return selected;
   }
-  return buildAutoCandidates();
+  if (workingMapJson && typeof workingMapJson.id === 'string' && workingMapJson.id.trim()) {
+    return workingMapJson.id.trim();
+  }
+  return 'v2_default';
 }
 
 function readPayload() {
-  const mapId = String(elements.mapIdInput.value || '').trim() || 'v2_default';
-  const winningRank = Math.max(1, Math.floor(Number(elements.winningRankInput.value) || 1));
   return {
-    mapId,
-    winningRank,
-    candidates: readCandidates(),
+    mapId: resolveCurrentMapId(),
+    winningRank: DEFAULT_WINNING_RANK,
+    candidates: buildAutoCandidates(),
     autoStart: false,
   };
 }
@@ -173,11 +156,7 @@ function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
   } else {
     source.id = source.id.trim();
   }
-  if (typeof source.title !== 'string' || !source.title.trim()) {
-    source.title = source.id;
-  } else {
-    source.title = source.title.trim();
-  }
+  source.title = source.id;
   if (!Number.isFinite(Number(source.schemaVersion))) {
     source.schemaVersion = 1;
   } else {
@@ -192,20 +171,10 @@ function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
   return source;
 }
 
-function syncMapIdInputFromMapJson(mapJson) {
-  const mapId = mapJson && typeof mapJson.id === 'string' && mapJson.id.trim()
-    ? mapJson.id.trim()
-    : '';
-  if (mapId) {
-    elements.mapIdInput.value = mapId;
-  }
-}
-
 function setWorkingMapJson(rawMapJson, fallbackMapId = '') {
-  const fallbackId = fallbackMapId || String(elements.mapIdInput.value || '').trim() || 'v2_custom_map';
+  const fallbackId = fallbackMapId || resolveCurrentMapId();
   const normalized = normalizeMapJson(rawMapJson, fallbackId);
   workingMapJson = deepClone(normalized);
-  syncMapIdInputFromMapJson(normalized);
   return deepClone(normalized);
 }
 
@@ -213,30 +182,12 @@ function getWorkingMapJson(fallbackMapId = '') {
   if (workingMapJson && typeof workingMapJson === 'object') {
     return deepClone(workingMapJson);
   }
-  const fallbackId = fallbackMapId || String(elements.mapIdInput.value || '').trim() || 'v2_custom_map';
+  const fallbackId = fallbackMapId || resolveCurrentMapId();
   return setWorkingMapJson(buildDefaultMapJson(fallbackId), fallbackId);
-}
-
-function sanitizeMapId(value) {
-  const raw = String(value || '').trim();
-  const cleaned = raw.replace(/[^a-zA-Z0-9._-]/g, '_');
-  return cleaned || `v2_map_${Date.now()}`;
-}
-
-function selectedMapIdFromDropdown() {
-  const value = String(elements.mapSelect && elements.mapSelect.value ? elements.mapSelect.value : '').trim();
-  return value || '';
 }
 
 function selectedMapCatalogEntry() {
   const mapId = selectedMapIdFromDropdown();
-  if (!mapId) {
-    return null;
-  }
-  return mapCatalog.find((entry) => entry && entry.id === mapId) || null;
-}
-
-function lookupMapCatalogById(mapId) {
   if (!mapId) {
     return null;
   }
@@ -248,10 +199,7 @@ function renderMapCatalog(preferredMapId = '') {
     return;
   }
   const options = mapCatalog
-    .map((entry) => {
-      const mapId = String(entry && entry.id ? entry.id : '');
-      return `<option value="${mapId}">${mapId}</option>`;
-    })
+    .map((entry) => `<option value="${entry.id}">${entry.id}</option>`)
     .join('');
   elements.mapSelect.innerHTML = options || '<option value="">등록된 맵 없음</option>';
   const picked = preferredMapId && mapCatalog.some((entry) => entry.id === preferredMapId)
@@ -259,6 +207,9 @@ function renderMapCatalog(preferredMapId = '') {
     : (mapCatalog[0] ? mapCatalog[0].id : '');
   if (picked) {
     elements.mapSelect.value = picked;
+  }
+  if (elements.mapNameInput) {
+    elements.mapNameInput.value = elements.mapSelect.value || 'v2_custom_map';
   }
 }
 
@@ -294,9 +245,6 @@ function normalizeManifestData(raw) {
 
 async function fetchManifestFromServer() {
   const payload = await callMapMakerApi(`maps?nocache=${Date.now()}`);
-  if (payload.mapsDir) {
-    setMapsDirStatus(`저장 경로(자동): ${payload.mapsDir}`, 'ok');
-  }
   return normalizeManifestData({
     version: 1,
     maps: Array.isArray(payload.maps) ? payload.maps : [],
@@ -332,33 +280,14 @@ async function refreshMapCatalog(preferredMapId = '') {
     .map((entry) => ({
       id: String(entry.id).trim(),
       file: String(entry.file).trim(),
-      enabled: entry.enabled !== false,
       sort: Number.isFinite(Number(entry.sort)) ? Number(entry.sort) : 9999,
     }));
-  renderMapCatalog(preferredMapId || String(elements.mapIdInput.value || '').trim());
-  const selectedMapId = selectedMapIdFromDropdown();
-  if (selectedMapId) {
-    elements.mapIdInput.value = selectedMapId;
-  }
+  renderMapCatalog(preferredMapId || resolveCurrentMapId());
   if (mapCatalog.length > 0) {
     setStatus(`맵 목록 갱신 완료: ${mapCatalog.length}개`);
   } else {
     setStatus('맵 목록이 비어 있습니다', 'warn');
   }
-}
-
-async function syncMapJsonFromEngine(api) {
-  if (!api || typeof api.getCurrentMapJson !== 'function') {
-    const fallbackId = String(elements.mapIdInput.value || '').trim() || 'v2_custom_map';
-    setWorkingMapJson(buildDefaultMapJson(fallbackId), fallbackId);
-    return getWorkingMapJson(fallbackId);
-  }
-  const mapJson = api.getCurrentMapJson();
-  if (mapJson && typeof mapJson === 'object') {
-    return setWorkingMapJson(mapJson);
-  }
-  const fallbackId = String(elements.mapIdInput.value || '').trim() || 'v2_custom_map';
-  return setWorkingMapJson(buildDefaultMapJson(fallbackId), fallbackId);
 }
 
 function getFrameWindow() {
@@ -383,7 +312,6 @@ function readEngineFrameDiagnostics() {
   const frameWindow = getFrameWindow();
   if (!frameWindow) {
     return {
-      hasFrameWindow: false,
       hasApi: false,
       hasRoulette: false,
       readyState: '',
@@ -411,7 +339,6 @@ function readEngineFrameDiagnostics() {
   } catch (_) {
   }
   return {
-    hasFrameWindow: true,
     hasApi: !!(frameWindow.__appPinballV2 && typeof frameWindow.__appPinballV2 === 'object'),
     hasRoulette: !!(frameWindow.roulette && typeof frameWindow.roulette === 'object'),
     readyState,
@@ -457,6 +384,64 @@ async function waitForEngineApi(timeoutMs = 20000) {
   throw new Error(`엔진 API 대기 시간 초과. ${formatEngineDiagnostics(diagnostics)}`);
 }
 
+async function withEngineAction(action, options = {}) {
+  const shouldRethrow = options.rethrow === true;
+  setBusy(true);
+  try {
+    const api = await waitForEngineApi();
+    return await action(api);
+  } catch (error) {
+    setStatus(String(error && error.message ? error.message : error), 'error');
+    if (shouldRethrow) {
+      throw error;
+    }
+    return null;
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function applyMapAndCandidates() {
+  await withEngineAction(async (api) => {
+    const payload = readPayload();
+    const mapResult = await api.loadMapById(payload.mapId);
+    if (!mapResult || mapResult.ok !== true) {
+      throw new Error(mapResult && mapResult.reason ? mapResult.reason : '맵 로드에 실패했습니다');
+    }
+    if (typeof api.getCurrentMapJson === 'function') {
+      const latestMap = api.getCurrentMapJson();
+      if (latestMap && typeof latestMap === 'object') {
+        setWorkingMapJson(latestMap, payload.mapId);
+      }
+    }
+    const rankResult = api.setWinningRank(payload.winningRank);
+    if (!rankResult || rankResult.ok !== true) {
+      throw new Error('당첨 순위 설정에 실패했습니다');
+    }
+    const candidateResult = await api.setCandidates(payload.candidates);
+    if (!candidateResult || candidateResult.ok !== true) {
+      throw new Error(candidateResult && candidateResult.reason ? candidateResult.reason : '후보 설정에 실패했습니다');
+    }
+    setPlayPauseUi(readEngineRunning(api));
+    setStatus(`맵 자동 적용 완료: ${payload.mapId}`);
+  }, { rethrow: true });
+}
+
+async function loadSelectedCatalogMap() {
+  const entry = selectedMapCatalogEntry();
+  if (!entry) {
+    throw new Error('로드할 맵을 먼저 선택하세요');
+  }
+  const mapPayload = await callMapMakerApi(`map?mapId=${encodeURIComponent(entry.id)}&nocache=${Date.now()}`);
+  if (mapPayload.mapJson && typeof mapPayload.mapJson === 'object') {
+    setWorkingMapJson(mapPayload.mapJson, entry.id);
+  }
+  if (elements.mapNameInput) {
+    elements.mapNameInput.value = entry.id;
+  }
+  await applyMapAndCandidates();
+}
+
 function selectedSnapshotSlot() {
   const checked = document.querySelector('input[name="snapshotSlot"]:checked');
   const slotId = checked && typeof checked.value === 'string' ? checked.value : 'slot1';
@@ -492,113 +477,42 @@ async function loadEngineFrame() {
   });
   setStatus('엔진 iframe 로드 완료. API 연결 대기 중...');
   const api = await waitForEngineApi(30000);
-  const payload = readPayload();
-  const initResult = await api.init(payload);
+  const initResult = await api.init(readPayload());
   if (!initResult || initResult.ok !== true) {
     throw new Error(initResult && initResult.reason ? initResult.reason : '초기화에 실패했습니다');
   }
-  await syncMapJsonFromEngine(api);
+  if (typeof api.getCurrentMapJson === 'function') {
+    const mapJson = api.getCurrentMapJson();
+    if (mapJson && typeof mapJson === 'object') {
+      setWorkingMapJson(mapJson);
+    }
+  }
   setPlayPauseUi(readEngineRunning(api));
-  setStatus(`엔진 준비 완료: 맵=${payload.mapId}, 볼=${payload.candidates.length}`);
-}
-
-async function withEngineAction(action, options = {}) {
-  const shouldRethrow = options.rethrow === true;
-  setBusy(true);
-  try {
-    const api = await waitForEngineApi();
-    return await action(api);
-  } catch (error) {
-    setStatus(String(error && error.message ? error.message : error), 'error');
-    if (shouldRethrow) {
-      throw error;
-    }
-    return null;
-  } finally {
-    setBusy(false);
-  }
-}
-
-async function applyMapAndCandidates() {
-  await withEngineAction(async (api) => {
-    const payload = readPayload();
-    const catalogEntry = lookupMapCatalogById(payload.mapId);
-    if (catalogEntry) {
-      const mapResult = await api.loadMapById(payload.mapId);
-      if (!mapResult || mapResult.ok !== true) {
-        throw new Error(mapResult && mapResult.reason ? mapResult.reason : '맵 로드에 실패했습니다');
-      }
-      await syncMapJsonFromEngine(api);
-    } else {
-      if (typeof api.applyMapJson !== 'function') {
-        throw new Error('엔진이 맵 JSON 적용 API를 지원하지 않습니다');
-      }
-      const mapJson = getWorkingMapJson(payload.mapId);
-      mapJson.id = payload.mapId;
-      mapJson.title = payload.mapId;
-      const mapResult = await api.applyMapJson(mapJson);
-      if (!mapResult || mapResult.ok !== true) {
-        throw new Error(mapResult && mapResult.reason ? mapResult.reason : '맵 JSON 적용에 실패했습니다');
-      }
-      setWorkingMapJson(mapJson, payload.mapId);
-    }
-    const rankResult = api.setWinningRank(payload.winningRank);
-    if (!rankResult || rankResult.ok !== true) {
-      throw new Error('당첨 순위 설정에 실패했습니다');
-    }
-    const candidateResult = await api.setCandidates(payload.candidates);
-    if (!candidateResult || candidateResult.ok !== true) {
-      throw new Error(candidateResult && candidateResult.reason ? candidateResult.reason : '후보 설정에 실패했습니다');
-    }
-    setPlayPauseUi(readEngineRunning(api));
-    if (elements.mapSelect && catalogEntry) {
-      elements.mapSelect.value = payload.mapId;
-    }
-    setStatus(`맵 적용 완료: 맵=${payload.mapId}, 후보=${payload.candidates.length}`);
-  }, { rethrow: true });
-}
-
-async function loadSelectedCatalogMap() {
-  const entry = selectedMapCatalogEntry();
-  if (!entry) {
-    throw new Error('로드할 맵을 먼저 선택하세요');
-  }
-  const mapPayload = await callMapMakerApi(`map?mapId=${encodeURIComponent(entry.id)}&nocache=${Date.now()}`);
-  if (mapPayload.mapJson && typeof mapPayload.mapJson === 'object') {
-    setWorkingMapJson(mapPayload.mapJson, entry.id);
-  }
-  elements.mapIdInput.value = entry.id;
-  await applyMapAndCandidates();
-}
-
-function updateMapsDirConnectedStatus() {
-  setMapsDirStatus('저장 경로(자동): assets/ui/pinball/maps', 'ok');
+  setStatus(`엔진 준비 완료: 맵=${resolveCurrentMapId()}`);
 }
 
 async function saveMapViaServer(payload) {
-  const result = await callMapMakerApi('save', {
+  return callMapMakerApi('save', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
   });
-  if (result.mapsDir) {
-    setMapsDirStatus(`저장 경로(자동): ${result.mapsDir}`, 'ok');
-  }
-  return result;
 }
 
 async function getCurrentMapJsonForSave() {
-  const api = await waitForEngineApi();
-  if (api && typeof api.getCurrentMapJson === 'function') {
-    const fromEngine = api.getCurrentMapJson();
-    if (fromEngine && typeof fromEngine === 'object') {
-      return setWorkingMapJson(fromEngine);
+  try {
+    const api = await waitForEngineApi(2000);
+    if (api && typeof api.getCurrentMapJson === 'function') {
+      const fromEngine = api.getCurrentMapJson();
+      if (fromEngine && typeof fromEngine === 'object') {
+        return setWorkingMapJson(fromEngine);
+      }
     }
+  } catch (_) {
   }
-  const fallbackId = String(elements.mapIdInput.value || '').trim() || 'v2_custom_map';
-  return getWorkingMapJson(fallbackId);
+  return getWorkingMapJson(resolveCurrentMapId());
 }
 
 async function saveSelectedMapOverwrite() {
@@ -609,37 +523,45 @@ async function saveSelectedMapOverwrite() {
   const mapJson = await getCurrentMapJsonForSave();
   mapJson.id = selected.id;
   mapJson.title = selected.id;
-  const result = await saveMapViaServer({
+  await saveMapViaServer({
     mode: 'selected',
     selectedMapId: selected.id,
     mapJson,
   });
-  await refreshMapCatalog(result.mapId || selected.id);
+  await refreshMapCatalog(selected.id);
   if (elements.mapSelect) {
     elements.mapSelect.value = selected.id;
   }
-  elements.mapIdInput.value = selected.id;
-  setWorkingMapJson(mapJson, selected.id);
+  if (elements.mapNameInput) {
+    elements.mapNameInput.value = selected.id;
+  }
+  await loadSelectedCatalogMap();
   setStatus(`선택 맵 저장 완료: ${selected.id}`);
 }
 
 async function saveAsNewMap() {
-  const newId = sanitizeMapId(String(elements.mapIdInput.value || '').trim());
+  const rawName = String(elements.mapNameInput && elements.mapNameInput.value ? elements.mapNameInput.value : '').trim();
+  if (!rawName) {
+    throw new Error('새 맵 이름을 입력하세요');
+  }
+  const newId = sanitizeMapId(rawName);
   const mapJson = await getCurrentMapJsonForSave();
   mapJson.id = newId;
   mapJson.title = newId;
-  const result = await saveMapViaServer({
+  await saveMapViaServer({
     mode: 'new',
     newMapId: newId,
     newMapTitle: newId,
     mapJson,
   });
-  await refreshMapCatalog(result.mapId || newId);
-  if (elements.mapSelect && mapCatalog.some((entry) => entry.id === newId)) {
+  await refreshMapCatalog(newId);
+  if (elements.mapSelect) {
     elements.mapSelect.value = newId;
   }
-  elements.mapIdInput.value = newId;
-  setWorkingMapJson(mapJson, newId);
+  if (elements.mapNameInput) {
+    elements.mapNameInput.value = newId;
+  }
+  await loadSelectedCatalogMap();
   setStatus(`새 맵 저장 완료: ${newId}`);
 }
 
@@ -647,7 +569,7 @@ function setupEvents() {
   bindEvent(elements.refreshMapListButton, 'click', async () => {
     setBusy(true);
     try {
-      await refreshMapCatalog(String(elements.mapIdInput.value || '').trim());
+      await refreshMapCatalog(resolveCurrentMapId());
     } catch (error) {
       setStatus(String(error && error.message ? error.message : error), 'error');
     } finally {
@@ -695,18 +617,11 @@ function setupEvents() {
     setBusy(true);
     try {
       await loadEngineFrame();
+      if (selectedMapCatalogEntry()) {
+        await loadSelectedCatalogMap();
+      }
     } catch (error) {
       setStatus(String(error && error.message ? error.message : error), 'error');
-    } finally {
-      setBusy(false);
-    }
-  });
-
-  bindEvent(elements.applyButton, 'click', async () => {
-    setBusy(true);
-    try {
-      await applyMapAndCandidates();
-    } catch (_) {
     } finally {
       setBusy(false);
     }
@@ -770,9 +685,11 @@ function setupEvents() {
 
 async function boot() {
   setupEvents();
-  const initialMapId = String(elements.mapIdInput.value || '').trim() || 'v2_default';
+  const initialMapId = 'v2_default';
+  if (elements.mapNameInput) {
+    elements.mapNameInput.value = initialMapId;
+  }
   setWorkingMapJson(buildDefaultMapJson(initialMapId), initialMapId);
-  updateMapsDirConnectedStatus();
   setPlayPauseUi(false);
   if (FILE_PROTOCOL) {
     setStatus('현재 file:// 경로입니다. tools/start_pinball_map_maker_v2.bat 로 실행하세요', 'warn');
@@ -780,12 +697,11 @@ async function boot() {
   }
   setBusy(true);
   try {
-    try {
-      await refreshMapCatalog(initialMapId);
-    } catch (catalogError) {
-      setStatus(`맵 목록 갱신 실패: ${String(catalogError && catalogError.message ? catalogError.message : catalogError)}`, 'warn');
-    }
+    await refreshMapCatalog(initialMapId);
     await loadEngineFrame();
+    if (selectedMapCatalogEntry()) {
+      await loadSelectedCatalogMap();
+    }
   } catch (error) {
     setStatus(String(error && error.message ? error.message : error), 'error');
   } finally {

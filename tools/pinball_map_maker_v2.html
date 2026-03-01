@@ -292,11 +292,14 @@
       <div class="panel-body">
         <div class="group">
           <div class="group-title">0) 맵 파일 저장/불러오기 (고정 경로: assets/ui/pinball/maps)</div>
-          <div class="inline-note strong">맵은 드롭다운에서 선택하면 즉시 로드됩니다. 저장 경로 연결 작업은 필요 없습니다.</div>
-          <div id="mapsDirStatus" class="dir-status">저장 경로(자동): assets/ui/pinball/maps</div>
+          <div class="inline-note">맵은 드롭다운에서 선택하면 즉시 로드/적용됩니다.</div>
           <div class="row">
             <label for="mapSelect">저장 맵 목록</label>
             <select id="mapSelect"></select>
+          </div>
+          <div class="row">
+            <label for="mapNameInput">새 맵 이름</label>
+            <input id="mapNameInput" type="text" value="v2_custom_map" placeholder="예: my_pinball_map">
           </div>
           <div class="btn-row">
             <button id="refreshMapListButton">목록 새로고침</button>
@@ -305,34 +308,11 @@
           <div class="btn-row single">
             <button id="saveAsNewMapButton" class="primary">새 맵으로 저장</button>
           </div>
-          <div class="inline-note">새 맵 저장 시 <code>맵 ID</code> 값을 파일명/표시명으로 함께 사용합니다. 저장 후 목록에 자동 반영됩니다.</div>
-        </div>
-        <div class="group">
-          <div class="group-title">1) 맵 설정 적용 (파일 저장 아님)</div>
-          <div class="inline-note">여기서는 맵 ID/후보/순위를 테스트 런타임에 반영합니다.</div>
-          <div class="row">
-            <label for="mapIdInput">맵 ID</label>
-            <input id="mapIdInput" type="text" value="v2_default">
-          </div>
-          <div class="row">
-            <label for="marbleCountInput">볼 개수</label>
-            <input id="marbleCountInput" type="number" min="1" max="200" value="32">
-          </div>
-          <div class="row">
-            <label for="winningRankInput">당첨 순위</label>
-            <input id="winningRankInput" type="number" min="1" max="200" value="1">
-          </div>
-          <div class="row">
-            <label for="candidatesInput">후보 목록</label>
-            <textarea id="candidatesInput" placeholder="선택 사항입니다. 한 줄에 후보 1개씩 입력하세요. 비워두면 볼 개수 기준으로 자동 생성됩니다."></textarea>
-          </div>
-          <div class="btn-row single">
-            <button id="applyButton" class="primary">현재 설정으로 맵 적용</button>
-          </div>
+          <div class="inline-note">새 맵 저장은 입력한 이름을 <code>ID/제목</code>으로 동일하게 사용합니다.</div>
         </div>
         <div id="statusBox" class="status">엔진 연결을 기다리는 중...</div>
         <div class="inline-note">
-          작업 순서: 맵 목록 선택(자동 로드) → 필요 시 맵 ID/후보/순위 수정 후 맵 적용 → 하단 바에서 시작/일시정지 테스트 → 하단 슬롯에서 퀵세이브/퀵로드
+          작업 순서: 맵 목록 선택(자동 로드/적용) → 하단 바에서 시작/일시정지 테스트 → 저장(덮어쓰기/새 맵 저장) → 슬롯 퀵세이브/퀵로드
         </div>
         <div class="inline-note">
           불러오기는 기본적으로 일시정지 상태로 복원됩니다.
