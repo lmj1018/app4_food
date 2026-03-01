@@ -371,7 +371,7 @@ function compileObject(rawObject, entityId) {
             width: Math.max(0.08, toFiniteNumber(rawObject.width, 0.48)),
             height: Math.max(0.03, toFiniteNumber(rawObject.height, 0.12)),
             restitution: toFiniteNumber(rawObject.restitution, 0.08),
-            rotation: toFiniteNumber(rawObject.rotation, 0),
+            rotation: 0,
             color: typeof rawObject.color === 'string' ? rawObject.color : DEFAULT_OBJECT_COLORS.hammer,
           },
           entityId,
@@ -383,7 +383,7 @@ function compileObject(rawObject, entityId) {
           entityId,
           x: toFiniteNumber(rawObject.x, 11.75),
           y: toFiniteNumber(rawObject.y, 70),
-          rotation: toFiniteNumber(rawObject.rotation, 0),
+          rotation: toFiniteNumber(rawObject.rotation, toFiniteNumber(rawObject.dirDeg, 90)),
           dirDeg: toFiniteNumber(rawObject.dirDeg, 90),
           force: Math.max(0.01, toFiniteNumber(rawObject.force, 4.2)),
           intervalMs: Math.max(60, toFiniteNumber(rawObject.intervalMs, 1200)),
@@ -1033,7 +1033,7 @@ function createHammerBehavior(def, env) {
     const body = entry.body;
     const currentAngle = typeof body.GetAngle === 'function' ? body.GetAngle() : 0;
     if (!Number.isFinite(baseAngleRad)) {
-      const initialRotation = degToRad(toFiniteNumber(def.rotation, toFiniteNumber(def.dirDeg, 0)));
+      const initialRotation = degToRad(toFiniteNumber(def.dirDeg, toFiniteNumber(def.rotation, 0)));
       baseAngleRad = Number.isFinite(initialRotation) ? initialRotation : currentAngle;
     }
     if (!Number.isFinite(basePosX) || !Number.isFinite(basePosY)) {
@@ -1094,9 +1094,6 @@ function createHammerBehavior(def, env) {
     }
     entry.x = targetX;
     entry.y = targetY;
-    if (entry.shape && typeof entry.shape === 'object') {
-      entry.shape.rotation = targetAngle;
-    }
     lastOffset = linearOffset;
     lastTickAt = now;
   }

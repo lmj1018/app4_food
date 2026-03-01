@@ -2323,7 +2323,10 @@ function getBoxResizeHandlesWorld(obj) {
   const cy = toFinite(obj.y, 0);
   const width = Math.max(0.08, toFinite(obj.width, 1.2));
   const height = Math.max(0.05, toFinite(obj.height, 0.2));
-  const rad = (Math.PI / 180) * normalizeDeg(toFinite(obj.rotation, 0));
+  const angleDeg = type === 'hammer'
+    ? normalizeDeg(toFinite(obj.dirDeg, toFinite(obj.rotation, 0)))
+    : normalizeDeg(toFinite(obj.rotation, 0));
+  const rad = (Math.PI / 180) * angleDeg;
   const axisX = { x: Math.cos(rad), y: Math.sin(rad) };
   const axisY = { x: -Math.sin(rad), y: Math.cos(rad) };
   return [
@@ -2568,7 +2571,10 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
 
   const width = Math.max(0.08, toFinite(obj.width, obj.type === 'rotor' ? 3 : (obj.type === 'diamond_block' ? 0.32 : 1.2)));
   const height = Math.max(0.05, toFinite(obj.height, obj.type === 'rotor' ? 0.12 : (obj.type === 'diamond_block' ? 0.32 : 0.2)));
-  const rad = (Math.PI / 180) * toFinite(obj.rotation, 0);
+  const angleDeg = obj.type === 'hammer'
+    ? normalizeDeg(toFinite(obj.dirDeg, toFinite(obj.rotation, 0)))
+    : toFinite(obj.rotation, 0);
+  const rad = (Math.PI / 180) * angleDeg;
   const drawWidth = width * layout.scale;
   const drawHeight = height * layout.scale;
   ctx.translate(center.x, center.y);
@@ -2786,8 +2792,8 @@ function drawMakerCanvas() {
   ctx.clearRect(0, 0, layout.width, layout.height);
   ctx.fillStyle = '#081226';
   ctx.fillRect(0, 0, layout.width, layout.height);
-  ctx.strokeStyle = 'rgba(150, 194, 255, 0.64)';
-  ctx.lineWidth = 1.25;
+  ctx.strokeStyle = 'rgba(99, 131, 178, 0.26)';
+  ctx.lineWidth = 1;
   for (let x = 0; x <= WORLD_WIDTH; x += 2) {
     const p1 = worldToCanvas(layout, x, 0);
     const p2 = worldToCanvas(layout, x, layout.stageGoalY);
@@ -3470,7 +3476,10 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
     if (type === 'box_block' || type === 'diamond_block' || type === 'hammer') {
       const cx = toFinite(obj.x, 0);
       const cy = toFinite(obj.y, 0);
-      const rad = (Math.PI / 180) * normalizeDeg(toFinite(obj.rotation, 0));
+      const angleDeg = type === 'hammer'
+        ? normalizeDeg(toFinite(obj.dirDeg, toFinite(obj.rotation, 0)))
+        : normalizeDeg(toFinite(obj.rotation, 0));
+      const rad = (Math.PI / 180) * angleDeg;
       const axisX = { x: Math.cos(rad), y: Math.sin(rad) };
       const axisY = { x: -Math.sin(rad), y: Math.cos(rad) };
       const vx = point.x - cx;
