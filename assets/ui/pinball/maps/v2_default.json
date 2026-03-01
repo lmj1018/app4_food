@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "id": "v2_default",
+  "title": "V2 Default Test Map",
+  "stage": {
+    "goalY": 210,
+    "zoomY": 200,
+    "spawn": {
+      "x": 8.8,
+      "y": 2.0,
+      "columns": 8,
+      "spacingX": 0.6,
+      "visibleRows": 6
+    }
+  },
+  "objects": [
+    {
+      "oid": "wall-left",
+      "type": "wall_polyline",
+      "points": [
+        [2.5, 2.0],
+        [2.5, 212.0]
+      ],
+      "color": "#243050"
+    },
+    {
+      "oid": "wall-right",
+      "type": "wall_polyline",
+      "points": [
+        [21.0, 2.0],
+        [21.0, 212.0]
+      ],
+      "color": "#243050"
+    },
+    {
+      "oid": "funnel-left",
+      "type": "wall_polyline",
+      "points": [
+        [2.5, 20.0],
+        [10.5, 34.0]
+      ],
+      "color": "#3f6be5"
+    },
+    {
+      "oid": "funnel-right",
+      "type": "wall_polyline",
+      "points": [
+        [21.0, 20.0],
+        [13.0, 34.0]
+      ],
+      "color": "#3f6be5"
+    },
+    {
+      "oid": "peg-center",
+      "type": "peg_circle",
+      "x": 11.75,
+      "y": 55.0,
+      "radius": 0.8,
+      "restitution": 2.8,
+      "life": 3,
+      "color": "#ffd166"
+    },
+    {
+      "oid": "rotor-main",
+      "type": "rotor",
+      "x": 11.75,
+      "y": 90.0,
+      "width": 3.4,
+      "height": 0.12,
+      "angularVelocity": -3.0,
+      "color": "#ef476f"
+    },
+    {
+      "oid": "portal-a",
+      "type": "portal",
+      "x": 5.5,
+      "y": 110.0,
+      "radius": 0.6,
+      "pair": "portal-b",
+      "cooldownMs": 900,
+      "exitImpulse": 2.6,
+      "exitDirDeg": 20
+    },
+    {
+      "oid": "portal-b",
+      "type": "portal",
+      "x": 18.0,
+      "y": 152.0,
+      "radius": 0.6,
+      "pair": "portal-a",
+      "cooldownMs": 900,
+      "exitImpulse": 2.6,
+      "exitDirDeg": 180
+    },
+    {
+      "oid": "hammer-mid",
+      "type": "hammer",
+      "x": 11.75,
+      "y": 132.0,
+      "dirDeg": 90,
+      "force": 4.8,
+      "intervalMs": 1400,
+      "doubleHit": true,
+      "triggerRadius": 1.4,
+      "cooldownMs": 320
+    },
+    {
+      "oid": "goal-ramp-left",
+      "type": "wall_polyline",
+      "points": [
+        [2.5, 184.0],
+        [10.2, 203.5]
+      ],
+      "color": "#46b8c8"
+    },
+    {
+      "oid": "goal-ramp-right",
+      "type": "wall_polyline",
+      "points": [
+        [21.0, 184.0],
+        [13.3, 203.5]
+      ],
+      "color": "#46b8c8"
+    }
+  ],
+  "meta": {
+    "notes": "Default test map for v2 runtime and snapshot workflow."
+  }
+}

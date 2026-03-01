@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pinball Engine V2</title>
+  <script type="importmap">
+    {
+      "imports": {
+        "2rDQN": "./Box2D.simd.dd31b167.wasm",
+        "8BShk": "./Box2D.simd.2fa02903.js",
+        "9DwmV": "./kkwak.673a610d.png",
+        "9YLvj": "./waldokun.7e88dd59.png",
+        "cdgIR": "./chamru.d6926a56.png",
+        "fkRhi": "./junyoop.d27f0cbf.png",
+        "h7cmx": "./Box2D.b9b16b27.wasm",
+        "ilUZb": "./Box2D.a11658c7.js",
+        "juMvj": "./ff.7fdc9e82.svg",
+        "lfSvD": "./kubin.f3647b70.png"
+      }
+    }
+  </script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #05070d;
+      --fg: #cfd9f8;
+      --muted: #7d8bb3;
+      --line: #223058;
+    }
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle at 14% 12%, #0f1830 0%, var(--bg) 50%);
+      color: var(--fg);
+      overflow: hidden;
+      font-family: Segoe UI, Arial, sans-serif;
+    }
+    .status {
+      position: fixed;
+      left: 10px;
+      top: 10px;
+      z-index: 50;
+      padding: 4px 8px;
+      border: 1px solid var(--line);
+      background: rgba(8, 12, 23, 0.8);
+      border-radius: 8px;
+      font-size: 12px;
+      color: var(--muted);
+      pointer-events: none;
+      user-select: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="v2Status" class="status">v2 booting...</div>
+  <script src="./roulette.99856b00.js"></script>
+  <script type="module" src="./v2/runtime_bootstrap.js"></script>
+</body>
+</html>

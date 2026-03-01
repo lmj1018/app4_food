@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pinball V2 Map Maker (Snapshot Test)</title>
+  <style>
+    :root {
+      --bg: #09101f;
+      --panel: #131f39;
+      --line: #2f4068;
+      --text: #d8e4ff;
+      --muted: #98abd3;
+      --primary: #49b5ff;
+      --success: #4de1a5;
+      --warn: #ffbd66;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle at 12% 10%, #15274f 0%, var(--bg) 54%);
+      color: var(--text);
+      font-family: Segoe UI, Arial, sans-serif;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 360px minmax(600px, 1fr);
+      gap: 12px;
+      height: 100%;
+      padding: 12px;
+    }
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(14, 22, 40, 0.92);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .panel-head {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #1c2a4d 0%, #152240 100%);
+      font-weight: 700;
+      font-size: 14px;
+    }
+    .panel-body {
+      padding: 12px;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 100px 1fr;
+      align-items: center;
+      gap: 8px;
+    }
+    label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    input,
+    select,
+    textarea,
+    button {
+      font: inherit;
+    }
+    input,
+    select,
+    textarea {
+      width: 100%;
+      background: #0d1730;
+      color: var(--text);
+      border: 1px solid #334772;
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 13px;
+    }
+    textarea {
+      min-height: 90px;
+      resize: vertical;
+    }
+    .btn-row {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+    }
+    button {
+      border: 1px solid #3e578e;
+      background: linear-gradient(180deg, #203056 0%, #1a294a 100%);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 9px 10px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
+    button.primary {
+      border-color: #4ea4ff;
+      background: linear-gradient(180deg, #2680da 0%, #1e63b3 100%);
+    }
+    button.warn {
+      border-color: #dc9750;
+      background: linear-gradient(180deg, #ac6f2f 0%, #845522 100%);
+    }
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+    .inline-note {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.35;
+    }
+    .status {
+      font-size: 12px;
+      border: 1px solid #315582;
+      border-radius: 8px;
+      background: #0d1934;
+      padding: 8px 10px;
+      color: var(--success);
+      min-height: 36px;
+      white-space: pre-wrap;
+    }
+    .snapshot-list {
+      border: 1px solid #2d436c;
+      border-radius: 8px;
+      background: #0b152b;
+      max-height: 200px;
+      overflow: auto;
+    }
+    .snapshot-item {
+      border-bottom: 1px solid #23375b;
+      padding: 8px 10px;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .snapshot-item:last-child {
+      border-bottom: 0;
+    }
+    .snapshot-slot {
+      color: var(--warn);
+      font-weight: 700;
+      margin-right: 6px;
+    }
+    .engine-wrap {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      min-height: 0;
+      background: #090f1d;
+      display: flex;
+      flex-direction: column;
+    }
+    .engine-head {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--line);
+      background: #111c35;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      display: block;
+      background: #000;
+      flex: 1;
+      min-height: 0;
+    }
+    @media (max-width: 1140px) {
+      .layout {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <section class="panel">
+      <div class="panel-head">Pinball V2 Snapshot Controls</div>
+      <div class="panel-body">
+        <div class="row">
+          <label for="mapIdInput">Map ID</label>
+          <input id="mapIdInput" type="text" value="v2_default">
+        </div>
+        <div class="row">
+          <label for="marbleCountInput">Marble Count</label>
+          <input id="marbleCountInput" type="number" min="1" max="200" value="32">
+        </div>
+        <div class="row">
+          <label for="winningRankInput">Winning Rank</label>
+          <input id="winningRankInput" type="number" min="1" max="200" value="1">
+        </div>
+        <div class="row">
+          <label for="candidatesInput">Candidates</label>
+          <textarea id="candidatesInput" placeholder="Optional. One candidate per line. If empty, auto-generated from Marble Count."></textarea>
+        </div>
+        <div class="btn-row">
+          <button id="applyButton" class="primary">Apply Map</button>
+          <button id="reloadButton">Reload Engine</button>
+        </div>
+        <div class="btn-row">
+          <button id="startButton" class="primary">Start</button>
+          <button id="pauseButton">Pause</button>
+        </div>
+        <div class="btn-row">
+          <button id="resetButton">Reset</button>
+          <button id="stateButton">Read State</button>
+        </div>
+        <div class="btn-row">
+          <button id="quickSaveButton">Quick Save</button>
+          <button id="quickLoadButton">Quick Load</button>
+        </div>
+        <div class="row">
+          <label for="slotSelect">Slot</label>
+          <select id="slotSelect"></select>
+        </div>
+        <div class="btn-row">
+          <button id="saveSlotButton">Save To Slot</button>
+          <button id="loadSlotButton">Load Slot</button>
+        </div>
+        <div class="btn-row">
+          <button id="deleteSlotButton" class="warn">Delete Slot</button>
+          <button id="refreshSlotsButton">Refresh Slots</button>
+        </div>
+        <div id="statusBox" class="status">Waiting for engine...</div>
+        <div class="inline-note">
+          Load restores snapshot in paused mode by default. Press Start to continue.
+        </div>
+        <div class="snapshot-list" id="snapshotList"></div>
+      </div>
+    </section>
+    <section class="engine-wrap">
+      <div class="engine-head">Engine iframe: <code id="engineUrlText">loading...</code></div>
+      <iframe id="engineFrame" title="pinball-v2-engine"></iframe>
+    </section>
+  </div>
+  <script type="module" src="./pinball_map_maker_v2.js"></script>
+</body>
+</html>

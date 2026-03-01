@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "maps": [
+    {
+      "id": "v2_default",
+      "title": "V2 Default Test Map",
+      "engine": "v2",
+      "file": "v2_default.json",
+      "enabled": true,
+      "sort": 100
+    }
+  ]
+}
