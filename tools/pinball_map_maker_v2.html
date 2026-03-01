@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="ko">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pinball V2 Map Maker (Snapshot Test)</title>
+  <title>핀볼 V2 맵 메이커 (스냅샷 테스트)</title>
   <style>
     :root {
       --bg: #09101f;
@@ -189,61 +189,61 @@
 <body>
   <div class="layout">
     <section class="panel">
-      <div class="panel-head">Pinball V2 Snapshot Controls</div>
+      <div class="panel-head">핀볼 V2 스냅샷 제어판</div>
       <div class="panel-body">
         <div class="row">
-          <label for="mapIdInput">Map ID</label>
+          <label for="mapIdInput">맵 ID</label>
           <input id="mapIdInput" type="text" value="v2_default">
         </div>
         <div class="row">
-          <label for="marbleCountInput">Marble Count</label>
+          <label for="marbleCountInput">볼 개수</label>
           <input id="marbleCountInput" type="number" min="1" max="200" value="32">
         </div>
         <div class="row">
-          <label for="winningRankInput">Winning Rank</label>
+          <label for="winningRankInput">당첨 순위</label>
           <input id="winningRankInput" type="number" min="1" max="200" value="1">
         </div>
         <div class="row">
-          <label for="candidatesInput">Candidates</label>
-          <textarea id="candidatesInput" placeholder="Optional. One candidate per line. If empty, auto-generated from Marble Count."></textarea>
+          <label for="candidatesInput">후보 목록</label>
+          <textarea id="candidatesInput" placeholder="선택 사항입니다. 한 줄에 후보 1개씩 입력하세요. 비워두면 볼 개수 기준으로 자동 생성됩니다."></textarea>
         </div>
         <div class="btn-row">
-          <button id="applyButton" class="primary">Apply Map</button>
-          <button id="reloadButton">Reload Engine</button>
+          <button id="applyButton" class="primary">맵 적용</button>
+          <button id="reloadButton">엔진 다시 불러오기</button>
         </div>
         <div class="btn-row">
-          <button id="startButton" class="primary">Start</button>
-          <button id="pauseButton">Pause</button>
+          <button id="startButton" class="primary">시작</button>
+          <button id="pauseButton">일시정지</button>
         </div>
         <div class="btn-row">
-          <button id="resetButton">Reset</button>
-          <button id="stateButton">Read State</button>
+          <button id="resetButton">리셋</button>
+          <button id="stateButton">상태 읽기</button>
         </div>
         <div class="btn-row">
-          <button id="quickSaveButton">Quick Save</button>
-          <button id="quickLoadButton">Quick Load</button>
+          <button id="quickSaveButton">빠른 저장</button>
+          <button id="quickLoadButton">빠른 불러오기</button>
         </div>
         <div class="row">
-          <label for="slotSelect">Slot</label>
+          <label for="slotSelect">슬롯</label>
           <select id="slotSelect"></select>
         </div>
         <div class="btn-row">
-          <button id="saveSlotButton">Save To Slot</button>
-          <button id="loadSlotButton">Load Slot</button>
+          <button id="saveSlotButton">슬롯 저장</button>
+          <button id="loadSlotButton">슬롯 불러오기</button>
         </div>
         <div class="btn-row">
-          <button id="deleteSlotButton" class="warn">Delete Slot</button>
-          <button id="refreshSlotsButton">Refresh Slots</button>
+          <button id="deleteSlotButton" class="warn">슬롯 삭제</button>
+          <button id="refreshSlotsButton">슬롯 목록 새로고침</button>
         </div>
-        <div id="statusBox" class="status">Waiting for engine...</div>
+        <div id="statusBox" class="status">엔진 연결을 기다리는 중...</div>
         <div class="inline-note">
-          Load restores snapshot in paused mode by default. Press Start to continue.
+          불러오기는 기본적으로 일시정지 상태로 복원됩니다. 계속하려면 시작을 누르세요.
         </div>
         <div class="snapshot-list" id="snapshotList"></div>
       </div>
     </section>
     <section class="engine-wrap">
-      <div class="engine-head">Engine iframe: <code id="engineUrlText">loading...</code></div>
+      <div class="engine-head">엔진 iframe: <code id="engineUrlText">불러오는 중...</code></div>
       <iframe id="engineFrame" title="pinball-v2-engine"></iframe>
     </section>
   </div>

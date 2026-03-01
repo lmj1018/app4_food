@@ -62,7 +62,7 @@ function buildAutoCandidates() {
   const count = Math.max(1, Math.min(200, Number(elements.marbleCountInput.value) || 1));
   const list = [];
   for (let index = 0; index < count; index += 1) {
-    list.push(`Candidate ${String(index + 1).padStart(2, '0')}`);
+    list.push(`후보 ${String(index + 1).padStart(2, '0')}`);
   }
   return list;
 }
@@ -117,12 +117,12 @@ async function waitForEngineApi(timeoutMs = 20000) {
     }
     await new Promise((resolve) => setTimeout(resolve, 60));
   }
-  throw new Error('Engine API did not become available');
+  throw new Error('엔진 API가 준비되지 않았습니다');
 }
 
 function renderSnapshotList(items) {
   if (!Array.isArray(items) || items.length === 0) {
-    elements.snapshotList.innerHTML = '<div class="snapshot-item">No snapshots yet.</div>';
+    elements.snapshotList.innerHTML = '<div class="snapshot-item">저장된 스냅샷이 없습니다.</div>';
     return;
   }
   const html = items
@@ -131,7 +131,7 @@ function renderSnapshotList(items) {
       const label = String(item.label || '');
       const mapId = String(item.mapId || '');
       const count = Number(item.marbleCount || 0);
-      return `<div class="snapshot-item"><span class="snapshot-slot">${slot}</span>${label}<br>map=${mapId} marbles=${count}</div>`;
+      return `<div class="snapshot-item"><span class="snapshot-slot">${slot}</span>${label}<br>맵=${mapId} 볼=${count}</div>`;
     })
     .join('');
   elements.snapshotList.innerHTML = html;
@@ -158,10 +158,10 @@ async function loadEngineFrame() {
   const payload = readPayload();
   const initResult = await api.init(payload);
   if (!initResult || initResult.ok !== true) {
-    throw new Error(initResult && initResult.reason ? initResult.reason : 'init failed');
+    throw new Error(initResult && initResult.reason ? initResult.reason : '초기화에 실패했습니다');
   }
   await refreshSnapshotList();
-  setStatus(`Engine ready. map=${payload.mapId}, marbles=${payload.candidates.length}`);
+  setStatus(`엔진 준비 완료: 맵=${payload.mapId}, 볼=${payload.candidates.length}`);
 }
 
 async function withEngineAction(action) {
@@ -181,17 +181,17 @@ async function applyMapAndCandidates() {
     const payload = readPayload();
     const mapResult = await api.loadMapById(payload.mapId);
     if (!mapResult || mapResult.ok !== true) {
-      throw new Error(mapResult && mapResult.reason ? mapResult.reason : 'map load failed');
+      throw new Error(mapResult && mapResult.reason ? mapResult.reason : '맵 로드에 실패했습니다');
     }
     const rankResult = api.setWinningRank(payload.winningRank);
     if (!rankResult || rankResult.ok !== true) {
-      throw new Error('failed to set winning rank');
+      throw new Error('당첨 순위 설정에 실패했습니다');
     }
     const candidateResult = await api.setCandidates(payload.candidates);
     if (!candidateResult || candidateResult.ok !== true) {
-      throw new Error(candidateResult && candidateResult.reason ? candidateResult.reason : 'candidate set failed');
+      throw new Error(candidateResult && candidateResult.reason ? candidateResult.reason : '후보 설정에 실패했습니다');
     }
-    setStatus(`Applied map=${payload.mapId}, candidates=${payload.candidates.length}`);
+    setStatus(`맵 적용 완료: 맵=${payload.mapId}, 후보=${payload.candidates.length}`);
   });
 }
 
@@ -224,9 +224,9 @@ function setupEvents() {
     await withEngineAction(async (api) => {
       const result = await api.start();
       if (!result || result.ok !== true) {
-        throw new Error(result && result.reason ? result.reason : 'start failed');
+        throw new Error(result && result.reason ? result.reason : '시작에 실패했습니다');
       }
-      setStatus('Started');
+      setStatus('시작되었습니다');
     });
   });
 
@@ -234,9 +234,9 @@ function setupEvents() {
     await withEngineAction(async (api) => {
       const result = await api.pause();
       if (!result || result.ok !== true) {
-        throw new Error(result && result.reason ? result.reason : 'pause failed');
+        throw new Error(result && result.reason ? result.reason : '일시정지에 실패했습니다');
       }
-      setStatus('Paused');
+      setStatus('일시정지되었습니다');
     });
   });
 
@@ -244,9 +244,9 @@ function setupEvents() {
     await withEngineAction(async (api) => {
       const result = await api.reset();
       if (!result || result.ok !== true) {
-        throw new Error(result && result.reason ? result.reason : 'reset failed');
+        throw new Error(result && result.reason ? result.reason : '리셋에 실패했습니다');
       }
-      setStatus('Reset complete');
+      setStatus('리셋이 완료되었습니다');
     });
   });
 
@@ -261,10 +261,10 @@ function setupEvents() {
     await withEngineAction(async (api) => {
       const result = await api.saveSnapshot('quick');
       if (!result || result.ok !== true) {
-        throw new Error(result && result.reason ? result.reason : 'quick save failed');
+        throw new Error(result && result.reason ? result.reason : '빠른 저장에 실패했습니다');
       }
       await refreshSnapshotList();
-      setStatus(`Quick saved: ${result.meta ? result.meta.label : 'ok'}`);
+      setStatus(`빠른 저장 완료: ${result.meta ? result.meta.label : '성공'}`);
     });
   });
 
@@ -272,10 +272,10 @@ function setupEvents() {
     await withEngineAction(async (api) => {
       const result = await api.loadSnapshot('quick', { autoResume: false });
       if (!result || result.ok !== true) {
-        throw new Error(result && result.reason ? result.reason : 'quick load failed');
+        throw new Error(result && result.reason ? result.reason : '빠른 불러오기에 실패했습니다');
       }
       await refreshSnapshotList();
-      setStatus('Restored to snapshot (paused)');
+      setStatus('스냅샷으로 복원되었습니다 (일시정지)');
     });
   });
 
@@ -284,10 +284,10 @@ function setupEvents() {
       const slotId = selectedSlot();
       const result = await api.saveSnapshot(slotId);
       if (!result || result.ok !== true) {
-        throw new Error(result && result.reason ? result.reason : `save failed (${slotId})`);
+        throw new Error(result && result.reason ? result.reason : `저장에 실패했습니다 (${slotId})`);
       }
       await refreshSnapshotList();
-      setStatus(`Saved ${slotId}: ${result.meta ? result.meta.label : 'ok'}`);
+      setStatus(`${slotId} 저장 완료: ${result.meta ? result.meta.label : '성공'}`);
     });
   });
 
@@ -296,10 +296,10 @@ function setupEvents() {
       const slotId = selectedSlot();
       const result = await api.loadSnapshot(slotId, { autoResume: false });
       if (!result || result.ok !== true) {
-        throw new Error(result && result.reason ? result.reason : `load failed (${slotId})`);
+        throw new Error(result && result.reason ? result.reason : `불러오기에 실패했습니다 (${slotId})`);
       }
       await refreshSnapshotList();
-      setStatus('Restored to snapshot (paused)');
+      setStatus('스냅샷으로 복원되었습니다 (일시정지)');
     });
   });
 
@@ -308,17 +308,17 @@ function setupEvents() {
       const slotId = selectedSlot();
       const result = api.deleteSnapshot(slotId);
       if (!result || result.ok !== true) {
-        throw new Error(result && result.reason ? result.reason : `delete failed (${slotId})`);
+        throw new Error(result && result.reason ? result.reason : `삭제에 실패했습니다 (${slotId})`);
       }
       await refreshSnapshotList();
-      setStatus(`Deleted ${slotId}`);
+      setStatus(`${slotId} 삭제 완료`);
     });
   });
 
   elements.refreshSlotsButton.addEventListener('click', async () => {
     await withEngineAction(async () => {
       await refreshSnapshotList();
-      setStatus('Snapshot list refreshed');
+      setStatus('스냅샷 목록을 새로고침했습니다');
     });
   });
 }
