@@ -185,7 +185,7 @@
     }
     .engine-body {
       display: grid;
-      grid-template-columns: minmax(460px, 1fr) minmax(260px, 0.5fr) 360px;
+      grid-template-columns: minmax(260px, 0.5fr) minmax(460px, 1fr) 360px;
       gap: 0;
       min-height: 0;
       flex: 1;
@@ -550,8 +550,13 @@
     <section class="engine-wrap">
       <div class="engine-head">엔진 iframe: <code id="engineUrlText">불러오는 중...</code></div>
       <div class="engine-body">
+        <div class="engine-view">
+          <div class="engine-frame-shell">
+            <iframe id="engineFrame" title="pinball-v2-engine"></iframe>
+          </div>
+        </div>
         <section class="maker-board">
-          <div class="maker-board-head">좌표 맵 제작 영역 (왼쪽)</div>
+          <div class="maker-board-head">좌표 맵 제작 영역 (가운데)</div>
           <div class="maker-board-body">
             <div class="maker-canvas-wrap">
               <canvas id="makerCanvas" width="360" height="760"></canvas>
@@ -563,11 +568,6 @@
             <div class="maker-compact" id="makerHintText">툴을 선택하고 좌표 맵 캔버스를 클릭해 배치하세요.</div>
           </div>
         </section>
-        <div class="engine-view">
-          <div class="engine-frame-shell">
-            <iframe id="engineFrame" title="pinball-v2-engine"></iframe>
-          </div>
-        </div>
         <aside class="maker-side">
           <div class="maker-side-head">오브젝트 툴 / 속성 (우측)</div>
           <div class="maker-side-body">

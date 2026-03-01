@@ -398,6 +398,70 @@ async function applyMapJson(rawMapJson) {
   return { ok: true, mapId: control.mapId };
 }
 
+async function applyMapJsonLive(rawMapJson, options = {}) {
+  const roulette = await ensureRouletteReady();
+  patchPhysicsStep();
+  wireGoalEvent();
+
+  const mapJson = rawMapJson && typeof rawMapJson === 'object'
+    ? deepClone(rawMapJson)
+    : buildDefaultMapIfNeeded(control.mapId || 'v2_dynamic_map');
+  const compiled = compileMap(mapJson);
+  const stage = deepClone(compiled.stage);
+
+  const physics = getPhysics();
+  if (!physics || typeof physics.clearEntities !== 'function' || typeof physics.createStage !== 'function') {
+    return applyMapJson(mapJson);
+  }
+
+  const pausedBefore = control.paused;
+  const runningBefore = roulette._isRunning === true && pausedBefore === false;
+  const preserveRunning = options && options.preserveRunning === true;
+
+  control.goalReceived = false;
+  control.mapId = compiled.mapId;
+  control.mapJson = mapJson;
+  control.compiledMap = compiled;
+  control.allEntityIds = compiled.objectIndex
+    .map((entry) => toFiniteNumber(entry.entityId, NaN))
+    .filter((value) => Number.isFinite(value));
+  control.destroyedEntityIds = [];
+
+  roulette._stage = stage;
+
+  physics.clearEntities();
+  physics.createStage(stage.entities);
+
+  control.behaviorRuntime = createBehaviorRuntime(createBehaviorEnvironment(), compiled.behaviorDefs);
+  startTickLoop();
+
+  if ((!Array.isArray(roulette._marbles) || roulette._marbles.length === 0) && control.candidates.length > 0) {
+    roulette.setMarbles(control.candidates.slice());
+    alignSpawnToStage();
+  }
+
+  setWinningRank(control.winningRank);
+  if (preserveRunning && runningBefore) {
+    control.paused = false;
+    roulette._isRunning = true;
+    const marbles = Array.isArray(roulette._marbles) ? roulette._marbles : [];
+    for (let index = 0; index < marbles.length; index += 1) {
+      const marble = marbles[index];
+      if (marble) {
+        marble.isActive = true;
+      }
+    }
+  } else {
+    control.paused = pausedBefore;
+    if (control.paused) {
+      roulette._isRunning = false;
+    }
+  }
+
+  setStatus(`map live applied: ${control.mapId}`);
+  return { ok: true, mapId: control.mapId, live: true };
+}
+
 async function loadMapById(mapId) {
   const safeMapId = typeof mapId === 'string' && mapId.trim() ? mapId.trim() : '';
   if (!safeMapId) {
@@ -937,6 +1001,7 @@ const api = {
   init,
   loadMapById,
   applyMapJson,
+  applyMapJsonLive,
   getCurrentMapJson,
   setCandidates,
   setWinningRank(rankOneBased) {

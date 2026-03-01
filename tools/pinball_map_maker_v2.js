@@ -5,7 +5,11 @@ const DEFAULT_WINNING_RANK = 1;
 const WORLD_WIDTH = 24;
 const MIN_MARBLE_COUNT = 1;
 const MAX_MARBLE_COUNT = 256;
+const LIVE_APPLY_DEBOUNCE_MS = 120;
 let engineCanvasFillTimer = 0;
+let liveApplyTimer = 0;
+let liveApplyInFlight = false;
+let liveApplyPending = false;
 
 let mapCatalog = [];
 let workingMapJson = null;
@@ -509,6 +513,12 @@ function ensureEngineCanvasFill() {
   const canvas = documentRef.querySelector('canvas');
   if (!canvas) {
     return false;
+  }
+  if (documentRef.__v2MakerContextMenuBlocked !== true) {
+    documentRef.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+    });
+    documentRef.__v2MakerContextMenuBlocked = true;
   }
   if (documentRef.documentElement) {
     documentRef.documentElement.style.width = '100%';
@@ -1103,14 +1113,22 @@ function getCanvasLayout() {
   }
   const stageGoalY = Math.max(20, toFinite(getMutableMap().stage.goalY, 210));
   const padding = 22 * dpr;
-  const drawW = Math.max(20, width - padding * 2);
-  const drawH = Math.max(20, height - padding * 2);
+  const usableW = Math.max(20, width - padding * 2);
+  const usableH = Math.max(20, height - padding * 2);
+  const scale = Math.max(0.001, Math.min(usableW / WORLD_WIDTH, usableH / stageGoalY));
+  const drawW = WORLD_WIDTH * scale;
+  const drawH = stageGoalY * scale;
+  const offsetX = (width - drawW) / 2;
+  const offsetY = (height - drawH) / 2;
   return {
     canvas,
     dpr,
     width,
     height,
     padding,
+    scale,
+    offsetX,
+    offsetY,
     drawW,
     drawH,
     stageGoalY,
@@ -1121,14 +1139,14 @@ function worldToCanvas(layout, x, y) {
   const safeX = clamp(toFinite(x, 0), 0, WORLD_WIDTH);
   const safeY = clamp(toFinite(y, 0), 0, layout.stageGoalY);
   return {
-    x: layout.padding + (safeX / WORLD_WIDTH) * layout.drawW,
-    y: layout.padding + (safeY / layout.stageGoalY) * layout.drawH,
+    x: layout.offsetX + safeX * layout.scale,
+    y: layout.offsetY + safeY * layout.scale,
   };
 }
 
 function canvasToWorld(layout, px, py) {
-  const nx = (px - layout.padding) / layout.drawW;
-  const ny = (py - layout.padding) / layout.drawH;
+  const nx = (px - layout.offsetX) / layout.drawW;
+  const ny = (py - layout.offsetY) / layout.drawH;
   return {
     x: round1(clamp(nx, 0, 1) * WORLD_WIDTH),
     y: round1(clamp(ny, 0, 1) * layout.stageGoalY),
@@ -1215,13 +1233,13 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
 
   const center = worldToCanvas(layout, obj.x, obj.y);
   if (obj.type === 'peg_circle' || obj.type === 'portal' || obj.type === 'burst_bumper') {
-    const radius = Math.max(0.08, toFinite(obj.radius, 0.6)) * (layout.drawW / WORLD_WIDTH);
+    const radius = Math.max(0.08, toFinite(obj.radius, 0.6)) * layout.scale;
     ctx.beginPath();
     ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
     if (obj.type === 'burst_bumper') {
-      const triggerRadius = Math.max(0.12, toFinite(obj.triggerRadius, toFinite(obj.radius, 0.7) + 0.45)) * (layout.drawW / WORLD_WIDTH);
+      const triggerRadius = Math.max(0.12, toFinite(obj.triggerRadius, toFinite(obj.radius, 0.7) + 0.45)) * layout.scale;
       ctx.beginPath();
       ctx.arc(center.x, center.y, triggerRadius, 0, Math.PI * 2);
       ctx.strokeStyle = selected ? '#ffd44d' : 'rgba(255, 169, 120, 0.9)';
@@ -1235,8 +1253,8 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
   const width = Math.max(0.08, toFinite(obj.width, obj.type === 'rotor' ? 3 : (obj.type === 'diamond_block' ? 0.32 : 1.2)));
   const height = Math.max(0.05, toFinite(obj.height, obj.type === 'rotor' ? 0.12 : (obj.type === 'diamond_block' ? 0.32 : 0.2)));
   const rad = (Math.PI / 180) * toFinite(obj.rotation, 0);
-  const drawWidth = width * (layout.drawW / WORLD_WIDTH);
-  const drawHeight = height * (layout.drawH / layout.stageGoalY);
+  const drawWidth = width * layout.scale;
+  const drawHeight = height * layout.scale;
   ctx.translate(center.x, center.y);
   ctx.rotate(rad);
   ctx.beginPath();
@@ -1280,7 +1298,7 @@ function drawMakerCanvas() {
   }
   ctx.strokeStyle = '#62a5ff';
   ctx.lineWidth = 2;
-  ctx.strokeRect(layout.padding, layout.padding, layout.drawW, layout.drawH);
+  ctx.strokeRect(layout.offsetX, layout.offsetY, layout.drawW, layout.drawH);
 
   const objects = getObjects();
   for (let index = 0; index < objects.length; index += 1) {
@@ -1334,6 +1352,7 @@ function addObjectAt(tool, x, y) {
   editorState.selectedIndex = objects.length - 1;
   syncObjectList();
   refreshCurrentJsonViewer();
+  queueLiveDraftApply('오브젝트 추가');
   drawMakerCanvas();
 }
 
@@ -1387,6 +1406,63 @@ async function withEngineAction(action, options = {}) {
   } finally {
     setBusy(false);
   }
+}
+
+async function applyDraftLiveNow(reason = '') {
+  if (liveApplyInFlight) {
+    liveApplyPending = true;
+    return;
+  }
+  liveApplyInFlight = true;
+  try {
+    const api = await waitForEngineApi(8000);
+    const mapId = resolveCurrentMapId();
+    const mapJson = getWorkingMapJson(mapId);
+    mapJson.id = mapId;
+    mapJson.title = mapId;
+
+    let result = null;
+    if (typeof api.applyMapJsonLive === 'function') {
+      result = await api.applyMapJsonLive(mapJson, { preserveMarbles: true, preserveRunning: true });
+    } else {
+      result = await api.applyMapJson(mapJson);
+    }
+    if (!result || result.ok !== true) {
+      throw new Error(result && result.reason ? result.reason : '실시간 드래프트 적용 실패');
+    }
+
+    setWorkingMapJson(mapJson, mapId);
+    ensureEngineCanvasFill();
+    syncViewZoomInputFromEngine();
+    const running = readEngineRunning(api);
+    setPlayPauseUi(running);
+    applyViewZoomToEngine(!running);
+    if (reason) {
+      setStatus(`실시간 적용: ${reason}`);
+    }
+  } catch (error) {
+    setStatus(String(error && error.message ? error.message : error), 'error');
+  } finally {
+    liveApplyInFlight = false;
+    if (liveApplyPending) {
+      liveApplyPending = false;
+      void applyDraftLiveNow('대기중 변경');
+    }
+  }
+}
+
+function queueLiveDraftApply(reason = '') {
+  if (FILE_PROTOCOL) {
+    return;
+  }
+  if (liveApplyTimer) {
+    window.clearTimeout(liveApplyTimer);
+    liveApplyTimer = 0;
+  }
+  liveApplyTimer = window.setTimeout(() => {
+    liveApplyTimer = 0;
+    void applyDraftLiveNow(reason || '자동 적용');
+  }, LIVE_APPLY_DEBOUNCE_MS);
 }
 
 async function applyMapAndCandidates() {
@@ -1573,6 +1649,10 @@ async function saveAsNewMap() {
 }
 
 function setupEvents() {
+  window.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+  });
+
   bindEvent(elements.marbleCountInput, 'change', () => {
     getCurrentMarbleCount();
   });
@@ -1671,6 +1751,15 @@ function setupEvents() {
     handleMakerCanvasClick(event);
   });
 
+  bindEvent(elements.makerCanvas, 'contextmenu', (event) => {
+    event.preventDefault();
+    setSelectedTool('select');
+    if (elements.makerToolSelect) {
+      elements.makerToolSelect.dispatchEvent(new Event('change'));
+    }
+    setStatus('우클릭: 선택 모드로 전환');
+  });
+
   bindEvent(elements.objectList, 'change', () => {
     const index = Number(elements.objectList && elements.objectList.value ? elements.objectList.value : -1);
     editorState.selectedIndex = Number.isFinite(index) ? index : -1;
@@ -1682,6 +1771,7 @@ function setupEvents() {
     try {
       applyObjectEditorValues();
       syncObjectList();
+      queueLiveDraftApply('오브젝트 수정');
       drawMakerCanvas();
       setStatus('선택 오브젝트 값 반영 완료');
     } catch (error) {
@@ -1693,6 +1783,7 @@ function setupEvents() {
     try {
       duplicateSelectedObject();
       syncObjectList();
+      queueLiveDraftApply('오브젝트 복제');
       drawMakerCanvas();
       setStatus('선택 오브젝트 복제 완료');
     } catch (error) {
@@ -1704,6 +1795,7 @@ function setupEvents() {
     try {
       deleteSelectedObject();
       syncObjectList();
+      queueLiveDraftApply('오브젝트 삭제');
       drawMakerCanvas();
       setStatus('선택 오브젝트 삭제 완료');
     } catch (error) {
@@ -1714,18 +1806,21 @@ function setupEvents() {
   bindEvent(elements.clearObjectsButton, 'click', () => {
     clearAllObjects();
     syncObjectList();
+    queueLiveDraftApply('오브젝트 전체삭제');
     drawMakerCanvas();
     setStatus('오브젝트 전체 삭제 완료');
   });
 
   bindEvent(elements.fitStageButton, 'click', () => {
     autoFitStageFromObjects();
+    queueLiveDraftApply('스테이지 자동맞춤');
     drawMakerCanvas();
     setStatus('스테이지 자동맞춤 완료');
   });
 
   bindEvent(elements.applyStageButton, 'click', () => {
     applyStageInputsToDraft();
+    queueLiveDraftApply('스테이지 값 변경');
     drawMakerCanvas();
     setStatus('스테이지 값 반영 완료 (드래프트)');
   });
@@ -1739,37 +1834,7 @@ function setupEvents() {
   });
 
   bindEvent(elements.applyDraftButton, 'click', async () => {
-    setBusy(true);
-    try {
-      await withEngineAction(async (api) => {
-        const mapId = resolveCurrentMapId();
-        const mapJson = getWorkingMapJson(mapId);
-        mapJson.id = mapId;
-        mapJson.title = mapId;
-        const result = await api.applyMapJson(mapJson);
-        if (!result || result.ok !== true) {
-          throw new Error(result && result.reason ? result.reason : '드래프트 맵 적용 실패');
-        }
-        const rankResult = api.setWinningRank(DEFAULT_WINNING_RANK);
-        if (!rankResult || rankResult.ok !== true) {
-          throw new Error('당첨 순위 설정 실패');
-        }
-        const candidateResult = await api.setCandidates(buildAutoCandidates());
-        if (!candidateResult || candidateResult.ok !== true) {
-          throw new Error(candidateResult && candidateResult.reason ? candidateResult.reason : '후보 설정 실패');
-        }
-        setWorkingMapJson(mapJson, mapId);
-        ensureEngineCanvasFill();
-        syncViewZoomInputFromEngine();
-        applyViewZoomToEngine(true);
-        setPlayPauseUi(readEngineRunning(api));
-      }, { rethrow: true });
-      setStatus(`드래프트 맵 적용 완료: ${resolveCurrentMapId()}`);
-    } catch (error) {
-      setStatus(String(error && error.message ? error.message : error), 'error');
-    } finally {
-      setBusy(false);
-    }
+    void applyDraftLiveNow('수동 적용');
   });
 
   bindEvent(elements.reloadButton, 'click', async () => {
