@@ -430,13 +430,19 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
   roulette._stage = stage;
 
   physics.clearEntities();
-  physics.createStage(stage.entities);
+  physics.createStage(stage);
 
   control.behaviorRuntime = createBehaviorRuntime(createBehaviorEnvironment(), compiled.behaviorDefs);
   startTickLoop();
 
+  const preserveMarbles = !(options && options.preserveMarbles === false);
+  if (!preserveMarbles) {
+    roulette.clearMarbles();
+  }
   if ((!Array.isArray(roulette._marbles) || roulette._marbles.length === 0) && control.candidates.length > 0) {
     roulette.setMarbles(control.candidates.slice());
+    alignSpawnToStage();
+  } else if (!preserveMarbles) {
     alignSpawnToStage();
   }
 

@@ -10,6 +10,16 @@ const CANVAS_MIN_ZOOM = 0.18;
 const CANVAS_MAX_ZOOM = 14;
 const MAX_UNDO_HISTORY = 50;
 const ENABLE_COORDINATE_OVERLAY = false;
+const OBJECT_COLOR_PRESET = {
+  wall: '#ffffff',
+  box: '#00dfff',
+  diamond: '#00dfff',
+  peg: '#ffd84d',
+  rotor: '#00dfff',
+  portal: '#b68cff',
+  hammer: '#00dfff',
+  burst: '#ffb347',
+};
 let engineCanvasFillTimer = 0;
 let liveApplyTimer = 0;
 let liveApplyInFlight = false;
@@ -94,6 +104,7 @@ const elements = {
   objForceInput: document.getElementById('objForceInput'),
   objIntervalLabel: document.getElementById('objIntervalLabel'),
   objIntervalInput: document.getElementById('objIntervalInput'),
+  objHitDistanceLabel: document.getElementById('objHitDistanceLabel'),
   objHitDistanceInput: document.getElementById('objHitDistanceInput'),
   applyObjectButton: document.getElementById('applyObjectButton'),
   duplicateObjectButton: document.getElementById('duplicateObjectButton'),
@@ -920,8 +931,10 @@ function toolDisplayName(tool) {
       return '선택';
     case 'spawn_point':
       return '공 시작점';
+    case 'wall_segment':
+      return '벽 2점(드래그)';
     case 'wall_polyline':
-      return '연속벽2점연결';
+      return '연속선(다점)';
     case 'peg_circle':
       return '원형 핀';
     case 'diamond_block':
@@ -938,6 +951,29 @@ function toolDisplayName(tool) {
       return '버스트 범퍼';
     default:
       return String(tool || '툴');
+  }
+}
+
+function defaultColorForObjectType(type) {
+  switch (String(type || '')) {
+    case 'wall_polyline':
+      return OBJECT_COLOR_PRESET.wall;
+    case 'box_block':
+      return OBJECT_COLOR_PRESET.box;
+    case 'diamond_block':
+      return OBJECT_COLOR_PRESET.diamond;
+    case 'peg_circle':
+      return OBJECT_COLOR_PRESET.peg;
+    case 'rotor':
+      return OBJECT_COLOR_PRESET.rotor;
+    case 'portal':
+      return OBJECT_COLOR_PRESET.portal;
+    case 'hammer':
+      return OBJECT_COLOR_PRESET.hammer;
+    case 'burst_bumper':
+      return OBJECT_COLOR_PRESET.burst;
+    default:
+      return '#7ab4ff';
   }
 }
 
@@ -960,6 +996,7 @@ function setSelectedTool(tool) {
   const allowed = new Set([
     'select',
     'spawn_point',
+    'wall_segment',
     'wall_polyline',
     'peg_circle',
     'diamond_block',
@@ -1014,7 +1051,7 @@ function createObjectByTool(tool, x, y) {
       radius: 0.7,
       restitution: 2.2,
       life: -1,
-      color: '#ffd166',
+      color: OBJECT_COLOR_PRESET.peg,
     };
   }
   if (tool === 'box_block') {
@@ -1027,7 +1064,7 @@ function createObjectByTool(tool, x, y) {
       height: 0.24,
       rotation: 0,
       restitution: 0.08,
-      color: '#62c2ff',
+      color: OBJECT_COLOR_PRESET.box,
     };
   }
   if (tool === 'diamond_block') {
@@ -1040,7 +1077,7 @@ function createObjectByTool(tool, x, y) {
       height: 0.34,
       rotation: 45,
       restitution: 1.5,
-      color: '#74d4ff',
+      color: OBJECT_COLOR_PRESET.diamond,
     };
   }
   if (tool === 'rotor') {
@@ -1052,7 +1089,7 @@ function createObjectByTool(tool, x, y) {
       width: 3.2,
       height: 0.12,
       angularVelocity: 2.2,
-      color: '#ef476f',
+      color: OBJECT_COLOR_PRESET.rotor,
     };
   }
   if (tool === 'portal') {
@@ -1067,7 +1104,7 @@ function createObjectByTool(tool, x, y) {
       cooldownMs: 900,
       exitImpulse: 2.4,
       exitDirDeg: 0,
-      color: '#c18bff',
+      color: OBJECT_COLOR_PRESET.portal,
     };
   }
   if (tool === 'hammer') {
@@ -1088,7 +1125,7 @@ function createObjectByTool(tool, x, y) {
       swingDeg: 26,
       swingDurationMs: 220,
       hitDistance: 0.95,
-      color: '#ffa557',
+      color: OBJECT_COLOR_PRESET.hammer,
     };
   }
   if (tool === 'burst_bumper') {
@@ -1103,7 +1140,9 @@ function createObjectByTool(tool, x, y) {
       triggerRadius: 1.2,
       force: 6.2,
       intervalMs: 420,
-      color: '#ff9f6e',
+      layers: 3,
+      hpPerLayer: 1,
+      color: OBJECT_COLOR_PRESET.burst,
     };
   }
   return null;
@@ -1135,6 +1174,7 @@ function clearObjectEditor() {
   if (elements.objIntervalInput) elements.objIntervalInput.value = '';
   if (elements.objHitDistanceInput) elements.objHitDistanceInput.value = '';
   if (elements.objHitDistanceInput) elements.objHitDistanceInput.disabled = true;
+  if (elements.objHitDistanceLabel) elements.objHitDistanceLabel.textContent = '이동거리';
   if (elements.reverseRotationButton) elements.reverseRotationButton.disabled = true;
   if (elements.objDirLabel) elements.objDirLabel.textContent = 'dirDeg';
   if (elements.objForceLabel) elements.objForceLabel.textContent = 'force';
@@ -1164,6 +1204,8 @@ function populateObjectEditor() {
       elements.objDirInput.value = '';
     } else if (obj.type === 'portal') {
       elements.objDirInput.value = String(Math.round(toFinite(obj.exitDirDeg, 0)));
+    } else if (obj.type === 'burst_bumper') {
+      elements.objDirInput.value = String(Math.max(1, Math.floor(toFinite(obj.layers, 3))));
     } else {
       elements.objDirInput.value = String(Math.round(toFinite(obj.dirDeg, 90)));
     }
@@ -1182,15 +1224,32 @@ function populateObjectEditor() {
       elements.objIntervalInput.value = '';
     } else if (obj.type === 'portal') {
       elements.objIntervalInput.value = String(Math.round(toFinite(obj.cooldownMs, 900)));
+    } else if (obj.type === 'burst_bumper') {
+      elements.objIntervalInput.value = String(Math.round(toFinite(obj.intervalMs, 420)));
     } else {
       elements.objIntervalInput.value = String(Math.round(toFinite(obj.intervalMs, 1200)));
     }
   }
   if (elements.objHitDistanceInput) {
-    elements.objHitDistanceInput.value = obj.type === 'hammer'
-      ? String(round1(toFinite(obj.hitDistance, 0.95)))
-      : '';
-    elements.objHitDistanceInput.disabled = obj.type !== 'hammer';
+    if (obj.type === 'hammer') {
+      elements.objHitDistanceInput.value = String(round1(toFinite(obj.hitDistance, 0.95)));
+      elements.objHitDistanceInput.disabled = false;
+      if (elements.objHitDistanceLabel) {
+        elements.objHitDistanceLabel.textContent = '이동거리';
+      }
+    } else if (obj.type === 'burst_bumper') {
+      elements.objHitDistanceInput.value = String(Math.max(1, Math.floor(toFinite(obj.hpPerLayer, 1))));
+      elements.objHitDistanceInput.disabled = false;
+      if (elements.objHitDistanceLabel) {
+        elements.objHitDistanceLabel.textContent = 'hp/층';
+      }
+    } else {
+      elements.objHitDistanceInput.value = '';
+      elements.objHitDistanceInput.disabled = true;
+      if (elements.objHitDistanceLabel) {
+        elements.objHitDistanceLabel.textContent = '이동거리';
+      }
+    }
   }
   if (elements.reverseRotationButton) {
     elements.reverseRotationButton.disabled = !(supportsRotationHandle(obj) || obj.type === 'hammer');
@@ -1198,7 +1257,7 @@ function populateObjectEditor() {
   if (elements.objDirLabel) {
     elements.objDirLabel.textContent = obj.type === 'rotor'
       ? 'dirDeg(미사용)'
-      : (obj.type === 'portal' ? 'exitDir' : 'dirDeg');
+      : (obj.type === 'portal' ? 'exitDir' : (obj.type === 'burst_bumper' ? 'layers' : 'dirDeg'));
   }
   if (elements.objForceLabel) {
     elements.objForceLabel.textContent = obj.type === 'rotor'
@@ -1208,7 +1267,7 @@ function populateObjectEditor() {
   if (elements.objIntervalLabel) {
     elements.objIntervalLabel.textContent = obj.type === 'rotor'
       ? 'interval(미사용)'
-      : (obj.type === 'portal' ? 'cooldown' : 'interval');
+      : (obj.type === 'portal' || obj.type === 'burst_bumper' ? 'cooldown' : 'interval');
   }
 
   if (obj.type === 'wall_polyline') {
@@ -1336,6 +1395,11 @@ function applyObjectEditorValues() {
     obj.restitution = round1(toFinite(elements.objExtra2Input ? elements.objExtra2Input.value : obj.restitution, toFinite(obj.restitution, 3.2)));
     obj.force = round1(toFinite(elements.objForceInput ? elements.objForceInput.value : obj.force, toFinite(obj.force, 6.2)));
     obj.intervalMs = Math.round(toFinite(elements.objIntervalInput ? elements.objIntervalInput.value : obj.intervalMs, toFinite(obj.intervalMs, 420)));
+    obj.layers = Math.max(1, Math.floor(toFinite(elements.objDirInput ? elements.objDirInput.value : obj.layers, toFinite(obj.layers, 3))));
+    obj.hpPerLayer = Math.max(1, Math.floor(toFinite(
+      elements.objHitDistanceInput ? elements.objHitDistanceInput.value : obj.hpPerLayer,
+      toFinite(obj.hpPerLayer, 1),
+    )));
     refreshCurrentJsonViewer();
     return;
   }
@@ -1713,7 +1777,7 @@ function drawMiniMap(mainLayout = null) {
       continue;
     }
     const selected = index === editorState.selectedIndex;
-    const color = selected ? '#ffd44d' : String(obj.color || '#7ab4ff');
+    const color = selected ? '#ffd44d' : String(obj.color || defaultColorForObjectType(obj.type));
     ctx.strokeStyle = color;
     ctx.fillStyle = selected ? 'rgba(255,212,77,0.28)' : 'rgba(123,180,255,0.22)';
     if (obj.type === 'wall_polyline') {
@@ -1954,6 +2018,71 @@ function getRotationHandleWorld(obj) {
   };
 }
 
+function getBoxResizeHandlesWorld(obj) {
+  if (!obj || typeof obj !== 'object') {
+    return [];
+  }
+  const type = String(obj.type || '');
+  if (type !== 'box_block' && type !== 'diamond_block' && type !== 'hammer') {
+    return [];
+  }
+  const cx = toFinite(obj.x, 0);
+  const cy = toFinite(obj.y, 0);
+  const width = Math.max(0.08, toFinite(obj.width, 1.2));
+  const height = Math.max(0.05, toFinite(obj.height, 0.2));
+  const rad = (Math.PI / 180) * normalizeDeg(toFinite(obj.rotation, 0));
+  const axisX = { x: Math.cos(rad), y: Math.sin(rad) };
+  const axisY = { x: -Math.sin(rad), y: Math.cos(rad) };
+  return [
+    {
+      kind: 'size_x',
+      x: round1(cx + axisX.x * width),
+      y: round1(cy + axisX.y * width),
+    },
+    {
+      kind: 'size_y',
+      x: round1(cx + axisY.x * height),
+      y: round1(cy + axisY.y * height),
+    },
+  ];
+}
+
+function getCircleHandlesWorld(obj) {
+  if (!obj || typeof obj !== 'object') {
+    return [];
+  }
+  const type = String(obj.type || '');
+  if (type !== 'peg_circle' && type !== 'portal' && type !== 'burst_bumper') {
+    return [];
+  }
+  const cx = toFinite(obj.x, 0);
+  const cy = toFinite(obj.y, 0);
+  const radius = Math.max(0.08, toFinite(obj.radius, 0.6));
+  const handles = [
+    { kind: 'radius', x: round1(cx + radius), y: round1(cy) },
+  ];
+  if (type === 'portal' || type === 'burst_bumper') {
+    const trigger = Math.max(radius + 0.05, toFinite(obj.triggerRadius, radius + 0.45));
+    handles.push({ kind: 'trigger_radius', x: round1(cx), y: round1(cy - trigger) });
+  }
+  return handles;
+}
+
+function drawRingHandle(ctx, x, y, radiusPx, style = {}) {
+  const fill = style.fill || '#0b1530';
+  const stroke = style.stroke || '#ffd44d';
+  const lineWidth = Number.isFinite(style.lineWidth) ? style.lineWidth : 1.8;
+  ctx.save();
+  ctx.fillStyle = fill;
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = lineWidth;
+  ctx.beginPath();
+  ctx.arc(x, y, radiusPx, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
 function findSelectedHandle(point, layout) {
   const obj = getSelectedObject();
   if (!obj || !layout) {
@@ -1961,6 +2090,10 @@ function findSelectedHandle(point, layout) {
   }
   const thresholdWorld = Math.max(0.08, 9 / Math.max(0.001, layout.scale));
   const type = String(obj.type || '');
+  const centerDist = Math.hypot(point.x - toFinite(obj.x, 0), point.y - toFinite(obj.y, 0));
+  if (type !== 'wall_polyline' && centerDist <= thresholdWorld * 0.9) {
+    return { kind: 'move_anchor' };
+  }
   if (type === 'wall_polyline') {
     const points = Array.isArray(obj.points) ? obj.points : [];
     for (let index = 0; index < points.length; index += 1) {
@@ -1973,6 +2106,22 @@ function findSelectedHandle(point, layout) {
       if (dist <= thresholdWorld) {
         return { kind: 'wall_point', pointIndex: index };
       }
+    }
+  }
+  const circleHandles = getCircleHandlesWorld(obj);
+  for (let index = 0; index < circleHandles.length; index += 1) {
+    const handle = circleHandles[index];
+    const dist = Math.hypot(point.x - handle.x, point.y - handle.y);
+    if (dist <= thresholdWorld) {
+      return { kind: handle.kind };
+    }
+  }
+  const resizeHandles = getBoxResizeHandlesWorld(obj);
+  for (let index = 0; index < resizeHandles.length; index += 1) {
+    const handle = resizeHandles[index];
+    const dist = Math.hypot(point.x - handle.x, point.y - handle.y);
+    if (dist <= thresholdWorld) {
+      return { kind: handle.kind };
     }
   }
   if (type === 'rotor') {
@@ -2016,7 +2165,7 @@ function findStageHandle(point, layout) {
 
 function drawObjectOnCanvas(ctx, layout, obj, selected) {
   ctx.save();
-  const color = String(obj && obj.color ? obj.color : '#77b7ff');
+  const color = String(obj && obj.color ? obj.color : defaultColorForObjectType(obj && obj.type));
   ctx.strokeStyle = selected ? '#ffd44d' : color;
   ctx.fillStyle = selected ? 'rgba(255, 212, 77, 0.25)' : 'rgba(110, 180, 255, 0.22)';
   ctx.lineWidth = selected ? 3 : 2;
@@ -2035,9 +2184,11 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
       if (selected) {
         for (let index = 0; index < points.length; index += 1) {
           const point = worldToCanvas(layout, points[index][0], points[index][1]);
-          ctx.beginPath();
-          ctx.arc(point.x, point.y, 4.5, 0, Math.PI * 2);
-          ctx.fill();
+          drawRingHandle(ctx, point.x, point.y, 5.2, {
+            fill: 'rgba(8, 16, 36, 0.92)',
+            stroke: '#ffd44d',
+            lineWidth: 1.9,
+          });
         }
       }
     }
@@ -2067,6 +2218,21 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
       ctx.lineWidth = selected ? 2 : 1.4;
       ctx.stroke();
     }
+    if (selected) {
+      drawRingHandle(ctx, center.x, center.y, 5.1, {
+        fill: 'rgba(8,16,36,0.95)',
+        stroke: '#ffd44d',
+      });
+      const circleHandles = getCircleHandlesWorld(obj);
+      for (let index = 0; index < circleHandles.length; index += 1) {
+        const handle = circleHandles[index];
+        const p = worldToCanvas(layout, handle.x, handle.y);
+        drawRingHandle(ctx, p.x, p.y, 5.2, {
+          fill: handle.kind === 'trigger_radius' ? 'rgba(58,26,78,0.9)' : 'rgba(8,16,36,0.95)',
+          stroke: handle.kind === 'trigger_radius' ? '#d8b2ff' : '#ffd44d',
+        });
+      }
+    }
     ctx.restore();
     return;
   }
@@ -2086,7 +2252,7 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
   if (selected && supportsRotationHandle(obj)) {
     const handleLength = (Math.max(width, height) + 0.65) * layout.scale;
     ctx.strokeStyle = '#ffd44d';
-    ctx.fillStyle = '#ffd44d';
+    ctx.fillStyle = '#0b1530';
     ctx.lineWidth = 1.8;
     ctx.beginPath();
     ctx.moveTo(0, 0);
@@ -2095,20 +2261,35 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
     ctx.beginPath();
     ctx.arc(0, -handleLength, 4.5, 0, Math.PI * 2);
     ctx.fill();
+    ctx.stroke();
   }
   ctx.restore();
+  if (selected) {
+    drawRingHandle(ctx, center.x, center.y, 5.1, {
+      fill: 'rgba(8,16,36,0.95)',
+      stroke: '#ffd44d',
+    });
+  }
+  if (selected) {
+    const resizeHandles = getBoxResizeHandlesWorld(obj);
+    for (let index = 0; index < resizeHandles.length; index += 1) {
+      const handle = resizeHandles[index];
+      const p = worldToCanvas(layout, handle.x, handle.y);
+      drawRingHandle(ctx, p.x, p.y, 5.2, {
+        fill: 'rgba(8,16,36,0.95)',
+        stroke: '#ffd44d',
+      });
+    }
+  }
   if (selected && obj.type === 'rotor') {
     const endHandles = getRotorEndHandlesWorld(obj);
     ctx.save();
-    ctx.fillStyle = '#ffd44d';
-    ctx.strokeStyle = '#1d2f57';
-    ctx.lineWidth = 1.6;
     for (let index = 0; index < endHandles.length; index += 1) {
       const p = worldToCanvas(layout, endHandles[index].x, endHandles[index].y);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
+      drawRingHandle(ctx, p.x, p.y, 5.2, {
+        fill: 'rgba(8,16,36,0.95)',
+        stroke: '#ffd44d',
+      });
     }
     ctx.restore();
   }
@@ -2188,6 +2369,26 @@ function drawCreateDragPreview(ctx, layout, drag) {
     ctx.restore();
     return;
   }
+  if (tool === 'wall_segment') {
+    let target = { x: current.x, y: current.y };
+    if (drag.shiftKey) {
+      target = snapPointBy45(start, target);
+    }
+    const p1 = worldToCanvas(layout, start.x, start.y);
+    const p2 = worldToCanvas(layout, target.x, target.y);
+    ctx.strokeStyle = OBJECT_COLOR_PRESET.wall;
+    ctx.lineWidth = 2.6;
+    ctx.setLineDash([8, 5]);
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    drawRingHandle(ctx, p1.x, p1.y, 4.8, { fill: 'rgba(8,16,36,0.95)', stroke: '#ffd44d' });
+    drawRingHandle(ctx, p2.x, p2.y, 4.8, { fill: 'rgba(8,16,36,0.95)', stroke: '#ffd44d' });
+    ctx.restore();
+    return;
+  }
 
   const p1 = worldToCanvas(layout, start.x, start.y);
   const p2 = worldToCanvas(layout, current.x, current.y);
@@ -2255,9 +2456,11 @@ function drawMakerCanvas() {
   ctx.fillStyle = '#ff8686';
   ctx.font = `${Math.max(11, Math.round(12 * layout.dpr))}px Segoe UI`;
   ctx.fillText('GOAL', goalP2.x - (40 * layout.dpr), goalP2.y - (6 * layout.dpr));
-  ctx.beginPath();
-  ctx.arc(goalP2.x, goalP2.y, 4.5 * layout.dpr, 0, Math.PI * 2);
-  ctx.fill();
+  drawRingHandle(ctx, goalP2.x, goalP2.y, 5.2 * layout.dpr, {
+    fill: 'rgba(32, 9, 14, 0.95)',
+    stroke: '#ff8686',
+    lineWidth: 2 * layout.dpr,
+  });
 
   const spawn = getSpawnPointWorld();
   const spawnCanvas = worldToCanvas(layout, spawn.x, spawn.y);
@@ -2273,6 +2476,11 @@ function drawMakerCanvas() {
   ctx.beginPath();
   ctx.arc(spawnCanvas.x, spawnCanvas.y, 7, 0, Math.PI * 2);
   ctx.fill();
+  drawRingHandle(ctx, spawnCanvas.x, spawnCanvas.y, 5.2, {
+    fill: 'rgba(8, 20, 16, 0.95)',
+    stroke: '#7ff8be',
+    lineWidth: 1.8,
+  });
   ctx.fillStyle = '#7ff8be';
   ctx.fillText('SPAWN', spawnCanvas.x + (8 * layout.dpr), spawnCanvas.y - (8 * layout.dpr));
 
@@ -2461,11 +2669,45 @@ function beginHandleDrag(index, handle) {
   if (!handle || !Number.isFinite(index)) {
     return false;
   }
+  if (handle.kind === 'move_anchor') {
+    const objects = getObjects();
+    const obj = objects[index];
+    if (!obj) {
+      return false;
+    }
+    const anchor = getObjectAnchorWorld(obj);
+    editorState.dragState = {
+      type: 'move',
+      index,
+      offsetX: 0,
+      offsetY: 0,
+      moved: false,
+      anchorX: anchor.x,
+      anchorY: anchor.y,
+    };
+    return true;
+  }
   if (handle.kind === 'wall_point') {
     editorState.dragState = {
       type: 'wall_point',
       index,
       pointIndex: handle.pointIndex,
+      moved: false,
+    };
+    return true;
+  }
+  if (handle.kind === 'radius' || handle.kind === 'trigger_radius') {
+    editorState.dragState = {
+      type: handle.kind,
+      index,
+      moved: false,
+    };
+    return true;
+  }
+  if (handle.kind === 'size_x' || handle.kind === 'size_y') {
+    editorState.dragState = {
+      type: handle.kind,
+      index,
       moved: false,
     };
     return true;
@@ -2552,7 +2794,7 @@ function createHammerFromDrag(startWorld, endWorld) {
     swingDeg: 26,
     swingDurationMs: 220,
     hitDistance: round1(Math.max(0.25, Math.max(halfWidth, halfHeight) * 1.4)),
-    color: '#ffa557',
+    color: OBJECT_COLOR_PRESET.hammer,
   };
 }
 
@@ -2564,6 +2806,21 @@ function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
   const distance = Math.hypot(dx, dy);
+  if (tool === 'wall_segment') {
+    if (distance < 0.06) {
+      return null;
+    }
+    let target = { x: end.x, y: end.y };
+    if (options.shiftKey === true) {
+      target = snapPointBy45(start, target);
+    }
+    return {
+      oid: nextOid('wall'),
+      type: 'wall_polyline',
+      points: [[round1(start.x), round1(start.y)], [round1(target.x), round1(target.y)]],
+      color: OBJECT_COLOR_PRESET.wall,
+    };
+  }
   if (tool === 'hammer') {
     return createHammerFromDrag(start, end);
   }
@@ -2665,6 +2922,54 @@ function updateObjectByDrag(point, event = null) {
       }
       points[pointIndex][0] = round1(nextPoint.x);
       points[pointIndex][1] = round1(nextPoint.y);
+      drag.moved = true;
+      return true;
+    }
+    return false;
+  }
+  if (drag.type === 'radius') {
+    if (obj.type === 'peg_circle' || obj.type === 'portal' || obj.type === 'burst_bumper') {
+      const cx = toFinite(obj.x, 0);
+      const cy = toFinite(obj.y, 0);
+      const nextRadius = Math.max(0.08, Math.hypot(point.x - cx, point.y - cy));
+      obj.radius = round1(nextRadius);
+      if (obj.type === 'portal' || obj.type === 'burst_bumper') {
+        obj.triggerRadius = round1(Math.max(nextRadius + 0.05, toFinite(obj.triggerRadius, nextRadius + 0.45)));
+      }
+      drag.moved = true;
+      return true;
+    }
+    return false;
+  }
+  if (drag.type === 'trigger_radius') {
+    if (obj.type === 'portal' || obj.type === 'burst_bumper') {
+      const cx = toFinite(obj.x, 0);
+      const cy = toFinite(obj.y, 0);
+      const minRadius = Math.max(toFinite(obj.radius, 0.6) + 0.05, 0.2);
+      const nextTrigger = Math.max(minRadius, Math.hypot(point.x - cx, point.y - cy));
+      obj.triggerRadius = round1(nextTrigger);
+      drag.moved = true;
+      return true;
+    }
+    return false;
+  }
+  if (drag.type === 'size_x' || drag.type === 'size_y') {
+    const type = String(obj.type || '');
+    if (type === 'box_block' || type === 'diamond_block' || type === 'hammer') {
+      const cx = toFinite(obj.x, 0);
+      const cy = toFinite(obj.y, 0);
+      const rad = (Math.PI / 180) * normalizeDeg(toFinite(obj.rotation, 0));
+      const axisX = { x: Math.cos(rad), y: Math.sin(rad) };
+      const axisY = { x: -Math.sin(rad), y: Math.cos(rad) };
+      const vx = point.x - cx;
+      const vy = point.y - cy;
+      if (drag.type === 'size_x') {
+        const proj = Math.abs(vx * axisX.x + vy * axisX.y);
+        obj.width = round1(Math.max(0.08, proj));
+      } else {
+        const proj = Math.abs(vx * axisY.x + vy * axisY.y);
+        obj.height = round1(Math.max(0.05, proj));
+      }
       drag.moved = true;
       return true;
     }
@@ -2816,6 +3121,14 @@ function handleMakerCanvasPointerDown(event) {
       updateMakerHint('벽 끝점 드래그 편집중');
     } else if (selectedHandle.kind === 'rotor_end') {
       updateMakerHint('회전바 끝점 드래그 길이/각도 편집중');
+    } else if (selectedHandle.kind === 'radius') {
+      updateMakerHint('반지름 핸들 드래그 편집중');
+    } else if (selectedHandle.kind === 'trigger_radius') {
+      updateMakerHint('트리거 반경 핸들 드래그 편집중');
+    } else if (selectedHandle.kind === 'size_x' || selectedHandle.kind === 'size_y') {
+      updateMakerHint('크기 핸들 드래그 편집중');
+    } else if (selectedHandle.kind === 'move_anchor') {
+      updateMakerHint('중심 핸들 드래그 이동중');
     } else {
       updateMakerHint('회전 핸들 드래그 편집중');
     }
@@ -2947,7 +3260,7 @@ function addObjectAt(tool, x, y, options = {}) {
         oid: nextOid('wall'),
         type: 'wall_polyline',
         points: [[start.x, start.y], [endPoint.x, endPoint.y]],
-        color: '#4f6fdb',
+        color: OBJECT_COLOR_PRESET.wall,
       };
       objects.push(created);
       editorState.pendingWallOid = created.oid;
@@ -2966,7 +3279,7 @@ function addObjectAt(tool, x, y, options = {}) {
           oid: nextOid('wall'),
           type: 'wall_polyline',
           points: [[start.x, start.y], [endPoint.x, endPoint.y]],
-          color: '#4f6fdb',
+          color: OBJECT_COLOR_PRESET.wall,
         };
         objects.push(created);
         editorState.pendingWallOid = created.oid;
@@ -3540,8 +3853,10 @@ function setupEvents() {
       updateMakerHint('선택 모드: 클릭 선택, 드래그 이동, Shift+회전은 45도 스냅');
     } else if (tool === 'spawn_point') {
       updateMakerHint('공 시작점 모드: 클릭/드래그로 시작 위치를 지정');
+    } else if (tool === 'wall_segment') {
+      updateMakerHint('벽 2점 모드: 드래그로 한 번에 벽 1개 생성, Shift는 45도 스냅');
     } else if (tool === 'wall_polyline') {
-      updateMakerHint('벽 모드: 연속 클릭으로 한 벽에 계속 연결, 우클릭 종료, Shift는 45도 스냅');
+      updateMakerHint('연속선 모드: 클릭을 계속 이어 다점 선 생성, 우클릭 종료, Shift는 45도 스냅');
     } else if (tool === 'portal') {
       updateMakerHint('포털 모드: 드래그로 반경 지정, 두 번 배치하면 A/B 자동 연결');
     } else if (tool === 'hammer') {

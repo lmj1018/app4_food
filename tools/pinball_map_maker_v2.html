@@ -810,7 +810,8 @@
               <div class="tool-palette">
                 <button type="button" class="maker-tool-button active" data-maker-tool="select"><span class="tool-icon"><span class="tool-shape select"></span></span><span class="tool-label">선택</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="spawn_point"><span class="tool-icon"><span class="tool-shape spawn"></span></span><span class="tool-label">공 시작점</span></button>
-                <button type="button" class="maker-tool-button" data-maker-tool="wall_polyline"><span class="tool-icon"><span class="tool-shape wall"></span></span><span class="tool-label">연속벽2점연결</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="wall_segment"><span class="tool-icon"><span class="tool-shape wall"></span></span><span class="tool-label">벽 2점(드래그)</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="wall_polyline"><span class="tool-icon"><span class="tool-shape wall"></span></span><span class="tool-label">연속선(다점)</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="peg_circle"><span class="tool-icon"><span class="tool-shape peg"></span></span><span class="tool-label">원형 핀</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="diamond_block"><span class="tool-icon"><span class="tool-shape diamond"></span></span><span class="tool-label">마름모</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="box_block"><span class="tool-icon"><span class="tool-shape box"></span></span><span class="tool-label">박스</span></button>
@@ -822,7 +823,8 @@
               <select id="makerToolSelect" class="hidden-tool-select" aria-hidden="true" tabindex="-1">
                 <option value="select">선택</option>
                 <option value="spawn_point">공 시작점</option>
-                <option value="wall_polyline">연속벽2점연결</option>
+                <option value="wall_segment">벽 2점(드래그)</option>
+                <option value="wall_polyline">연속선(다점)</option>
                 <option value="peg_circle">원형 핀</option>
                 <option value="diamond_block">마름모</option>
                 <option value="box_block">박스</option>
@@ -890,7 +892,7 @@
                   <input id="objIntervalInput" type="number" step="10">
                 </div>
                 <div class="maker-row">
-                  <label for="objHitDistanceInput">이동거리</label>
+                  <label id="objHitDistanceLabel" for="objHitDistanceInput">이동거리</label>
                   <input id="objHitDistanceInput" type="number" step="0.1">
                 </div>
               </div>
