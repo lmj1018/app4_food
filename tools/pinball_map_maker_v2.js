@@ -1,6 +1,15 @@
 const SLOT_IDS = ['slot1', 'slot2', 'slot3', 'slot4', 'slot5', 'slot6', 'slot7', 'slot8'];
+const MAP_DRAFT_STORAGE_PREFIX = 'pinball_v2_map_draft:';
 
 const elements = {
+  mapJsonInput: document.getElementById('mapJsonInput'),
+  pullMapButton: document.getElementById('pullMapButton'),
+  applyJsonButton: document.getElementById('applyJsonButton'),
+  downloadMapButton: document.getElementById('downloadMapButton'),
+  uploadMapButton: document.getElementById('uploadMapButton'),
+  saveDraftButton: document.getElementById('saveDraftButton'),
+  loadDraftButton: document.getElementById('loadDraftButton'),
+  mapFileInput: document.getElementById('mapFileInput'),
   mapIdInput: document.getElementById('mapIdInput'),
   marbleCountInput: document.getElementById('marbleCountInput'),
   winningRankInput: document.getElementById('winningRankInput'),
@@ -38,6 +47,12 @@ function setStatus(message, kind = 'ok') {
 
 function setBusy(isBusy) {
   const buttons = [
+    elements.pullMapButton,
+    elements.applyJsonButton,
+    elements.downloadMapButton,
+    elements.uploadMapButton,
+    elements.saveDraftButton,
+    elements.loadDraftButton,
     elements.applyButton,
     elements.reloadButton,
     elements.startButton,
@@ -88,6 +103,119 @@ function readPayload() {
     candidates,
     autoStart: false,
   };
+}
+
+function buildDefaultMapJson(mapId = 'v2_custom_map') {
+  return {
+    schemaVersion: 1,
+    id: mapId,
+    title: mapId,
+    stage: {
+      goalY: 210,
+      zoomY: 200,
+      spawn: { x: 10.25, y: 0, columns: 10, spacingX: 0.6, visibleRows: 5 },
+    },
+    objects: [],
+  };
+}
+
+function prettyJson(value) {
+  return JSON.stringify(value, null, 2);
+}
+
+function writeMapJsonEditor(mapJson) {
+  if (!elements.mapJsonInput) {
+    return;
+  }
+  elements.mapJsonInput.value = prettyJson(mapJson);
+}
+
+function parseMapJsonText() {
+  const rawText = String(elements.mapJsonInput && elements.mapJsonInput.value ? elements.mapJsonInput.value : '').trim();
+  if (!rawText) {
+    throw new Error('맵 JSON 입력칸이 비어 있습니다');
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (error) {
+    throw new Error(`맵 JSON 파싱 실패: ${String(error && error.message ? error.message : error)}`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('맵 JSON 형식이 올바르지 않습니다');
+  }
+  const fallbackMapId = String(elements.mapIdInput.value || '').trim() || `v2_custom_${Date.now()}`;
+  if (typeof parsed.id !== 'string' || !parsed.id.trim()) {
+    parsed.id = fallbackMapId;
+  }
+  if (typeof parsed.title !== 'string' || !parsed.title.trim()) {
+    parsed.title = parsed.id;
+  }
+  if (!Number.isFinite(Number(parsed.schemaVersion))) {
+    parsed.schemaVersion = 1;
+  }
+  if (!parsed.stage || typeof parsed.stage !== 'object' || Array.isArray(parsed.stage)) {
+    parsed.stage = {};
+  }
+  if (!Array.isArray(parsed.objects)) {
+    parsed.objects = [];
+  }
+  return parsed;
+}
+
+function syncMapIdInputFromMapJson(mapJson) {
+  const mapId = mapJson && typeof mapJson.id === 'string' && mapJson.id.trim()
+    ? mapJson.id.trim()
+    : '';
+  if (mapId) {
+    elements.mapIdInput.value = mapId;
+  }
+}
+
+function resolveMapFilename(mapJson) {
+  const mapId = mapJson && typeof mapJson.id === 'string' && mapJson.id.trim()
+    ? mapJson.id.trim()
+    : `v2_map_${Date.now()}`;
+  const safeId = mapId.replace(/[^a-zA-Z0-9._-]/g, '_');
+  return `${safeId}.json`;
+}
+
+function resolveDraftStorageKey(mapJson) {
+  const mapId = mapJson && typeof mapJson.id === 'string' && mapJson.id.trim()
+    ? mapJson.id.trim()
+    : (String(elements.mapIdInput.value || '').trim() || 'v2_draft');
+  return `${MAP_DRAFT_STORAGE_PREFIX}${mapId}`;
+}
+
+async function readFileText(file) {
+  if (!file) {
+    throw new Error('선택된 파일이 없습니다');
+  }
+  if (typeof file.text === 'function') {
+    return file.text();
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('파일 읽기에 실패했습니다'));
+    reader.readAsText(file, 'utf-8');
+  });
+}
+
+async function syncMapJsonEditorFromEngine(api) {
+  if (!api || typeof api.getCurrentMapJson !== 'function') {
+    const fallback = buildDefaultMapJson(String(elements.mapIdInput.value || '').trim() || 'v2_custom_map');
+    writeMapJsonEditor(fallback);
+    return;
+  }
+  const mapJson = api.getCurrentMapJson();
+  if (mapJson && typeof mapJson === 'object') {
+    writeMapJsonEditor(mapJson);
+    syncMapIdInputFromMapJson(mapJson);
+  } else {
+    const fallback = buildDefaultMapJson(String(elements.mapIdInput.value || '').trim() || 'v2_custom_map');
+    writeMapJsonEditor(fallback);
+  }
 }
 
 function getFrameWindow() {
@@ -160,6 +288,7 @@ async function loadEngineFrame() {
   if (!initResult || initResult.ok !== true) {
     throw new Error(initResult && initResult.reason ? initResult.reason : '초기화에 실패했습니다');
   }
+  await syncMapJsonEditorFromEngine(api);
   await refreshSnapshotList();
   setStatus(`엔진 준비 완료: 맵=${payload.mapId}, 볼=${payload.candidates.length}`);
 }
@@ -183,6 +312,7 @@ async function applyMapAndCandidates() {
     if (!mapResult || mapResult.ok !== true) {
       throw new Error(mapResult && mapResult.reason ? mapResult.reason : '맵 로드에 실패했습니다');
     }
+    await syncMapJsonEditorFromEngine(api);
     const rankResult = api.setWinningRank(payload.winningRank);
     if (!rankResult || rankResult.ok !== true) {
       throw new Error('당첨 순위 설정에 실패했습니다');
@@ -195,6 +325,118 @@ async function applyMapAndCandidates() {
   });
 }
 
+async function applyMapJsonFromEditor() {
+  await withEngineAction(async (api) => {
+    if (typeof api.applyMapJson !== 'function') {
+      throw new Error('엔진이 맵 JSON 적용 API를 지원하지 않습니다');
+    }
+    const payload = readPayload();
+    const mapJson = parseMapJsonText();
+    const mapResult = await api.applyMapJson(mapJson);
+    if (!mapResult || mapResult.ok !== true) {
+      throw new Error(mapResult && mapResult.reason ? mapResult.reason : '맵 JSON 적용에 실패했습니다');
+    }
+    syncMapIdInputFromMapJson(mapJson);
+    writeMapJsonEditor(mapJson);
+    const rankResult = api.setWinningRank(payload.winningRank);
+    if (!rankResult || rankResult.ok !== true) {
+      throw new Error('당첨 순위 설정에 실패했습니다');
+    }
+    const candidateResult = await api.setCandidates(payload.candidates);
+    if (!candidateResult || candidateResult.ok !== true) {
+      throw new Error(candidateResult && candidateResult.reason ? candidateResult.reason : '후보 설정에 실패했습니다');
+    }
+    setStatus(`JSON 맵 적용 완료: 맵=${mapJson.id}, 후보=${payload.candidates.length}`);
+  });
+}
+
+function triggerMapFileDialog() {
+  if (elements.mapFileInput) {
+    elements.mapFileInput.click();
+  }
+}
+
+async function handleMapFileSelected(file) {
+  const text = await readFileText(file);
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`맵 파일 JSON 파싱 실패: ${String(error && error.message ? error.message : error)}`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('맵 파일 형식이 올바르지 않습니다');
+  }
+  writeMapJsonEditor(parsed);
+  syncMapIdInputFromMapJson(parsed);
+  setStatus(`맵 파일을 불러왔습니다: ${file && file.name ? file.name : '이름없음'}`);
+}
+
+async function pullMapJsonFromEngine() {
+  await withEngineAction(async (api) => {
+    await syncMapJsonEditorFromEngine(api);
+    const mapJson = parseMapJsonText();
+    setStatus(`현재 맵 JSON을 가져왔습니다: ${mapJson.id}`);
+  });
+}
+
+async function downloadMapJsonFile() {
+  let mapJson;
+  try {
+    mapJson = parseMapJsonText();
+  } catch (_) {
+    mapJson = buildDefaultMapJson(String(elements.mapIdInput.value || '').trim() || 'v2_custom_map');
+    writeMapJsonEditor(mapJson);
+  }
+  const fileName = resolveMapFilename(mapJson);
+  const blob = new Blob([prettyJson(mapJson)], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+  setStatus(`맵 JSON 파일 저장 완료: ${fileName}`);
+}
+
+function saveMapDraftToStorage() {
+  if (!window.localStorage) {
+    throw new Error('브라우저 저장소를 사용할 수 없습니다');
+  }
+  const mapJson = parseMapJsonText();
+  const key = resolveDraftStorageKey(mapJson);
+  const serialized = prettyJson(mapJson);
+  window.localStorage.setItem(key, serialized);
+  setStatus(`브라우저 임시저장 완료: ${key}`);
+}
+
+function loadMapDraftFromStorage() {
+  if (!window.localStorage) {
+    throw new Error('브라우저 저장소를 사용할 수 없습니다');
+  }
+  const key = resolveDraftStorageKey({
+    id: String(elements.mapIdInput.value || '').trim() || 'v2_draft',
+  });
+  const serialized = window.localStorage.getItem(key);
+  if (!serialized) {
+    throw new Error(`임시저장 데이터가 없습니다: ${key}`);
+  }
+  let mapJson;
+  try {
+    mapJson = JSON.parse(serialized);
+  } catch (_) {
+    throw new Error(`임시저장 JSON이 손상되었습니다: ${key}`);
+  }
+  writeMapJsonEditor(mapJson);
+  syncMapIdInputFromMapJson(mapJson);
+  setStatus(`브라우저 임시불러오기 완료: ${key}`);
+}
+
 function setupSlotOptions() {
   elements.slotSelect.innerHTML = SLOT_IDS.map((slotId) => `<option value="${slotId}">${slotId}</option>`).join('');
 }
@@ -205,6 +447,57 @@ function selectedSlot() {
 }
 
 function setupEvents() {
+  elements.pullMapButton.addEventListener('click', async () => {
+    await pullMapJsonFromEngine();
+  });
+
+  elements.applyJsonButton.addEventListener('click', async () => {
+    await applyMapJsonFromEditor();
+  });
+
+  elements.downloadMapButton.addEventListener('click', async () => {
+    try {
+      await downloadMapJsonFile();
+    } catch (error) {
+      setStatus(String(error && error.message ? error.message : error), 'error');
+    }
+  });
+
+  elements.uploadMapButton.addEventListener('click', () => {
+    triggerMapFileDialog();
+  });
+
+  elements.saveDraftButton.addEventListener('click', () => {
+    try {
+      saveMapDraftToStorage();
+    } catch (error) {
+      setStatus(String(error && error.message ? error.message : error), 'error');
+    }
+  });
+
+  elements.loadDraftButton.addEventListener('click', () => {
+    try {
+      loadMapDraftFromStorage();
+    } catch (error) {
+      setStatus(String(error && error.message ? error.message : error), 'error');
+    }
+  });
+
+  elements.mapFileInput.addEventListener('change', async () => {
+    const files = elements.mapFileInput.files;
+    const file = files && files.length > 0 ? files[0] : null;
+    if (!file) {
+      return;
+    }
+    try {
+      await handleMapFileSelected(file);
+    } catch (error) {
+      setStatus(String(error && error.message ? error.message : error), 'error');
+    } finally {
+      elements.mapFileInput.value = '';
+    }
+  });
+
   elements.reloadButton.addEventListener('click', async () => {
     setBusy(true);
     try {
@@ -326,6 +619,7 @@ function setupEvents() {
 async function boot() {
   setupSlotOptions();
   setupEvents();
+  writeMapJsonEditor(buildDefaultMapJson(String(elements.mapIdInput.value || '').trim() || 'v2_custom_map'));
   setBusy(true);
   try {
     await loadEngineFrame();

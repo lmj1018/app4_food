@@ -647,6 +647,7 @@ function buildSnapshotEnvelope() {
     runtimeRevision: RUNTIME_REVISION,
     createdAt: Date.now(),
     mapId: control.mapId,
+    mapJson: control.mapJson ? deepClone(control.mapJson) : null,
     candidates: control.candidates.slice(),
     winningRank: control.winningRank,
     engineState,
@@ -736,7 +737,14 @@ async function restoreSnapshot(snapshot, opts = {}) {
 
   const reloadedMap = await loadMapById(snapshot.mapId);
   if (!reloadedMap.ok) {
-    throw new Error(reloadedMap.reason || 'Map load failed during restore');
+    if (snapshot.mapJson && typeof snapshot.mapJson === 'object') {
+      const applyResult = await applyMapJson(snapshot.mapJson);
+      if (!applyResult || applyResult.ok !== true) {
+        throw new Error('Map restore from embedded mapJson failed');
+      }
+    } else {
+      throw new Error(reloadedMap.reason || 'Map load failed during restore');
+    }
   }
   await setCandidates(snapshot.candidates);
   setWinningRank(snapshot.winningRank);
@@ -874,6 +882,10 @@ function getState() {
   };
 }
 
+function getCurrentMapJson() {
+  return control.mapJson ? deepClone(control.mapJson) : null;
+}
+
 async function init(payload = {}) {
   await ensureRouletteReady();
   patchPhysicsStep();
@@ -925,6 +937,7 @@ const api = {
   init,
   loadMapById,
   applyMapJson,
+  getCurrentMapJson,
   setCandidates,
   setWinningRank(rankOneBased) {
     setWinningRank(rankOneBased);
