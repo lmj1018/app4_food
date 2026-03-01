@@ -1,9 +1,9 @@
-$ErrorActionPreference = 'Stop'
-
 param(
   [int]$Port = 8080,
   [switch]$NoOpen
 )
+
+$ErrorActionPreference = 'Stop'
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $scriptDir '..')
