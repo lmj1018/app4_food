@@ -12,7 +12,7 @@ import {
   stableHash,
 } from './snapshot_manager.js';
 
-const RUNTIME_REVISION = 'v2-runtime-r20260301-01';
+const RUNTIME_REVISION = 'v2-runtime-r20260302-01';
 const STATUS_ELEMENT_ID = 'v2Status';
 
 function toFiniteNumber(value, fallback) {

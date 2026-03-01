@@ -2,7 +2,7 @@ const SLOT_IDS = ['slot1', 'slot2', 'slot3'];
 const FILE_PROTOCOL = window.location.protocol === 'file:';
 const DEFAULT_MARBLE_COUNT = 32;
 const DEFAULT_WINNING_RANK = 1;
-const WORLD_WIDTH = 36;
+const WORLD_WIDTH = 81;
 const MIN_MARBLE_COUNT = 1;
 const MAX_MARBLE_COUNT = 256;
 const LIVE_APPLY_DEBOUNCE_MS = 120;
@@ -18,6 +18,7 @@ const OBJECT_COLOR_PRESET = {
   rotor: '#ff66c8',
   portal: '#b68cff',
   hammer: '#ffa557',
+  fan: '#7fd9ff',
   burst: '#5dff7a',
 };
 const DEFAULT_MARBLE_SIZE_SCALE = 1;
@@ -78,10 +79,7 @@ const elements = {
   previewStatusText: document.getElementById('previewStatusText'),
   viewZoomInput: document.getElementById('viewZoomInput'),
   marbleSizeInput: document.getElementById('marbleSizeInput'),
-  stageGoalInput: document.getElementById('stageGoalInput'),
   stageZoomInput: document.getElementById('stageZoomInput'),
-  stageLeftWallInput: document.getElementById('stageLeftWallInput'),
-  stageRightWallInput: document.getElementById('stageRightWallInput'),
   stageDisableSkillsInput: document.getElementById('stageDisableSkillsInput'),
   applyViewZoomButton: document.getElementById('applyViewZoomButton'),
   applyMarbleSizeButton: document.getElementById('applyMarbleSizeButton'),
@@ -343,7 +341,6 @@ function setBusy(isBusy) {
     elements.toggleJsonViewButton,
     elements.viewZoomInput,
     elements.marbleSizeInput,
-    elements.stageGoalInput,
     elements.stageZoomInput,
     elements.applyViewZoomButton,
     elements.applyMarbleSizeButton,
@@ -499,23 +496,15 @@ function inferStageWallBounds(mapJson) {
       rightX: round1(clamp(fromStageRight, fromStageLeft + 2, WORLD_WIDTH - 0.1)),
     };
   }
-  let leftX = Number.POSITIVE_INFINITY;
-  let rightX = Number.NEGATIVE_INFINITY;
-  for (let index = 0; index < objects.length; index += 1) {
-    const vx = readVerticalWallX(objects[index]);
-    if (!Number.isFinite(vx)) {
-      continue;
-    }
-    leftX = Math.min(leftX, vx);
-    rightX = Math.max(rightX, vx);
-  }
-  if (Number.isFinite(leftX) && Number.isFinite(rightX) && rightX > leftX + 1.5) {
-    return {
-      leftX: round1(clamp(leftX, 0.1, WORLD_WIDTH - 2.1)),
-      rightX: round1(clamp(rightX, leftX + 2, WORLD_WIDTH - 0.1)),
-    };
-  }
   return { leftX: 2.5, rightX: 21 };
+}
+
+function isBoundaryWallObject(obj) {
+  if (!obj || obj.type !== 'wall_polyline') {
+    return false;
+  }
+  const oid = String(obj.oid || '').trim();
+  return oid === 'wall-left' || oid === 'wall-right';
 }
 
 function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
@@ -654,18 +643,8 @@ function undoLastChange() {
 
 function syncStageInputsFromMap() {
   const mapJson = getMutableMap();
-  if (elements.stageGoalInput) {
-    elements.stageGoalInput.value = String(Math.round(toFinite(mapJson.stage.goalY, 210)));
-  }
   if (elements.stageZoomInput) {
     elements.stageZoomInput.value = String(round1(toFinite(mapJson.stage.zoomY, 206)));
-  }
-  const bounds = inferStageWallBounds(mapJson);
-  if (elements.stageLeftWallInput) {
-    elements.stageLeftWallInput.value = String(round1(toFinite(mapJson.stage.leftWallX, bounds.leftX)));
-  }
-  if (elements.stageRightWallInput) {
-    elements.stageRightWallInput.value = String(round1(toFinite(mapJson.stage.rightWallX, bounds.rightX)));
   }
   if (elements.stageDisableSkillsInput) {
     elements.stageDisableSkillsInput.checked = mapJson.stage && mapJson.stage.disableSkills === true;
@@ -675,13 +654,23 @@ function syncStageInputsFromMap() {
 function upsertStageBoundaryWall(oid, x) {
   const mapJson = getMutableMap();
   const objects = getObjects();
-  let wall = objects.find((obj) => obj && obj.type === 'wall_polyline' && String(obj.oid || '') === oid);
+  const matchingIndexes = [];
+  for (let index = 0; index < objects.length; index += 1) {
+    const obj = objects[index];
+    if (obj && obj.type === 'wall_polyline' && String(obj.oid || '') === oid) {
+      matchingIndexes.push(index);
+    }
+  }
+  for (let index = matchingIndexes.length - 1; index >= 1; index -= 1) {
+    objects.splice(matchingIndexes[index], 1);
+  }
+  let wall = matchingIndexes.length > 0 ? objects[matchingIndexes[0]] : null;
   if (!wall) {
     wall = {
       oid,
       type: 'wall_polyline',
       points: [],
-      color: '#43df7d',
+      color: '#ff7cc8',
     };
     objects.push(wall);
   }
@@ -691,20 +680,14 @@ function upsertStageBoundaryWall(oid, x) {
     [round1(x), topY],
     [round1(x), bottomY],
   ];
-  wall.color = '#43df7d';
+  wall.color = '#ff7cc8';
 }
 
 function applyStageWallBoundsToMap() {
   const mapJson = getMutableMap();
   const inferred = inferStageWallBounds(mapJson);
-  let leftX = round1(toFinite(
-    elements.stageLeftWallInput ? elements.stageLeftWallInput.value : mapJson.stage.leftWallX,
-    toFinite(mapJson.stage.leftWallX, inferred.leftX),
-  ));
-  let rightX = round1(toFinite(
-    elements.stageRightWallInput ? elements.stageRightWallInput.value : mapJson.stage.rightWallX,
-    toFinite(mapJson.stage.rightWallX, inferred.rightX),
-  ));
+  let leftX = round1(toFinite(mapJson.stage.leftWallX, inferred.leftX));
+  let rightX = round1(toFinite(mapJson.stage.rightWallX, inferred.rightX));
   leftX = round1(clamp(leftX, 0.1, WORLD_WIDTH - 2.1));
   rightX = round1(clamp(rightX, leftX + 2, WORLD_WIDTH - 0.1));
   mapJson.stage.leftWallX = leftX;
@@ -1157,6 +1140,8 @@ function toolDisplayName(tool) {
       return '포털 A/B';
     case 'hammer':
       return '해머';
+    case 'fan':
+      return '선풍기';
     case 'burst_bumper':
       return '버스트 범퍼';
     default:
@@ -1184,6 +1169,8 @@ function defaultColorForObjectType(type) {
       return OBJECT_COLOR_PRESET.portal;
     case 'hammer':
       return OBJECT_COLOR_PRESET.hammer;
+    case 'fan':
+      return OBJECT_COLOR_PRESET.fan;
     case 'burst_bumper':
       return OBJECT_COLOR_PRESET.burst;
     default:
@@ -1218,6 +1205,7 @@ function setSelectedTool(tool) {
     'rotor',
     'portal',
     'hammer',
+    'fan',
     'burst_bumper',
   ]);
   const nextTool = allowed.has(String(tool || '')) ? String(tool) : fallback;
@@ -1347,7 +1335,7 @@ function createObjectByTool(tool, x, y) {
       triggerRadius: 1.05,
       pair: '',
       cooldownMs: 900,
-      preserveVelocity: true,
+      preserveVelocity: false,
       exitImpulse: 0,
       exitDirDeg: 0,
       color: OBJECT_COLOR_PRESET.portal,
@@ -1372,6 +1360,22 @@ function createObjectByTool(tool, x, y) {
       swingDurationMs: 220,
       hitDistance: 0.95,
       color: OBJECT_COLOR_PRESET.hammer,
+    };
+  }
+  if (tool === 'fan') {
+    return {
+      oid: nextOid('fan'),
+      type: 'fan',
+      x: px,
+      y: py,
+      width: 0.95,
+      height: 0.32,
+      rotation: 0,
+      dirDeg: 0,
+      force: 0.32,
+      triggerRadius: 0.9,
+      hitDistance: 2.8,
+      color: OBJECT_COLOR_PRESET.fan,
     };
   }
   if (tool === 'burst_bumper') {
@@ -1442,7 +1446,7 @@ function populateObjectEditor() {
     elements.objRotationInput.disabled = !canRotate;
     elements.objRotationInput.value = canRotate
       ? String(round1(toFinite(obj.rotation, 0)))
-      : (obj.type === 'hammer' ? '0' : '');
+      : ((obj.type === 'hammer' || obj.type === 'fan') ? '0' : '');
   }
   if (elements.objPairInput) elements.objPairInput.value = String(obj.pair || '');
   if (elements.objDirInput) {
@@ -1483,6 +1487,12 @@ function populateObjectEditor() {
       if (elements.objHitDistanceLabel) {
         elements.objHitDistanceLabel.textContent = '이동거리';
       }
+    } else if (obj.type === 'fan') {
+      elements.objHitDistanceInput.value = String(round1(toFinite(obj.hitDistance, 2.8)));
+      elements.objHitDistanceInput.disabled = false;
+      if (elements.objHitDistanceLabel) {
+        elements.objHitDistanceLabel.textContent = '바람거리';
+      }
     } else if (obj.type === 'burst_bumper') {
       elements.objHitDistanceInput.value = String(Math.max(1, Math.floor(toFinite(obj.hpPerLayer, 1))));
       elements.objHitDistanceInput.disabled = false;
@@ -1498,22 +1508,24 @@ function populateObjectEditor() {
     }
   }
   if (elements.reverseRotationButton) {
-    elements.reverseRotationButton.disabled = !(supportsRotationHandle(obj) || obj.type === 'hammer');
+    elements.reverseRotationButton.disabled = !(supportsRotationHandle(obj) || obj.type === 'hammer' || obj.type === 'fan');
   }
   if (elements.objDirLabel) {
     elements.objDirLabel.textContent = obj.type === 'rotor'
       ? '방향 각도(미사용)'
-      : (obj.type === 'portal' ? '출구 각도(도)' : (obj.type === 'burst_bumper' ? '레이어 수' : '방향 각도(도)'));
+      : (obj.type === 'portal'
+        ? '출구 각도(도)'
+        : (obj.type === 'burst_bumper' ? '레이어 수' : (obj.type === 'fan' ? '바람 방향(도)' : '방향 각도(도)')));
   }
   if (elements.objForceLabel) {
     elements.objForceLabel.textContent = obj.type === 'rotor'
       ? '회전 속도'
-      : (obj.type === 'portal' ? '출구 가속(impulse)' : '힘');
+      : (obj.type === 'portal' ? '출구 가속(impulse)' : (obj.type === 'fan' ? '풍압' : '힘'));
   }
   if (elements.objIntervalLabel) {
     elements.objIntervalLabel.textContent = obj.type === 'rotor'
       ? '간격(미사용)'
-      : (obj.type === 'portal' || obj.type === 'burst_bumper' ? '쿨다운(ms)' : '간격(ms)');
+      : (obj.type === 'portal' || obj.type === 'burst_bumper' ? '쿨다운(ms)' : (obj.type === 'fan' ? '간격(미사용)' : '간격(ms)'));
   }
 
   if (obj.type === 'wall_polyline') {
@@ -1540,6 +1552,13 @@ function populateObjectEditor() {
     if (elements.objExtra2Input) elements.objExtra2Input.value = String(Math.round(toFinite(obj.cooldownMs, 320)));
     if (elements.objExtra1Label) elements.objExtra1Label.textContent = '트리거 반경';
     if (elements.objExtra2Label) elements.objExtra2Label.textContent = '쿨다운(ms)';
+  } else if (obj.type === 'fan') {
+    if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
+    if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
+    if (elements.objExtra1Input) elements.objExtra1Input.value = String(round1(toFinite(obj.triggerRadius, 0.9)));
+    if (elements.objExtra2Input) elements.objExtra2Input.value = String('0');
+    if (elements.objExtra1Label) elements.objExtra1Label.textContent = '영향폭';
+    if (elements.objExtra2Label) elements.objExtra2Label.textContent = '보조(미사용)';
   } else if (obj.type === 'portal') {
     if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
     if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
@@ -1672,7 +1691,7 @@ function applyObjectEditorValues() {
     ));
     obj.pair = String(elements.objPairInput && elements.objPairInput.value ? elements.objPairInput.value : obj.pair || '').trim();
     if (!Object.prototype.hasOwnProperty.call(obj, 'preserveVelocity')) {
-      obj.preserveVelocity = true;
+      obj.preserveVelocity = false;
     }
     obj.exitDirDeg = Math.round(toFinite(
       elements.objDirInput ? elements.objDirInput.value : obj.exitDirDeg,
@@ -1721,6 +1740,23 @@ function applyObjectEditorValues() {
     refreshCurrentJsonViewer();
     return;
   }
+  if (obj.type === 'fan') {
+    obj.x = round1(toFinite(elements.objXInput ? elements.objXInput.value : obj.x, toFinite(obj.x, 0)));
+    obj.y = round1(toFinite(elements.objYInput ? elements.objYInput.value : obj.y, toFinite(obj.y, 0)));
+    obj.triggerRadius = round1(toFinite(
+      elements.objExtra1Input ? elements.objExtra1Input.value : obj.triggerRadius,
+      toFinite(obj.triggerRadius, 0.9),
+    ));
+    obj.rotation = 0;
+    obj.dirDeg = Math.round(toFinite(elements.objDirInput ? elements.objDirInput.value : obj.dirDeg, toFinite(obj.dirDeg, 0)));
+    obj.force = round2(toFinite(elements.objForceInput ? elements.objForceInput.value : obj.force, toFinite(obj.force, 0.32)));
+    obj.hitDistance = round1(toFinite(
+      elements.objHitDistanceInput ? elements.objHitDistanceInput.value : obj.hitDistance,
+      toFinite(obj.hitDistance, 2.8),
+    ));
+    refreshCurrentJsonViewer();
+    return;
+  }
   obj.x = round1(toFinite(elements.objXInput ? elements.objXInput.value : obj.x, toFinite(obj.x, 0)));
   obj.y = round1(toFinite(elements.objYInput ? elements.objYInput.value : obj.y, toFinite(obj.y, 0)));
   obj.width = round1(toFinite(elements.objExtra1Input ? elements.objExtra1Input.value : obj.width, toFinite(obj.width, 1.2)));
@@ -1755,6 +1791,11 @@ function reverseSelectedObjectRotation() {
     obj.dirDeg = round1(normalizeDeg(toFinite(obj.dirDeg, 90) + 180));
     refreshCurrentJsonViewer();
     return `해머 타격 방향 반전 완료 (dirDeg=${obj.dirDeg})`;
+  }
+  if (obj.type === 'fan') {
+    obj.dirDeg = round1(normalizeDeg(toFinite(obj.dirDeg, 0) + 180));
+    refreshCurrentJsonViewer();
+    return `선풍기 방향 반전 완료 (dirDeg=${obj.dirDeg})`;
   }
   obj.rotation = round1(normalizeDeg(-toFinite(obj.rotation, 0)));
   refreshCurrentJsonViewer();
@@ -1831,7 +1872,6 @@ function clearAllObjects() {
 
 function applyStageInputsToDraft() {
   const mapJson = getMutableMap();
-  mapJson.stage.goalY = Math.max(20, toFinite(elements.stageGoalInput ? elements.stageGoalInput.value : mapJson.stage.goalY, mapJson.stage.goalY));
   mapJson.stage.zoomY = Math.max(10, toFinite(elements.stageZoomInput ? elements.stageZoomInput.value : mapJson.stage.zoomY, mapJson.stage.zoomY));
   mapJson.stage.disableSkills = !!(elements.stageDisableSkillsInput && elements.stageDisableSkillsInput.checked);
   applyStageWallBoundsToMap();
@@ -2027,7 +2067,7 @@ function drawMiniMap(mainLayout = null) {
   const leftGuideBottom = worldToMiniMap(layout, bounds.leftX, layout.stageGoalY);
   const rightGuide = worldToMiniMap(layout, bounds.rightX, 0);
   const rightGuideBottom = worldToMiniMap(layout, bounds.rightX, layout.stageGoalY);
-  ctx.strokeStyle = 'rgba(67, 223, 125, 0.95)';
+  ctx.strokeStyle = 'rgba(255, 124, 200, 0.95)';
   ctx.lineWidth = 1.25;
   ctx.beginPath();
   ctx.moveTo(leftGuide.x, leftGuide.y);
@@ -2066,6 +2106,9 @@ function drawMiniMap(mainLayout = null) {
       continue;
     }
     const selected = index === editorState.selectedIndex;
+    if (!selected && isBoundaryWallObject(obj)) {
+      continue;
+    }
     const color = selected ? '#ffd44d' : String(obj.color || defaultColorForObjectType(obj.type));
     ctx.strokeStyle = color;
     ctx.fillStyle = selected ? 'rgba(255,212,77,0.28)' : 'rgba(123,180,255,0.22)';
@@ -2262,6 +2305,14 @@ function moveObjectToWorld(obj, targetX, targetY) {
     const anchor = getObjectAnchorWorld(obj);
     const dx = round1(targetX - anchor.x);
     const dy = round1(targetY - anchor.y);
+    const lockVertical = isBoundaryWallObject(obj);
+    if (lockVertical) {
+      const nextX = round1(clamp(toFinite(points[0] && points[0][0], anchor.x) + dx, 0.1, WORLD_WIDTH - 0.1));
+      for (let index = 0; index < points.length; index += 1) {
+        points[index][0] = nextX;
+      }
+      return;
+    }
     for (let index = 0; index < points.length; index += 1) {
       points[index][0] = round1(toFinite(points[index][0], 0) + dx);
       points[index][1] = round1(toFinite(points[index][1], 0) + dy);
@@ -2316,14 +2367,14 @@ function getBoxResizeHandlesWorld(obj) {
     return [];
   }
   const type = String(obj.type || '');
-  if (type !== 'box_block' && type !== 'diamond_block' && type !== 'hammer') {
+  if (type !== 'box_block' && type !== 'diamond_block' && type !== 'hammer' && type !== 'fan') {
     return [];
   }
   const cx = toFinite(obj.x, 0);
   const cy = toFinite(obj.y, 0);
   const width = Math.max(0.08, toFinite(obj.width, 1.2));
   const height = Math.max(0.05, toFinite(obj.height, 0.2));
-  const angleDeg = type === 'hammer'
+  const angleDeg = type === 'hammer' || type === 'fan'
     ? normalizeDeg(toFinite(obj.dirDeg, toFinite(obj.rotation, 0)))
     : normalizeDeg(toFinite(obj.rotation, 0));
   const rad = (Math.PI / 180) * angleDeg;
@@ -2365,7 +2416,7 @@ function getCircleHandlesWorld(obj) {
 }
 
 function getHammerDirectionHandleWorld(obj) {
-  if (!obj || obj.type !== 'hammer') {
+  if (!obj || (obj.type !== 'hammer' && obj.type !== 'fan')) {
     return null;
   }
   const cx = toFinite(obj.x, 0);
@@ -2435,7 +2486,7 @@ function findSelectedHandle(point, layout) {
       return { kind: handle.kind };
     }
   }
-  if (type === 'hammer') {
+  if (type === 'hammer' || type === 'fan') {
     const hammerHandle = getHammerDirectionHandleWorld(obj);
     if (hammerHandle) {
       const dist = Math.hypot(point.x - hammerHandle.x, point.y - hammerHandle.y);
@@ -2484,6 +2535,9 @@ function findStageHandle(point, layout) {
 }
 
 function drawObjectOnCanvas(ctx, layout, obj, selected) {
+  if (!selected && isBoundaryWallObject(obj)) {
+    return;
+  }
   ctx.save();
   const color = String(obj && obj.color ? obj.color : defaultColorForObjectType(obj && obj.type));
   ctx.strokeStyle = selected ? '#ffd44d' : color;
@@ -2571,7 +2625,7 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
 
   const width = Math.max(0.08, toFinite(obj.width, obj.type === 'rotor' ? 3 : (obj.type === 'diamond_block' ? 0.32 : 1.2)));
   const height = Math.max(0.05, toFinite(obj.height, obj.type === 'rotor' ? 0.12 : (obj.type === 'diamond_block' ? 0.32 : 0.2)));
-  const angleDeg = obj.type === 'hammer'
+  const angleDeg = obj.type === 'hammer' || obj.type === 'fan'
     ? normalizeDeg(toFinite(obj.dirDeg, toFinite(obj.rotation, 0)))
     : toFinite(obj.rotation, 0);
   const rad = (Math.PI / 180) * angleDeg;
@@ -2616,12 +2670,14 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
       });
     }
   }
-  if (selected && obj.type === 'hammer') {
+  if (selected && (obj.type === 'hammer' || obj.type === 'fan')) {
     const hammerHandle = getHammerDirectionHandleWorld(obj);
     if (hammerHandle) {
       const hp = worldToCanvas(layout, hammerHandle.x, hammerHandle.y);
       ctx.save();
-      ctx.strokeStyle = '#9fd7ff';
+      const isFan = obj.type === 'fan';
+      const lineColor = isFan ? '#8fe6ff' : '#9fd7ff';
+      ctx.strokeStyle = lineColor;
       ctx.lineWidth = 1.6;
       ctx.setLineDash([6, 4]);
       ctx.beginPath();
@@ -2631,8 +2687,47 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
       ctx.setLineDash([]);
       drawRingHandle(ctx, hp.x, hp.y, 5.2, {
         fill: 'rgba(8,16,36,0.95)',
-        stroke: '#9fd7ff',
+        stroke: lineColor,
       });
+      const distWorld = Math.max(0.2, toFinite(obj.hitDistance, isFan ? 2.8 : 0.95));
+      const dir = (Math.PI / 180) * normalizeDeg(toFinite(obj.dirDeg, isFan ? 0 : 90));
+      const targetX = toFinite(obj.x, 0) + Math.cos(dir) * distWorld;
+      const targetY = toFinite(obj.y, 0) + Math.sin(dir) * distWorld;
+      if (isFan) {
+        const halfW = Math.max(
+          0.2,
+          Math.max(
+            toFinite(obj.triggerRadius, 0.9),
+            toFinite(obj.width, 0.95) * 1.2,
+          ),
+        );
+        const pStart = worldToCanvas(layout, toFinite(obj.x, 0), toFinite(obj.y, 0));
+        const pEnd = worldToCanvas(layout, targetX, targetY);
+        const zoneLength = Math.max(8, Math.hypot(pEnd.x - pStart.x, pEnd.y - pStart.y));
+        const halfWPx = Math.max(4, halfW * layout.scale);
+        ctx.translate(pStart.x, pStart.y);
+        ctx.rotate(dir);
+        ctx.fillStyle = 'rgba(127, 217, 255, 0.13)';
+        ctx.strokeStyle = 'rgba(143, 230, 255, 0.88)';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.rect(0, -halfWPx, zoneLength, halfWPx * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        const ghost = worldToCanvas(layout, targetX, targetY);
+        const halfW = Math.max(0.08, toFinite(obj.width, 0.9)) * layout.scale;
+        const halfH = Math.max(0.05, toFinite(obj.height, 0.32)) * layout.scale;
+        ctx.translate(ghost.x, ghost.y);
+        ctx.rotate(dir);
+        ctx.fillStyle = 'rgba(255, 165, 87, 0.2)';
+        ctx.strokeStyle = '#ffb77e';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.rect(-halfW, -halfH, halfW * 2, halfH * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
       ctx.restore();
     }
   }
@@ -2820,7 +2915,7 @@ function drawMakerCanvas() {
   const leftGuideBottom = worldToCanvas(layout, stageBounds.leftX, layout.stageGoalY);
   const rightGuide = worldToCanvas(layout, stageBounds.rightX, 0);
   const rightGuideBottom = worldToCanvas(layout, stageBounds.rightX, layout.stageGoalY);
-  ctx.strokeStyle = 'rgba(67, 223, 125, 0.98)';
+  ctx.strokeStyle = 'rgba(255, 124, 200, 0.98)';
   ctx.lineWidth = 2.8;
   ctx.beginPath();
   ctx.moveTo(leftGuide.x, leftGuide.y);
@@ -2919,20 +3014,26 @@ function drawMakerCanvas() {
 
   if (editorState.pendingHammerOid) {
     const objects = getObjects();
-    const hammer = objects.find((item) => item && item.oid === editorState.pendingHammerOid && item.type === 'hammer');
-    if (hammer) {
-      const center = worldToCanvas(layout, hammer.x, hammer.y);
+    const directional = objects.find(
+      (item) =>
+        item &&
+        item.oid === editorState.pendingHammerOid &&
+        (item.type === 'hammer' || item.type === 'fan'),
+    );
+    if (directional) {
+      const isFan = directional.type === 'fan';
+      const center = worldToCanvas(layout, directional.x, directional.y);
       const hoverWorld = editorState.canvasHoverWorld;
-      const baseRad = (Math.PI / 180) * toFinite(hammer.dirDeg, 0);
+      const baseRad = (Math.PI / 180) * toFinite(directional.dirDeg, isFan ? 0 : 90);
       const targetWorld = hoverWorld
         ? { x: hoverWorld.x, y: hoverWorld.y }
         : {
-            x: toFinite(hammer.x, 0) + Math.cos(baseRad) * Math.max(0.2, toFinite(hammer.hitDistance, 1)),
-            y: toFinite(hammer.y, 0) + Math.sin(baseRad) * Math.max(0.2, toFinite(hammer.hitDistance, 1)),
+            x: toFinite(directional.x, 0) + Math.cos(baseRad) * Math.max(0.2, toFinite(directional.hitDistance, isFan ? 2.8 : 1)),
+            y: toFinite(directional.y, 0) + Math.sin(baseRad) * Math.max(0.2, toFinite(directional.hitDistance, isFan ? 2.8 : 1)),
           };
       const target = worldToCanvas(layout, targetWorld.x, targetWorld.y);
       ctx.save();
-      ctx.strokeStyle = '#9fd7ff';
+      ctx.strokeStyle = isFan ? '#8fe6ff' : '#9fd7ff';
       ctx.lineWidth = 1.8;
       ctx.setLineDash([6, 4]);
       ctx.beginPath();
@@ -2942,25 +3043,51 @@ function drawMakerCanvas() {
       ctx.setLineDash([]);
       drawRingHandle(ctx, target.x, target.y, 5.2, {
         fill: 'rgba(8,16,36,0.94)',
-        stroke: '#9fd7ff',
+        stroke: isFan ? '#8fe6ff' : '#9fd7ff',
         lineWidth: 1.6,
       });
       const dir = Math.atan2(target.y - center.y, target.x - center.x);
-      const distWorld = Math.max(0.2, Math.hypot(targetWorld.x - toFinite(hammer.x, 0), targetWorld.y - toFinite(hammer.y, 0)));
-      const hitX = toFinite(hammer.x, 0) + Math.cos(dir) * distWorld;
-      const hitY = toFinite(hammer.y, 0) + Math.sin(dir) * distWorld;
-      const ghost = worldToCanvas(layout, hitX, hitY);
-      const halfW = Math.max(0.08, toFinite(hammer.width, 0.9)) * layout.scale;
-      const halfH = Math.max(0.05, toFinite(hammer.height, 0.32)) * layout.scale;
-      ctx.translate(ghost.x, ghost.y);
-      ctx.rotate(dir);
-      ctx.fillStyle = 'rgba(255, 165, 87, 0.2)';
-      ctx.strokeStyle = '#ffb77e';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.rect(-halfW, -halfH, halfW * 2, halfH * 2);
-      ctx.fill();
-      ctx.stroke();
+      const distWorld = Math.max(
+        0.2,
+        Math.hypot(
+          targetWorld.x - toFinite(directional.x, 0),
+          targetWorld.y - toFinite(directional.y, 0),
+        ),
+      );
+      const hitX = toFinite(directional.x, 0) + Math.cos(dir) * distWorld;
+      const hitY = toFinite(directional.y, 0) + Math.sin(dir) * distWorld;
+      if (isFan) {
+        const halfW = Math.max(
+          0.2,
+          Math.max(
+            toFinite(directional.triggerRadius, 0.9),
+            toFinite(directional.width, 0.95) * 1.2,
+          ),
+        ) * layout.scale;
+        const zoneLength = Math.max(6, distWorld * layout.scale);
+        ctx.translate(center.x, center.y);
+        ctx.rotate(dir);
+        ctx.fillStyle = 'rgba(127, 217, 255, 0.13)';
+        ctx.strokeStyle = 'rgba(143, 230, 255, 0.88)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.rect(0, -halfW, zoneLength, halfW * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        const ghost = worldToCanvas(layout, hitX, hitY);
+        const halfW = Math.max(0.08, toFinite(directional.width, 0.9)) * layout.scale;
+        const halfH = Math.max(0.05, toFinite(directional.height, 0.32)) * layout.scale;
+        ctx.translate(ghost.x, ghost.y);
+        ctx.rotate(dir);
+        ctx.fillStyle = 'rgba(255, 165, 87, 0.2)';
+        ctx.strokeStyle = '#ffb77e';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.rect(-halfW, -halfH, halfW * 2, halfH * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
       ctx.restore();
     } else {
       resetPendingHammer();
@@ -3261,8 +3388,36 @@ function createHammerFromDrag(startWorld, endWorld) {
   };
 }
 
+function createFanFromDrag(startWorld, endWorld) {
+  const mapJson = getMutableMap();
+  const goalY = Math.max(25, toFinite(mapJson.stage && mapJson.stage.goalY, 210) + 4);
+  const start = clampWorldPoint(startWorld, goalY);
+  const end = clampWorldPoint(endWorld, goalY);
+  const minSize = 0.08;
+  const fullWidth = Math.max(minSize, Math.abs(end.x - start.x));
+  const fullHeight = Math.max(minSize, Math.abs(end.y - start.y));
+  const centerX = round1((start.x + end.x) / 2);
+  const centerY = round1((start.y + end.y) / 2);
+  const halfWidth = round1(Math.max(0.12, fullWidth / 2));
+  const halfHeight = round1(Math.max(0.08, fullHeight / 2));
+  return {
+    oid: nextOid('fan'),
+    type: 'fan',
+    x: centerX,
+    y: centerY,
+    width: halfWidth,
+    height: halfHeight,
+    rotation: 0,
+    dirDeg: 0,
+    force: 0.32,
+    triggerRadius: round1(Math.max(0.35, Math.max(halfWidth, halfHeight) + 0.35)),
+    hitDistance: round1(Math.max(0.5, Math.max(halfWidth, halfHeight) * 2.8)),
+    color: OBJECT_COLOR_PRESET.fan,
+  };
+}
+
 function setHammerDirectionAndDistance(obj, point, shiftKey = false) {
-  if (!obj || obj.type !== 'hammer') {
+  if (!obj || (obj.type !== 'hammer' && obj.type !== 'fan')) {
     return false;
   }
   const cx = toFinite(obj.x, 0);
@@ -3313,6 +3468,9 @@ function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
   }
   if (tool === 'hammer') {
     return createHammerFromDrag(start, end);
+  }
+  if (tool === 'fan') {
+    return createFanFromDrag(start, end);
   }
   if (tool === 'box_block' || tool === 'diamond_block') {
     const created = createObjectByTool(tool, (start.x + end.x) / 2, (start.y + end.y) / 2);
@@ -3383,7 +3541,7 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
       return false;
     }
     const obj = objects[index];
-    if (!obj || obj.type !== 'hammer') {
+    if (!obj || (obj.type !== 'hammer' && obj.type !== 'fan')) {
       return false;
     }
     const updated = setHammerDirectionAndDistance(obj, point, !!(event && event.shiftKey));
@@ -3438,8 +3596,15 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
           );
         }
       }
-      points[pointIndex][0] = round1(nextPoint.x);
-      points[pointIndex][1] = round1(nextPoint.y);
+      if (isBoundaryWallObject(obj)) {
+        const safeX = round1(clamp(toFinite(nextPoint.x, 0), 0.1, WORLD_WIDTH - 0.1));
+        for (let boundaryIndex = 0; boundaryIndex < points.length; boundaryIndex += 1) {
+          points[boundaryIndex][0] = safeX;
+        }
+      } else {
+        points[pointIndex][0] = round1(nextPoint.x);
+        points[pointIndex][1] = round1(nextPoint.y);
+      }
       drag.moved = true;
       return true;
     }
@@ -3473,10 +3638,10 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
   }
   if (drag.type === 'size_x' || drag.type === 'size_y') {
     const type = String(obj.type || '');
-    if (type === 'box_block' || type === 'diamond_block' || type === 'hammer') {
+    if (type === 'box_block' || type === 'diamond_block' || type === 'hammer' || type === 'fan') {
       const cx = toFinite(obj.x, 0);
       const cy = toFinite(obj.y, 0);
-      const angleDeg = type === 'hammer'
+      const angleDeg = type === 'hammer' || type === 'fan'
         ? normalizeDeg(toFinite(obj.dirDeg, toFinite(obj.rotation, 0)))
         : normalizeDeg(toFinite(obj.rotation, 0));
       const rad = (Math.PI / 180) * angleDeg;
@@ -3502,7 +3667,7 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
     return false;
   }
   if (drag.type === 'hammer_dir') {
-    if (obj.type !== 'hammer') {
+    if (obj.type !== 'hammer' && obj.type !== 'fan') {
       return false;
     }
     const updated = setHammerDirectionAndDistance(obj, point, !!(event && event.shiftKey));
@@ -3591,9 +3756,11 @@ function finishDrag() {
       } else {
         resetPendingPortal();
       }
-      if (tool === 'hammer') {
+      if (tool === 'hammer' || tool === 'fan') {
         editorState.pendingHammerOid = String(created.oid || '');
-        updateMakerHint('해머 생성 완료: 드래그/클릭으로 타격 방향·이동거리 설정');
+        updateMakerHint(tool === 'fan'
+          ? '선풍기 생성 완료: 드래그/클릭으로 바람 방향·거리 설정'
+          : '해머 생성 완료: 드래그/클릭으로 타격 방향·이동거리 설정');
       } else {
         resetPendingHammer();
       }
@@ -3610,6 +3777,9 @@ function finishDrag() {
   }
   const moved = drag.moved === true;
   const dragType = String(drag.type || '');
+  const objects = getObjects();
+  const dragIndex = Math.floor(toFinite(drag.index, -1));
+  const draggedObject = dragIndex >= 0 && dragIndex < objects.length ? objects[dragIndex] : null;
   const finishedHammerTarget = dragType === 'hammer_target';
   resetActiveDrag();
   if (moved) {
@@ -3622,8 +3792,9 @@ function finishDrag() {
     } else if (dragType === 'spawn_move') {
       queueLiveDraftApply('공 시작점 이동');
     } else if (dragType === 'hammer_target') {
-      queueLiveDraftApply('해머 타격 방향/거리 설정');
-      updateMakerHint('해머 타격 방향 설정 완료');
+      const isFan = draggedObject && draggedObject.type === 'fan';
+      queueLiveDraftApply(isFan ? '선풍기 방향/거리 설정' : '해머 타격 방향/거리 설정');
+      updateMakerHint(isFan ? '선풍기 바람 방향 설정 완료' : '해머 타격 방향 설정 완료');
     } else {
       queueLiveDraftApply('오브젝트 드래그 수정');
     }
@@ -3665,11 +3836,16 @@ function handleMakerCanvasPointerDown(event) {
     drawMakerCanvas();
     return;
   }
-  if (tool === 'hammer' && editorState.pendingHammerOid) {
+  if ((tool === 'hammer' || tool === 'fan') && editorState.pendingHammerOid) {
     const objects = getObjects();
-    const index = objects.findIndex((item) => item && item.oid === editorState.pendingHammerOid && item.type === 'hammer');
+    const index = objects.findIndex(
+      (item) =>
+        item &&
+        item.oid === editorState.pendingHammerOid &&
+        (item.type === 'hammer' || item.type === 'fan'),
+    );
     if (index >= 0) {
-      rememberUndoState('해머 타격 설정 시작');
+      rememberUndoState(objects[index] && objects[index].type === 'fan' ? '선풍기 방향 설정 시작' : '해머 타격 설정 시작');
       editorState.selectedIndex = index;
       editorState.dragState = {
         type: 'hammer_target',
@@ -3679,7 +3855,9 @@ function handleMakerCanvasPointerDown(event) {
       updateObjectByDrag(point, event);
       editorState.suppressClickOnce = true;
       syncObjectList();
-      updateMakerHint('해머 타격 방향/이동거리 설정중');
+      updateMakerHint(objects[index] && objects[index].type === 'fan'
+        ? '선풍기 바람 방향/거리 설정중'
+        : '해머 타격 방향/이동거리 설정중');
       drawMakerCanvas();
       return;
     }
@@ -3696,7 +3874,10 @@ function handleMakerCanvasPointerDown(event) {
     } else if (selectedHandle.kind === 'rotor_end') {
       updateMakerHint('회전바 끝점 드래그 길이/각도 편집중');
     } else if (selectedHandle.kind === 'hammer_dir') {
-      updateMakerHint('해머 타격 방향/거리 드래그 편집중');
+      const selectedObj = getSelectedObject();
+      updateMakerHint(selectedObj && selectedObj.type === 'fan'
+        ? '선풍기 바람 방향/거리 드래그 편집중'
+        : '해머 타격 방향/거리 드래그 편집중');
     } else if (selectedHandle.kind === 'radius') {
       updateMakerHint('반지름 핸들 드래그 편집중');
     } else if (selectedHandle.kind === 'trigger_radius') {
@@ -3893,7 +4074,12 @@ function addObjectAt(tool, x, y, options = {}) {
     if (tool !== 'portal') {
       resetPendingPortal();
     }
-    if (tool !== 'hammer') {
+    if (tool === 'hammer' || tool === 'fan') {
+      editorState.pendingHammerOid = String(created.oid || '');
+      updateMakerHint(tool === 'fan'
+        ? '선풍기 생성 완료: 드래그/클릭으로 바람 방향·거리 설정'
+        : '해머 생성 완료: 드래그/클릭으로 타격 방향·이동거리 설정');
+    } else {
       resetPendingHammer();
     }
   }
@@ -4435,7 +4621,7 @@ function setupEvents() {
     syncToolButtons();
     resetPendingWall();
     resetPendingPortal();
-    if (selectedTool() !== 'hammer') {
+    if (selectedTool() !== 'hammer' && selectedTool() !== 'fan') {
       resetPendingHammer();
     }
     cancelDrag();
@@ -4454,6 +4640,10 @@ function setupEvents() {
       updateMakerHint(editorState.pendingHammerOid
         ? '해머 방향 설정 대기: 드래그/클릭으로 이동 방향·거리 지정'
         : '해머 모드: 드래그로 크기 생성 후, 점선 단계에서 방향·거리 지정');
+    } else if (tool === 'fan') {
+      updateMakerHint(editorState.pendingHammerOid
+        ? '선풍기 방향 설정 대기: 드래그/클릭으로 바람 방향·거리 지정'
+        : '선풍기 모드: 드래그로 크기 생성 후, 점선 단계에서 방향·거리 지정');
     } else if (tool === 'rotor') {
       updateMakerHint('회전 바 모드: 드래그로 길이/방향 지정 생성');
     } else {
@@ -4533,11 +4723,11 @@ function setupEvents() {
       setStatus('포털 연결 대기를 취소했습니다.');
       return;
     }
-    if (tool === 'hammer' && editorState.pendingHammerOid) {
+    if ((tool === 'hammer' || tool === 'fan') && editorState.pendingHammerOid) {
       resetPendingHammer();
-      updateMakerHint('해머 방향 설정 입력 취소');
+      updateMakerHint(tool === 'fan' ? '선풍기 방향 설정 입력 취소' : '해머 방향 설정 입력 취소');
       drawMakerCanvas();
-      setStatus('해머 방향 설정 대기를 취소했습니다.');
+      setStatus(tool === 'fan' ? '선풍기 방향 설정 대기를 취소했습니다.' : '해머 방향 설정 대기를 취소했습니다.');
       return;
     }
     setSelectedTool('select');

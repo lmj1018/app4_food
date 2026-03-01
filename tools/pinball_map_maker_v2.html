@@ -483,6 +483,26 @@
       top: 6px;
       border-radius: 2px;
     }
+    .tool-shape.fan {
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      border: 2px solid #7fd9ff;
+      left: 9px;
+      top: 4px;
+      box-sizing: border-box;
+    }
+    .tool-shape.fan::before {
+      content: "";
+      position: absolute;
+      width: 12px;
+      height: 2px;
+      background: rgba(127, 217, 255, 0.88);
+      left: 13px;
+      top: 4px;
+      box-shadow: 0 4px 0 rgba(127, 217, 255, 0.65), 0 -4px 0 rgba(127, 217, 255, 0.65);
+      border-radius: 2px;
+    }
     .tool-shape.burst {
       width: 12px;
       height: 12px;
@@ -795,20 +815,8 @@
                 <input id="marbleSizeInput" type="number" min="0.4" max="3" step="0.1" value="1.0">
               </div>
               <div class="maker-row">
-                <label for="stageGoalInput">goalY</label>
-                <input id="stageGoalInput" type="number" min="20" max="2000" step="1" value="210">
-              </div>
-              <div class="maker-row">
                 <label for="stageZoomInput">zoomY</label>
                 <input id="stageZoomInput" type="number" min="10" max="2000" step="0.5" value="200">
-              </div>
-              <div class="maker-row">
-                <label for="stageLeftWallInput">좌측 벽 X</label>
-                <input id="stageLeftWallInput" type="number" min="0.1" max="35.5" step="0.1" value="2.5">
-              </div>
-              <div class="maker-row">
-                <label for="stageRightWallInput">우측 벽 X</label>
-                <input id="stageRightWallInput" type="number" min="0.1" max="35.9" step="0.1" value="21">
               </div>
               <div class="maker-row">
                 <label for="stageDisableSkillsInput">스킬 금지</label>
@@ -833,6 +841,7 @@
                 <button type="button" class="maker-tool-button" data-maker-tool="rotor"><span class="tool-icon"><span class="tool-shape rotor"></span></span><span class="tool-label">회전 바</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="portal"><span class="tool-icon"><span class="tool-shape portal"></span></span><span class="tool-label">포털 A/B</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="hammer"><span class="tool-icon"><span class="tool-shape hammer"></span></span><span class="tool-label">해머</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="fan"><span class="tool-icon"><span class="tool-shape fan"></span></span><span class="tool-label">선풍기</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="burst_bumper"><span class="tool-icon"><span class="tool-shape burst"></span></span><span class="tool-label">버스트 범퍼</span></button>
               </div>
               <select id="makerToolSelect" class="hidden-tool-select" aria-hidden="true" tabindex="-1">
@@ -846,6 +855,7 @@
                 <option value="rotor">회전 바</option>
                 <option value="portal">포털 A/B</option>
                 <option value="hammer">해머</option>
+                <option value="fan">선풍기</option>
                 <option value="burst_bumper">버스트 범퍼</option>
               </select>
             </div>

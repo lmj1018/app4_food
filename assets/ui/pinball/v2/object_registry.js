@@ -18,6 +18,7 @@ const DEFAULT_OBJECT_COLORS = {
   burst: '#5dff7a',
   hammer: '#ffa557',
   diamond: '#6affea',
+  fan: '#7fd9ff',
 };
 
 function toFiniteNumber(value, fallback) {
@@ -358,7 +359,7 @@ function compileObject(rawObject, entityId) {
             toFiniteNumber(rawObject.triggerRadius, toFiniteNumber(rawObject.radius, 0.45) + 0.45),
           ),
           cooldownMs: Math.max(0, toFiniteNumber(rawObject.cooldownMs, 900)),
-          preserveVelocity: toBoolean(rawObject.preserveVelocity, true),
+          preserveVelocity: toBoolean(rawObject.preserveVelocity, false),
           exitImpulse: Math.max(0, toFiniteNumber(rawObject.exitImpulse, 0)),
           exitDirDeg: toFiniteNumber(rawObject.exitDirDeg, 0),
         },
@@ -393,6 +394,41 @@ function compileObject(rawObject, entityId) {
           swingDeg: Math.max(0, toFiniteNumber(rawObject.swingDeg, 26)),
           swingDurationMs: Math.max(40, toFiniteNumber(rawObject.swingDurationMs, 220)),
           hitDistance: Math.max(0, toFiniteNumber(rawObject.hitDistance, toFiniteNumber(rawObject.moveDistance, 0.95))),
+        },
+      };
+    case 'fan':
+      return {
+        entity: compileBox(
+          {
+            ...rawObject,
+            width: Math.max(0.08, toFiniteNumber(rawObject.width, 0.48)),
+            height: Math.max(0.03, toFiniteNumber(rawObject.height, 0.14)),
+            restitution: toFiniteNumber(rawObject.restitution, 0.02),
+            rotation: toFiniteNumber(rawObject.rotation, toFiniteNumber(rawObject.dirDeg, 0)),
+            color: typeof rawObject.color === 'string' ? rawObject.color : DEFAULT_OBJECT_COLORS.fan,
+          },
+          entityId,
+          true,
+        ),
+        behavior: {
+          kind: 'fan',
+          oid: toId(rawObject.oid, `fan_${entityId}`),
+          entityId,
+          x: toFiniteNumber(rawObject.x, 11.75),
+          y: toFiniteNumber(rawObject.y, 70),
+          dirDeg: toFiniteNumber(rawObject.dirDeg, toFiniteNumber(rawObject.rotation, 0)),
+          force: Math.max(0.01, toFiniteNumber(rawObject.force, 0.32)),
+          hitDistance: Math.max(0.2, toFiniteNumber(rawObject.hitDistance, 2.8)),
+          triggerRadius: Math.max(
+            0.2,
+            toFiniteNumber(
+              rawObject.triggerRadius,
+              Math.max(
+                toFiniteNumber(rawObject.width, 0.48) * 1.2,
+                toFiniteNumber(rawObject.height, 0.14) * 2.2,
+              ),
+            ),
+          ),
         },
       };
     default:
@@ -531,6 +567,27 @@ function createPortalBehavior(def, portalByOid, env) {
     const angle = typeof body.GetAngle === 'function' ? body.GetAngle() : 0;
     const targetX = toFiniteNumber(target.x, source.x);
     const targetY = toFiniteNumber(target.y, source.y);
+    const sourceX = toFiniteNumber(source.x, targetX);
+    const sourceY = toFiniteNumber(source.y, targetY);
+    const hasExitDir = Number.isFinite(toFiniteNumber(target.exitDirDeg, NaN));
+    const sourceToTargetDx = targetX - sourceX;
+    const sourceToTargetDy = targetY - sourceY;
+    const sourceToTargetDist = Math.hypot(sourceToTargetDx, sourceToTargetDy);
+    const fallbackDirRad = sourceToTargetDist > 0.0001
+      ? Math.atan2(sourceToTargetDy, sourceToTargetDx)
+      : degToRad(90);
+    const exitDirRad = hasExitDir
+      ? degToRad(toFiniteNumber(target.exitDirDeg, 0))
+      : fallbackDirRad;
+    const exitOffset = Math.max(
+      0.25,
+      Math.max(
+        toFiniteNumber(target.radius, 0.45) + 0.38,
+        toFiniteNumber(target.triggerRadius, toFiniteNumber(target.radius, 0.45) + 0.45) * 0.35,
+      ),
+    );
+    const spawnX = targetX + Math.cos(exitDirRad) * exitOffset;
+    const spawnY = targetY + Math.sin(exitDirRad) * exitOffset;
 
     try {
       if (typeof body.SetEnabled === 'function') {
@@ -540,7 +597,7 @@ function createPortalBehavior(def, portalByOid, env) {
         body.SetAwake(true);
       }
       if (typeof body.SetTransform === 'function') {
-        body.SetTransform(new box2d.b2Vec2(targetX, targetY), angle);
+        body.SetTransform(new box2d.b2Vec2(spawnX, spawnY), angle);
       }
       if (typeof body.SetLinearVelocity === 'function') {
         if (target.preserveVelocity) {
@@ -554,13 +611,16 @@ function createPortalBehavior(def, portalByOid, env) {
       }
       const impulse = Math.max(0, toFiniteNumber(target.exitImpulse, 0));
       if (impulse > 0 && typeof body.ApplyLinearImpulseToCenter === 'function') {
-        const rad = degToRad(toFiniteNumber(target.exitDirDeg, 0));
-        const ix = Math.cos(rad) * impulse;
-        const iy = Math.sin(rad) * impulse;
+        const ix = Math.cos(exitDirRad) * impulse;
+        const iy = Math.sin(exitDirRad) * impulse;
         body.ApplyLinearImpulseToCenter(new box2d.b2Vec2(ix, iy), true);
       }
-      marble.x = targetX;
-      marble.y = targetY;
+      marble.x = spawnX;
+      marble.y = spawnY;
+      if (marble.lastPosition && typeof marble.lastPosition === 'object') {
+        marble.lastPosition.x = spawnX;
+        marble.lastPosition.y = spawnY;
+      }
     } catch (_) {
       return;
     }
@@ -1094,6 +1154,10 @@ function createHammerBehavior(def, env) {
     }
     entry.x = targetX;
     entry.y = targetY;
+    if (entry.position && typeof entry.position === 'object') {
+      entry.position.x = targetX;
+      entry.position.y = targetY;
+    }
     lastOffset = linearOffset;
     lastTickAt = now;
   }
@@ -1167,6 +1231,153 @@ function createHammerBehavior(def, env) {
   };
 }
 
+function createFanBehavior(def, env) {
+  let lastTickAt = 0;
+
+  function getFanEntry() {
+    const roulette = env.getRoulette();
+    const physics = roulette && roulette.physics ? roulette.physics : null;
+    const entities = physics && Array.isArray(physics.entities) ? physics.entities : [];
+    for (let index = 0; index < entities.length; index += 1) {
+      const entry = entities[index];
+      const entityId = toFiniteNumber(entry && entry.shape && entry.shape.__v2eid, NaN);
+      if (Number.isFinite(entityId) && entityId === toFiniteNumber(def.entityId, -1)) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  function syncFanVisual() {
+    const entry = getFanEntry();
+    const box2d = env.getBox2D();
+    if (!entry || !entry.body || !box2d || typeof box2d.b2Vec2 !== 'function') {
+      return;
+    }
+    const body = entry.body;
+    const x = toFiniteNumber(def.x, 0);
+    const y = toFiniteNumber(def.y, 0);
+    const angle = degToRad(toFiniteNumber(def.dirDeg, 0));
+    try {
+      if (typeof body.SetEnabled === 'function') {
+        body.SetEnabled(true);
+      }
+      if (typeof body.SetAwake === 'function') {
+        body.SetAwake(true);
+      }
+      if (typeof body.SetTransform === 'function') {
+        body.SetTransform(new box2d.b2Vec2(x, y), angle);
+      }
+      if (typeof body.SetLinearVelocity === 'function') {
+        body.SetLinearVelocity(new box2d.b2Vec2(0, 0));
+      }
+      if (typeof body.SetAngularVelocity === 'function') {
+        body.SetAngularVelocity(0);
+      }
+    } catch (_) {
+    }
+    entry.x = x;
+    entry.y = y;
+    if (entry.position && typeof entry.position === 'object') {
+      entry.position.x = x;
+      entry.position.y = y;
+    }
+  }
+
+  return {
+    kind: 'fan',
+    oid: def.oid,
+    tick(now) {
+      if (env.isPaused()) {
+        return;
+      }
+      const roulette = env.getRoulette();
+      const physics = roulette && roulette.physics ? roulette.physics : null;
+      const box2d = env.getBox2D();
+      if (!roulette || !physics || !physics.marbleMap || !box2d || typeof box2d.b2Vec2 !== 'function') {
+        return;
+      }
+      const marbles = Array.isArray(roulette._marbles) ? roulette._marbles : [];
+      if (marbles.length === 0) {
+        return;
+      }
+
+      syncFanVisual();
+
+      const deltaMs = Math.max(8, Math.min(80, toFiniteNumber(now - lastTickAt, 16)));
+      lastTickAt = now;
+      const deltaScale = deltaMs / 16.666;
+      const dirRad = degToRad(toFiniteNumber(def.dirDeg, 0));
+      const dirX = Math.cos(dirRad);
+      const dirY = Math.sin(dirRad);
+      const sideX = -dirY;
+      const sideY = dirX;
+      const zoneLength = Math.max(0.2, toFiniteNumber(def.hitDistance, 2.8));
+      const zoneHalfWidth = Math.max(0.2, toFiniteNumber(def.triggerRadius, 0.9));
+      const baseForce = Math.max(0.01, toFiniteNumber(def.force, 0.32));
+      const originX = toFiniteNumber(def.x, 0);
+      const originY = toFiniteNumber(def.y, 0);
+
+      for (let index = 0; index < marbles.length; index += 1) {
+        const marble = marbles[index];
+        if (!marble || typeof marble.id !== 'number') {
+          continue;
+        }
+        const body = physics.marbleMap[marble.id];
+        if (!body || typeof body.GetPosition !== 'function' || typeof body.ApplyLinearImpulseToCenter !== 'function') {
+          continue;
+        }
+        const pos = body.GetPosition();
+        const px = toFiniteNumber(pos && pos.x, NaN);
+        const py = toFiniteNumber(pos && pos.y, NaN);
+        if (!Number.isFinite(px) || !Number.isFinite(py)) {
+          continue;
+        }
+        const relX = px - originX;
+        const relY = py - originY;
+        const forward = relX * dirX + relY * dirY;
+        if (forward < 0 || forward > zoneLength) {
+          continue;
+        }
+        const lateral = Math.abs(relX * sideX + relY * sideY);
+        if (lateral > zoneHalfWidth) {
+          continue;
+        }
+        const forwardFalloff = Math.max(0, 1 - forward / zoneLength);
+        const lateralFalloff = Math.max(0, 1 - lateral / zoneHalfWidth);
+        const strengthScale = 0.18 + forwardFalloff * 0.56 + lateralFalloff * 0.26;
+        const impulse = baseForce * deltaScale * strengthScale;
+        if (impulse <= 0) {
+          continue;
+        }
+        try {
+          if (typeof body.SetEnabled === 'function') {
+            body.SetEnabled(true);
+          }
+          if (typeof body.SetAwake === 'function') {
+            body.SetAwake(true);
+          }
+          body.ApplyLinearImpulseToCenter(
+            new box2d.b2Vec2(dirX * impulse, dirY * impulse),
+            true,
+          );
+        } catch (_) {
+        }
+      }
+    },
+    serializeState() {
+      return {
+        lastTickAt: toFiniteNumber(lastTickAt, 0),
+      };
+    },
+    restoreState(rawState) {
+      const safeState = rawState && typeof rawState === 'object' ? rawState : {};
+      lastTickAt = toFiniteNumber(safeState.lastTickAt, 0);
+      syncFanVisual();
+    },
+  };
+}
+
 export function createBehaviorRuntime(env, behaviorDefs) {
   const defs = Array.isArray(behaviorDefs) ? behaviorDefs : [];
   const portalDefs = defs
@@ -1177,6 +1388,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
     .map((item) => ({ ...item }));
   const hammerDefs = defs
     .filter((item) => item && item.kind === 'hammer')
+    .map((item) => ({ ...item }));
+  const fanDefs = defs
+    .filter((item) => item && item.kind === 'fan')
     .map((item) => ({ ...item }));
 
   const portalByOid = new Map();
@@ -1194,6 +1408,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
   for (const hammerDef of hammerDefs) {
     behaviors.push(createHammerBehavior(hammerDef, env));
   }
+  for (const fanDef of fanDefs) {
+    behaviors.push(createFanBehavior(fanDef, env));
+  }
 
   return {
     tick(now) {
@@ -1209,6 +1426,7 @@ export function createBehaviorRuntime(env, behaviorDefs) {
       const portal = {};
       const burst = {};
       const hammer = {};
+      const fan = {};
       for (let index = 0; index < behaviors.length; index += 1) {
         const behavior = behaviors[index];
         const state = behavior && typeof behavior.serializeState === 'function'
@@ -1223,15 +1441,18 @@ export function createBehaviorRuntime(env, behaviorDefs) {
           burst[behavior.oid] = state;
         } else if (behavior.kind === 'hammer') {
           hammer[behavior.oid] = state;
+        } else if (behavior.kind === 'fan') {
+          fan[behavior.oid] = state;
         }
       }
-      return { portal, burst, hammer };
+      return { portal, burst, hammer, fan };
     },
     restoreState(rawState) {
       const safeState = rawState && typeof rawState === 'object' ? rawState : {};
       const portalState = safeState.portal && typeof safeState.portal === 'object' ? safeState.portal : {};
       const burstState = safeState.burst && typeof safeState.burst === 'object' ? safeState.burst : {};
       const hammerState = safeState.hammer && typeof safeState.hammer === 'object' ? safeState.hammer : {};
+      const fanState = safeState.fan && typeof safeState.fan === 'object' ? safeState.fan : {};
       for (let index = 0; index < behaviors.length; index += 1) {
         const behavior = behaviors[index];
         if (!behavior || typeof behavior.restoreState !== 'function') {
@@ -1243,6 +1464,8 @@ export function createBehaviorRuntime(env, behaviorDefs) {
           behavior.restoreState(burstState[behavior.oid]);
         } else if (behavior.kind === 'hammer') {
           behavior.restoreState(hammerState[behavior.oid]);
+        } else if (behavior.kind === 'fan') {
+          behavior.restoreState(fanState[behavior.oid]);
         }
       }
     },
