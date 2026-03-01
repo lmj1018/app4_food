@@ -56,14 +56,30 @@
     .shot {
       border: 1px dashed #3a4154;
       border-radius: 10px;
-      padding: 16px;
       min-height: 130px;
+      overflow: hidden;
+      background: #0d121a;
+      position: relative;
+    }
+    .shot img {
+      width: 100%;
+      height: 100%;
+      min-height: 130px;
+      object-fit: cover;
+      display: block;
+    }
+    .shot-fallback {
+      display: none;
       color: var(--sub);
       font-size: 14px;
-      display: flex;
       align-items: center;
       justify-content: center;
       text-align: center;
+      min-height: 130px;
+      padding: 16px;
+    }
+    .shot.noimg .shot-fallback {
+      display: flex;
     }
     .badge {
       display: inline-block;
@@ -114,11 +130,20 @@
     <div class="card">
       <h2>서비스 화면</h2>
       <div class="grid">
-        <div class="shot">통합검색 화면 캡처 첨부</div>
-        <div class="shot">주변식당 기준 화면 캡처 첨부</div>
-        <div class="shot">룰렛/결과 화면 캡처 첨부</div>
+        <div class="shot">
+          <img src="./assets/screenshots/search.png" alt="통합검색 화면 캡처" onerror="this.parentElement.classList.add('noimg'); this.remove();">
+          <div class="shot-fallback">통합검색 화면 캡처 첨부</div>
+        </div>
+        <div class="shot">
+          <img src="./assets/screenshots/nearby.png" alt="주변식당 기준 화면 캡처" onerror="this.parentElement.classList.add('noimg'); this.remove();">
+          <div class="shot-fallback">주변식당 기준 화면 캡처 첨부</div>
+        </div>
+        <div class="shot">
+          <img src="./assets/screenshots/result.png" alt="룰렛/결과 화면 캡처" onerror="this.parentElement.classList.add('noimg'); this.remove();">
+          <div class="shot-fallback">룰렛/결과 화면 캡처 첨부</div>
+        </div>
       </div>
-      <p class="sub">실제 제출 시 위 영역 대신 앱 화면 이미지로 교체하세요.</p>
+      <p class="sub">`assets/screenshots/search.png`, `nearby.png`, `result.png` 파일을 올리면 자동 반영됩니다.</p>
     </div>
 
     <div class="card">
