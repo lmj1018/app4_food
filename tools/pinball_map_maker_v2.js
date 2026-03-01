@@ -11,15 +11,18 @@ const CANVAS_MAX_ZOOM = 14;
 const MAX_UNDO_HISTORY = 50;
 const ENABLE_COORDINATE_OVERLAY = false;
 const OBJECT_COLOR_PRESET = {
-  wall: '#ffffff',
-  box: '#00dfff',
-  diamond: '#00dfff',
-  peg: '#ffd84d',
-  rotor: '#00dfff',
+  wall: '#ff7cc8',
+  box: '#ff4fa8',
+  diamond: '#6affea',
+  peg: '#ff62bf',
+  rotor: '#ff66c8',
   portal: '#b68cff',
-  hammer: '#00dfff',
-  burst: '#ffb347',
+  hammer: '#ffa557',
+  burst: '#5dff7a',
 };
+const DEFAULT_MARBLE_SIZE_SCALE = 1;
+const MIN_MARBLE_SIZE_SCALE = 0.4;
+const MAX_MARBLE_SIZE_SCALE = 3;
 let engineCanvasFillTimer = 0;
 let liveApplyTimer = 0;
 let liveApplyInFlight = false;
@@ -35,6 +38,7 @@ const editorState = {
   pendingWallStart: null,
   pendingWallOid: '',
   pendingPortalOid: '',
+  pendingHammerOid: '',
   canvasZoom: 1,
   canvasPanX: 0,
   canvasPanY: 0,
@@ -73,9 +77,11 @@ const elements = {
   previewResetButton: document.getElementById('previewResetButton'),
   previewStatusText: document.getElementById('previewStatusText'),
   viewZoomInput: document.getElementById('viewZoomInput'),
+  marbleSizeInput: document.getElementById('marbleSizeInput'),
   stageGoalInput: document.getElementById('stageGoalInput'),
   stageZoomInput: document.getElementById('stageZoomInput'),
   applyViewZoomButton: document.getElementById('applyViewZoomButton'),
+  applyMarbleSizeButton: document.getElementById('applyMarbleSizeButton'),
   fitStageButton: document.getElementById('fitStageButton'),
   applyStageButton: document.getElementById('applyStageButton'),
   makerToolSelect: document.getElementById('makerToolSelect'),
@@ -197,6 +203,24 @@ function setMarbleCountInput(count) {
   elements.marbleCountInput.value = String(safe);
 }
 
+function getCurrentMarbleSizeScale() {
+  const raw = elements.marbleSizeInput ? elements.marbleSizeInput.value : DEFAULT_MARBLE_SIZE_SCALE;
+  const parsed = toFinite(raw, DEFAULT_MARBLE_SIZE_SCALE);
+  const safe = clamp(parsed, MIN_MARBLE_SIZE_SCALE, MAX_MARBLE_SIZE_SCALE);
+  if (elements.marbleSizeInput) {
+    elements.marbleSizeInput.value = String(round2(safe));
+  }
+  return safe;
+}
+
+function setMarbleSizeInput(scale) {
+  if (!elements.marbleSizeInput) {
+    return;
+  }
+  const safe = clamp(toFinite(scale, DEFAULT_MARBLE_SIZE_SCALE), MIN_MARBLE_SIZE_SCALE, MAX_MARBLE_SIZE_SCALE);
+  elements.marbleSizeInput.value = String(round2(safe));
+}
+
 function isJsonViewerOpen() {
   return !!(elements.currentJsonViewer && elements.currentJsonViewer.classList.contains('open'));
 }
@@ -315,9 +339,11 @@ function setBusy(isBusy) {
     elements.applyMarbleCountButton,
     elements.toggleJsonViewButton,
     elements.viewZoomInput,
+    elements.marbleSizeInput,
     elements.stageGoalInput,
     elements.stageZoomInput,
     elements.applyViewZoomButton,
+    elements.applyMarbleSizeButton,
     elements.fitStageButton,
     elements.applyStageButton,
     elements.makerToolSelect,
@@ -450,6 +476,7 @@ function setWorkingMapJson(rawMapJson, fallbackMapId = '') {
   workingMapJson = deepClone(normalized);
   resetPendingWall();
   resetPendingPortal();
+  resetPendingHammer();
   resetActiveDrag();
   refreshCurrentJsonViewer();
   return deepClone(normalized);
@@ -688,6 +715,39 @@ function getPreviewApi() {
     return null;
   }
   return api;
+}
+
+function applyMarbleSizeScaleToFrame(frameWindow, scale) {
+  if (!frameWindow || !frameWindow.roulette) {
+    return false;
+  }
+  const roulette = frameWindow.roulette;
+  const marbles = Array.isArray(roulette._marbles) ? roulette._marbles : [];
+  const nextSize = round2(0.5 * clamp(toFinite(scale, DEFAULT_MARBLE_SIZE_SCALE), MIN_MARBLE_SIZE_SCALE, MAX_MARBLE_SIZE_SCALE));
+  for (let index = 0; index < marbles.length; index += 1) {
+    const marble = marbles[index];
+    if (!marble) {
+      continue;
+    }
+    marble.size = nextSize;
+  }
+  return true;
+}
+
+function applyMarbleSizeToEngines(scale, options = {}) {
+  const safeScale = clamp(toFinite(scale, DEFAULT_MARBLE_SIZE_SCALE), MIN_MARBLE_SIZE_SCALE, MAX_MARBLE_SIZE_SCALE);
+  const mainFrame = getFrameWindow();
+  const previewFrame = getPreviewFrameWindow();
+  const appliedMain = applyMarbleSizeScaleToFrame(mainFrame, safeScale);
+  const appliedPreview = applyMarbleSizeScaleToFrame(previewFrame, safeScale);
+  if (!options.silent) {
+    if (appliedMain || appliedPreview) {
+      setStatus(`공 크기 적용: x${round2(safeScale)}`);
+    } else {
+      setStatus('엔진 준비 후 공 크기를 적용할 수 있습니다.', 'warn');
+    }
+  }
+  return appliedMain || appliedPreview;
 }
 
 function ensureEngineCanvasFill() {
@@ -932,9 +992,9 @@ function toolDisplayName(tool) {
     case 'spawn_point':
       return '공 시작점';
     case 'wall_segment':
-      return '벽 2점(드래그)';
+      return '일반 벽선';
     case 'wall_polyline':
-      return '연속선(다점)';
+      return '다점 벽선';
     case 'peg_circle':
       return '원형 핀';
     case 'diamond_block':
@@ -1020,6 +1080,10 @@ function resetPendingWall() {
 
 function resetPendingPortal() {
   editorState.pendingPortalOid = '';
+}
+
+function resetPendingHammer() {
+  editorState.pendingHammerOid = '';
 }
 
 function resetActiveDrag() {
@@ -1460,6 +1524,11 @@ function applyObjectEditorValues() {
   obj.y = round1(toFinite(elements.objYInput ? elements.objYInput.value : obj.y, toFinite(obj.y, 0)));
   obj.width = round1(toFinite(elements.objExtra1Input ? elements.objExtra1Input.value : obj.width, toFinite(obj.width, 1.2)));
   obj.height = round1(toFinite(elements.objExtra2Input ? elements.objExtra2Input.value : obj.height, toFinite(obj.height, 0.2)));
+  if (obj.type === 'diamond_block') {
+    const half = round1(Math.max(0.12, Math.max(toFinite(obj.width, 0.12), toFinite(obj.height, 0.12))));
+    obj.width = half;
+    obj.height = half;
+  }
   obj.radius = round1(toFinite(elements.objRadiusInput ? elements.objRadiusInput.value : obj.radius, toFinite(obj.radius, 0.6)));
   obj.rotation = round1(toFinite(elements.objRotationInput ? elements.objRotationInput.value : obj.rotation, toFinite(obj.rotation, 0)));
   obj.pair = String(elements.objPairInput && elements.objPairInput.value ? elements.objPairInput.value : obj.pair || '').trim();
@@ -1536,6 +1605,9 @@ function deleteSelectedObject() {
       editorState.pendingPortalOid = '';
     }
   }
+  if (removed && String(removed.oid || '') === editorState.pendingHammerOid) {
+    resetPendingHammer();
+  }
   if (objects.length === 0) {
     editorState.selectedIndex = -1;
     refreshCurrentJsonViewer();
@@ -1551,6 +1623,7 @@ function clearAllObjects() {
   editorState.selectedIndex = -1;
   resetPendingWall();
   resetPendingPortal();
+  resetPendingHammer();
   resetActiveDrag();
   refreshCurrentJsonViewer();
 }
@@ -1932,8 +2005,8 @@ function getGoalYWorld() {
 
 function setGoalYWorld(nextGoalY) {
   const mapJson = getMutableMap();
-  mapJson.stage.goalY = round1(clamp(toFinite(nextGoalY, mapJson.stage.goalY), 20, 500));
-  mapJson.stage.zoomY = round1(clamp(toFinite(mapJson.stage.zoomY, mapJson.stage.goalY - 4), 10, 500));
+  mapJson.stage.goalY = round1(clamp(toFinite(nextGoalY, mapJson.stage.goalY), 20, 2000));
+  mapJson.stage.zoomY = round1(clamp(toFinite(mapJson.stage.zoomY, mapJson.stage.goalY - 4), 10, 2000));
 }
 
 function getObjectAnchorWorld(obj) {
@@ -2199,6 +2272,18 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
   const center = worldToCanvas(layout, obj.x, obj.y);
   if (obj.type === 'peg_circle' || obj.type === 'portal' || obj.type === 'burst_bumper') {
     const radius = Math.max(0.08, toFinite(obj.radius, 0.6)) * layout.scale;
+    if (obj.type === 'burst_bumper') {
+      const layers = Math.max(1, Math.floor(toFinite(obj.layers, 3)));
+      for (let layer = layers; layer >= 1; layer -= 1) {
+        const layerRadius = radius * (layer / layers);
+        ctx.beginPath();
+        ctx.arc(center.x, center.y, layerRadius, 0, Math.PI * 2);
+        ctx.strokeStyle = selected ? '#ffd44d' : `rgba(93,255,122,${0.25 + (layer / layers) * 0.55})`;
+        ctx.lineWidth = selected ? 2.2 : 1.6;
+        ctx.stroke();
+      }
+      ctx.fillStyle = selected ? 'rgba(255, 212, 77, 0.16)' : 'rgba(93,255,122,0.12)';
+    }
     ctx.beginPath();
     ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
     ctx.fill();
@@ -2389,6 +2474,24 @@ function drawCreateDragPreview(ctx, layout, drag) {
     ctx.restore();
     return;
   }
+  if (tool === 'diamond_block') {
+    const half = Math.max(0.08, Math.max(Math.abs(current.x - start.x), Math.abs(current.y - start.y)) / 2);
+    const cx = (start.x + current.x) / 2;
+    const cy = (start.y + current.y) / 2;
+    const center = worldToCanvas(layout, cx, cy);
+    const extent = half * layout.scale;
+    ctx.translate(center.x, center.y);
+    ctx.rotate(Math.PI / 4);
+    ctx.fillStyle = 'rgba(106, 255, 234, 0.18)';
+    ctx.strokeStyle = '#6affea';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.rect(-extent, -extent, extent * 2, extent * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
 
   const p1 = worldToCanvas(layout, start.x, start.y);
   const p2 = worldToCanvas(layout, current.x, current.y);
@@ -2530,6 +2633,56 @@ function drawMakerCanvas() {
     }
   }
 
+  if (editorState.pendingHammerOid) {
+    const objects = getObjects();
+    const hammer = objects.find((item) => item && item.oid === editorState.pendingHammerOid && item.type === 'hammer');
+    if (hammer) {
+      const center = worldToCanvas(layout, hammer.x, hammer.y);
+      const hoverWorld = editorState.canvasHoverWorld;
+      const baseRad = (Math.PI / 180) * toFinite(hammer.dirDeg, 0);
+      const targetWorld = hoverWorld
+        ? { x: hoverWorld.x, y: hoverWorld.y }
+        : {
+            x: toFinite(hammer.x, 0) + Math.cos(baseRad) * Math.max(0.2, toFinite(hammer.hitDistance, 1)),
+            y: toFinite(hammer.y, 0) + Math.sin(baseRad) * Math.max(0.2, toFinite(hammer.hitDistance, 1)),
+          };
+      const target = worldToCanvas(layout, targetWorld.x, targetWorld.y);
+      ctx.save();
+      ctx.strokeStyle = '#9fd7ff';
+      ctx.lineWidth = 1.8;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(center.x, center.y);
+      ctx.lineTo(target.x, target.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      drawRingHandle(ctx, target.x, target.y, 5.2, {
+        fill: 'rgba(8,16,36,0.94)',
+        stroke: '#9fd7ff',
+        lineWidth: 1.6,
+      });
+      const dir = Math.atan2(target.y - center.y, target.x - center.x);
+      const distWorld = Math.max(0.2, Math.hypot(targetWorld.x - toFinite(hammer.x, 0), targetWorld.y - toFinite(hammer.y, 0)));
+      const hitX = toFinite(hammer.x, 0) + Math.cos(dir) * distWorld;
+      const hitY = toFinite(hammer.y, 0) + Math.sin(dir) * distWorld;
+      const ghost = worldToCanvas(layout, hitX, hitY);
+      const halfW = Math.max(0.08, toFinite(hammer.width, 0.9)) * layout.scale;
+      const halfH = Math.max(0.05, toFinite(hammer.height, 0.32)) * layout.scale;
+      ctx.translate(ghost.x, ghost.y);
+      ctx.rotate(dir);
+      ctx.fillStyle = 'rgba(255, 165, 87, 0.2)';
+      ctx.strokeStyle = '#ffb77e';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.rect(-halfW, -halfH, halfW * 2, halfH * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    } else {
+      resetPendingHammer();
+    }
+  }
+
   drawCreateDragPreview(ctx, layout, editorState.dragState);
   drawMiniMap(layout);
 }
@@ -2543,6 +2696,17 @@ function readCanvasWorldPoint(event) {
   const x = (event.clientX - rect.left) * layout.dpr;
   const y = (event.clientY - rect.top) * layout.dpr;
   return canvasToWorld(layout, x, y);
+}
+
+function readCanvasWorldPointRaw(event) {
+  const layout = getCanvasLayout();
+  if (!layout) {
+    return null;
+  }
+  const rect = layout.canvas.getBoundingClientRect();
+  const x = (event.clientX - rect.left) * layout.dpr;
+  const y = (event.clientY - rect.top) * layout.dpr;
+  return canvasToWorldRaw(layout, x, y);
 }
 
 function setCanvasPanningState(active) {
@@ -2567,7 +2731,7 @@ function handleMakerCanvasWheel(event) {
   const worldPoint = canvasToWorld(oldLayout, px, py);
 
   const direction = event.deltaY < 0 ? 1 : -1;
-  const zoomFactor = direction > 0 ? 1.22 : 1 / 1.22;
+  const zoomFactor = direction > 0 ? 1.36 : 1 / 1.36;
   const previousZoom = clamp(toFinite(editorState.canvasZoom, 1), CANVAS_MIN_ZOOM, CANVAS_MAX_ZOOM);
   const nextZoom = clamp(previousZoom * zoomFactor, CANVAS_MIN_ZOOM, CANVAS_MAX_ZOOM);
   if (Math.abs(nextZoom - previousZoom) < 0.0001) {
@@ -2733,7 +2897,7 @@ function beginHandleDrag(index, handle) {
   return false;
 }
 
-function beginStageHandleDrag(handle) {
+function beginStageHandleDrag(handle, options = {}) {
   if (!handle) {
     return false;
   }
@@ -2745,9 +2909,16 @@ function beginStageHandleDrag(handle) {
     return true;
   }
   if (handle.kind === 'goal') {
+    const startClientY = toFinite(options.startClientY, NaN);
+    const startScale = toFinite(options.startScale, NaN);
+    const startDpr = toFinite(options.startDpr, Math.max(1, window.devicePixelRatio || 1));
     editorState.dragState = {
       type: 'goal_move',
       moved: false,
+      startGoalY: getGoalYWorld(),
+      startClientY: Number.isFinite(startClientY) ? startClientY : null,
+      startScale: Number.isFinite(startScale) ? Math.max(0.001, startScale) : null,
+      startDpr: Number.isFinite(startDpr) ? Math.max(1, startDpr) : 1,
     };
     return true;
   }
@@ -2798,6 +2969,33 @@ function createHammerFromDrag(startWorld, endWorld) {
   };
 }
 
+function setHammerDirectionAndDistance(obj, point, shiftKey = false) {
+  if (!obj || obj.type !== 'hammer') {
+    return false;
+  }
+  const cx = toFinite(obj.x, 0);
+  const cy = toFinite(obj.y, 0);
+  let dx = toFinite(point && point.x, cx) - cx;
+  let dy = toFinite(point && point.y, cy) - cy;
+  let distance = Math.hypot(dx, dy);
+  if (distance < 0.05) {
+    distance = Math.max(0.2, toFinite(obj.hitDistance, 1.1));
+    dx = distance;
+    dy = 0;
+  }
+  let angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
+  if (shiftKey) {
+    angleDeg = snapAngleDeg(angleDeg, 45);
+    const rad = (Math.PI / 180) * angleDeg;
+    dx = Math.cos(rad) * distance;
+    dy = Math.sin(rad) * distance;
+  }
+  obj.dirDeg = round1(normalizeDeg(angleDeg));
+  obj.rotation = obj.dirDeg;
+  obj.hitDistance = round1(clamp(Math.hypot(dx, dy), 0.2, 24));
+  return true;
+}
+
 function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
   const mapJson = getMutableMap();
   const goalY = Math.max(25, toFinite(mapJson.stage && mapJson.stage.goalY, 210) + 4);
@@ -2831,11 +3029,13 @@ function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
     }
     created.x = round1((start.x + end.x) / 2);
     created.y = round1((start.y + end.y) / 2);
-    created.width = round1(Math.max(0.08, Math.abs(dx) / 2));
-    created.height = round1(Math.max(0.05, Math.abs(dy) / 2));
-    if (tool === 'diamond_block' && (created.width < 0.12 || created.height < 0.12)) {
-      created.width = round1(Math.max(0.12, created.width));
-      created.height = round1(Math.max(0.12, created.height));
+    if (tool === 'diamond_block') {
+      const half = round1(Math.max(0.12, Math.max(Math.abs(dx), Math.abs(dy)) / 2));
+      created.width = half;
+      created.height = half;
+    } else {
+      created.width = round1(Math.max(0.08, Math.abs(dx) / 2));
+      created.height = round1(Math.max(0.05, Math.abs(dy) / 2));
     }
     return created;
   }
@@ -2872,7 +3072,7 @@ function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
   return createObjectByTool(tool, end.x, end.y);
 }
 
-function updateObjectByDrag(point, event = null) {
+function updateObjectByDrag(point, event = null, rawPoint = null) {
   const drag = editorState.dragState;
   if (!drag) {
     return false;
@@ -2884,6 +3084,23 @@ function updateObjectByDrag(point, event = null) {
     drawMakerCanvas();
     return false;
   }
+  if (drag.type === 'hammer_target') {
+    const objects = getObjects();
+    const index = Math.floor(toFinite(drag.index, -1));
+    if (index < 0 || index >= objects.length) {
+      return false;
+    }
+    const obj = objects[index];
+    if (!obj || obj.type !== 'hammer') {
+      return false;
+    }
+    const updated = setHammerDirectionAndDistance(obj, point, !!(event && event.shiftKey));
+    if (!updated) {
+      return false;
+    }
+    drag.moved = true;
+    return true;
+  }
   if (drag.type === 'spawn_move') {
     setSpawnPointWorld(point);
     drag.moved = true;
@@ -2891,7 +3108,16 @@ function updateObjectByDrag(point, event = null) {
     return true;
   }
   if (drag.type === 'goal_move') {
-    setGoalYWorld(point.y);
+    let nextY = rawPoint && Number.isFinite(toFinite(rawPoint.y, NaN))
+      ? toFinite(rawPoint.y, point.y)
+      : point.y;
+    if (event && Number.isFinite(toFinite(drag.startClientY, NaN)) && Number.isFinite(toFinite(drag.startScale, NaN))) {
+      const dpr = Math.max(1, toFinite(drag.startDpr, Math.max(1, window.devicePixelRatio || 1)));
+      const deltaCanvasY = (toFinite(event.clientY, drag.startClientY) - toFinite(drag.startClientY, event.clientY)) * dpr;
+      const worldDelta = deltaCanvasY / Math.max(0.001, toFinite(drag.startScale, 1));
+      nextY = toFinite(drag.startGoalY, nextY) + worldDelta;
+    }
+    setGoalYWorld(nextY);
     drag.moved = true;
     syncStageInputsFromMap();
     return true;
@@ -2969,6 +3195,11 @@ function updateObjectByDrag(point, event = null) {
       } else {
         const proj = Math.abs(vx * axisY.x + vy * axisY.y);
         obj.height = round1(Math.max(0.05, proj));
+      }
+      if (type === 'diamond_block') {
+        const half = round1(Math.max(0.12, Math.max(toFinite(obj.width, 0.12), toFinite(obj.height, 0.12))));
+        obj.width = half;
+        obj.height = half;
       }
       drag.moved = true;
       return true;
@@ -3056,6 +3287,12 @@ function finishDrag() {
       } else {
         resetPendingPortal();
       }
+      if (tool === 'hammer') {
+        editorState.pendingHammerOid = String(created.oid || '');
+        updateMakerHint('해머 생성 완료: 드래그/클릭으로 타격 방향·이동거리 설정');
+      } else {
+        resetPendingHammer();
+      }
       syncObjectList();
       refreshCurrentJsonViewer();
       queueLiveDraftApply(`${toolDisplayName(tool)} 생성`);
@@ -3069,6 +3306,7 @@ function finishDrag() {
   }
   const moved = drag.moved === true;
   const dragType = String(drag.type || '');
+  const finishedHammerTarget = dragType === 'hammer_target';
   resetActiveDrag();
   if (moved) {
     syncObjectList();
@@ -3078,9 +3316,15 @@ function finishDrag() {
       queueLiveDraftApply('골라인 이동');
     } else if (dragType === 'spawn_move') {
       queueLiveDraftApply('공 시작점 이동');
+    } else if (dragType === 'hammer_target') {
+      queueLiveDraftApply('해머 타격 방향/거리 설정');
+      updateMakerHint('해머 타격 방향 설정 완료');
     } else {
       queueLiveDraftApply('오브젝트 드래그 수정');
     }
+  }
+  if (finishedHammerTarget) {
+    resetPendingHammer();
   }
   drawMakerCanvas();
 }
@@ -3102,14 +3346,39 @@ function handleMakerCanvasPointerDown(event) {
     return;
   }
   const layout = getCanvasLayout();
+  const tool = selectedTool();
   const stageHandle = findStageHandle(point, layout);
   if (stageHandle) {
     rememberUndoState(stageHandle.kind === 'goal' ? '골라인 이동 시작' : '시작점 이동 시작');
-    beginStageHandleDrag(stageHandle);
+    beginStageHandleDrag(stageHandle, {
+      startClientY: event.clientY,
+      startScale: layout ? layout.scale : null,
+      startDpr: layout ? layout.dpr : null,
+    });
     editorState.suppressClickOnce = true;
     updateMakerHint(stageHandle.kind === 'goal' ? '골라인 드래그 이동중' : '공 시작점 드래그 이동중');
     drawMakerCanvas();
     return;
+  }
+  if (tool === 'hammer' && editorState.pendingHammerOid) {
+    const objects = getObjects();
+    const index = objects.findIndex((item) => item && item.oid === editorState.pendingHammerOid && item.type === 'hammer');
+    if (index >= 0) {
+      rememberUndoState('해머 타격 설정 시작');
+      editorState.selectedIndex = index;
+      editorState.dragState = {
+        type: 'hammer_target',
+        index,
+        moved: false,
+      };
+      updateObjectByDrag(point, event);
+      editorState.suppressClickOnce = true;
+      syncObjectList();
+      updateMakerHint('해머 타격 방향/이동거리 설정중');
+      drawMakerCanvas();
+      return;
+    }
+    resetPendingHammer();
   }
   const selectedIndex = editorState.selectedIndex;
   const selectedHandle = findSelectedHandle(point, layout);
@@ -3135,7 +3404,6 @@ function handleMakerCanvasPointerDown(event) {
     drawMakerCanvas();
     return;
   }
-  const tool = selectedTool();
   if (tool === 'select') {
     const nearestIndex = findNearestObjectIndex(point.x, point.y);
     editorState.selectedIndex = nearestIndex;
@@ -3150,7 +3418,7 @@ function handleMakerCanvasPointerDown(event) {
     return;
   }
   if (tool === 'wall_polyline') {
-    rememberUndoState('연속 벽 추가');
+    rememberUndoState('다점 벽선 추가');
     addObjectAt(tool, point.x, point.y, { snap45: event.shiftKey === true });
     editorState.suppressClickOnce = true;
     return;
@@ -3163,7 +3431,7 @@ function handleMakerCanvasPointerDown(event) {
 }
 
 function handleMakerCanvasPointerMove(event) {
-  const shouldTrackHover = !!(editorState.pendingWallStart || editorState.pendingPortalOid || editorState.dragState);
+  const shouldTrackHover = !!(editorState.pendingWallStart || editorState.pendingPortalOid || editorState.pendingHammerOid || editorState.dragState);
   if (!shouldTrackHover) {
     if (editorState.canvasHoverWorld) {
       editorState.canvasHoverWorld = null;
@@ -3173,11 +3441,12 @@ function handleMakerCanvasPointerMove(event) {
   }
   updateCanvasHoverPoint(event);
   const point = readCanvasWorldPoint(event);
+  const rawPoint = readCanvasWorldPointRaw(event);
   if (!point || !editorState.dragState) {
     drawMakerCanvas();
     return;
   }
-  const updated = updateObjectByDrag(point, event);
+  const updated = updateObjectByDrag(point, event, rawPoint);
   if (updated) {
     refreshCurrentJsonViewer();
     populateObjectEditor();
@@ -3240,7 +3509,7 @@ function addObjectAt(tool, x, y, options = {}) {
     if (!editorState.pendingWallStart) {
       editorState.pendingWallStart = { x, y };
       editorState.pendingWallOid = '';
-      updateMakerHint(`벽 시작점 설정됨 (${x}, ${y}) → 다음 클릭으로 연결 시작`);
+      updateMakerHint(`다점 벽선 시작점 설정됨 (${x}, ${y}) → 다음 클릭으로 점 연결`);
       drawMakerCanvas();
       return;
     }
@@ -3287,7 +3556,7 @@ function addObjectAt(tool, x, y, options = {}) {
       }
     }
     editorState.pendingWallStart = { x: endPoint.x, y: endPoint.y };
-    updateMakerHint('연속 벽 입력중: 계속 클릭해서 이어 그리고, 우클릭으로 종료');
+    updateMakerHint('다점 벽선 입력중: 클릭한 점을 계속 이어 그립니다. 우클릭 종료');
   } else if (tool === 'portal') {
     const created = createObjectByTool(tool, x, y);
     if (!created) {
@@ -3318,6 +3587,9 @@ function addObjectAt(tool, x, y, options = {}) {
     objects.push(created);
     if (tool !== 'portal') {
       resetPendingPortal();
+    }
+    if (tool !== 'hammer') {
+      resetPendingHammer();
     }
   }
   if (tool !== 'wall_polyline') {
@@ -3495,7 +3767,6 @@ async function applyDraftLiveNow(reason = '') {
       preserveRunning: true,
       updateCandidates: false,
     });
-    setWorkingMapJson(getWorkingMapJson(resolveCurrentMapId()), resolveCurrentMapId());
     ensureEngineCanvasFill();
     syncViewZoomInputFromEngine();
     const running = readEngineRunning(api);
@@ -3562,6 +3833,7 @@ async function applyMapAndCandidates() {
     syncViewZoomInputFromEngine();
     setPlayPauseUi(readEngineRunning(api));
     applyViewZoomToEngine(true);
+    applyMarbleSizeToEngines(getCurrentMarbleSizeScale(), { silent: true });
     await syncPreviewFromDraft({
       preserveMarbles: false,
       preserveRunning: false,
@@ -3643,6 +3915,7 @@ async function loadEngineFrame() {
   syncViewZoomInputFromEngine();
   setPlayPauseUi(readEngineRunning(api));
   applyViewZoomToEngine(true);
+  applyMarbleSizeToEngines(getCurrentMarbleSizeScale(), { silent: true });
   setStatus(`엔진 준비 완료: 맵=${resolveCurrentMapId()}`);
 }
 
@@ -3775,6 +4048,10 @@ function setupEvents() {
     getCurrentMarbleCount();
   });
 
+  bindEvent(elements.marbleSizeInput, 'change', () => {
+    getCurrentMarbleSizeScale();
+  });
+
   bindEvent(elements.applyMarbleCountButton, 'click', async () => {
     const marbleCount = getCurrentMarbleCount();
     await withEngineAction(async (api) => {
@@ -3782,6 +4059,7 @@ function setupEvents() {
       if (!candidateResult || candidateResult.ok !== true) {
         throw new Error(candidateResult && candidateResult.reason ? candidateResult.reason : '공 개수 적용에 실패했습니다');
       }
+      applyMarbleSizeToEngines(getCurrentMarbleSizeScale(), { silent: true });
       setPlayPauseUi(readEngineRunning(api));
       setStatus(`테스트 공 개수 적용 완료: ${marbleCount}개`);
     });
@@ -3790,6 +4068,11 @@ function setupEvents() {
       preserveRunning: false,
       updateCandidates: true,
     });
+  });
+
+  bindEvent(elements.applyMarbleSizeButton, 'click', () => {
+    const scale = getCurrentMarbleSizeScale();
+    applyMarbleSizeToEngines(scale);
   });
 
   bindEvent(elements.toggleJsonViewButton, 'click', () => {
@@ -3847,6 +4130,9 @@ function setupEvents() {
     syncToolButtons();
     resetPendingWall();
     resetPendingPortal();
+    if (selectedTool() !== 'hammer') {
+      resetPendingHammer();
+    }
     cancelDrag();
     const tool = selectedTool();
     if (tool === 'select') {
@@ -3854,13 +4140,15 @@ function setupEvents() {
     } else if (tool === 'spawn_point') {
       updateMakerHint('공 시작점 모드: 클릭/드래그로 시작 위치를 지정');
     } else if (tool === 'wall_segment') {
-      updateMakerHint('벽 2점 모드: 드래그로 한 번에 벽 1개 생성, Shift는 45도 스냅');
+      updateMakerHint('일반 벽선 모드: 드래그로 2점 벽 생성, Shift는 45도 스냅');
     } else if (tool === 'wall_polyline') {
-      updateMakerHint('연속선 모드: 클릭을 계속 이어 다점 선 생성, 우클릭 종료, Shift는 45도 스냅');
+      updateMakerHint('다점 벽선 모드: 1,2,3... 클릭한 점을 이어 벽 생성, 우클릭 종료');
     } else if (tool === 'portal') {
       updateMakerHint('포털 모드: 드래그로 반경 지정, 두 번 배치하면 A/B 자동 연결');
     } else if (tool === 'hammer') {
-      updateMakerHint('해머 모드: 드래그로 크기를 정해 생성');
+      updateMakerHint(editorState.pendingHammerOid
+        ? '해머 방향 설정 대기: 드래그/클릭으로 이동 방향·거리 지정'
+        : '해머 모드: 드래그로 크기 생성 후, 점선 단계에서 방향·거리 지정');
     } else if (tool === 'rotor') {
       updateMakerHint('회전 바 모드: 드래그로 길이/방향 지정 생성');
     } else {
@@ -3928,9 +4216,9 @@ function setupEvents() {
     const tool = selectedTool();
     if (tool === 'wall_polyline' && editorState.pendingWallStart) {
       resetPendingWall();
-      updateMakerHint('연속 벽 입력 종료');
+      updateMakerHint('다점 벽선 입력 종료');
       drawMakerCanvas();
-      setStatus('벽 연결 입력을 종료했습니다.');
+      setStatus('다점 벽선 입력을 종료했습니다.');
       return;
     }
     if (tool === 'portal' && editorState.pendingPortalOid) {
@@ -3940,9 +4228,17 @@ function setupEvents() {
       setStatus('포털 연결 대기를 취소했습니다.');
       return;
     }
+    if (tool === 'hammer' && editorState.pendingHammerOid) {
+      resetPendingHammer();
+      updateMakerHint('해머 방향 설정 입력 취소');
+      drawMakerCanvas();
+      setStatus('해머 방향 설정 대기를 취소했습니다.');
+      return;
+    }
     setSelectedTool('select');
     resetPendingWall();
     resetPendingPortal();
+    resetPendingHammer();
     cancelDrag();
     if (elements.makerToolSelect) {
       elements.makerToolSelect.dispatchEvent(new Event('change'));
@@ -4132,6 +4428,7 @@ function setupEvents() {
       if (!result || result.ok !== true) {
         throw new Error(result && result.reason ? result.reason : '리셋에 실패했습니다');
       }
+      applyMarbleSizeToEngines(getCurrentMarbleSizeScale(), { silent: true });
       setPlayPauseUi(false);
       applyViewZoomToEngine(true);
       setStatus('리셋이 완료되었습니다');
@@ -4156,6 +4453,7 @@ function setupEvents() {
       if (!result || result.ok !== true) {
         throw new Error(result && result.reason ? result.reason : '퀵 로드에 실패했습니다');
       }
+      applyMarbleSizeToEngines(getCurrentMarbleSizeScale(), { silent: true });
       setPlayPauseUi(false);
       applyViewZoomToEngine(true);
       setStatus(`${slotId} 퀵 로드 완료 (일시정지 복원)`);
@@ -4202,9 +4500,10 @@ function setupEvents() {
       return;
     }
     if (key === 'Escape') {
-      const hadPending = !!(editorState.pendingWallStart || editorState.pendingPortalOid || editorState.dragState);
+      const hadPending = !!(editorState.pendingWallStart || editorState.pendingPortalOid || editorState.pendingHammerOid || editorState.dragState);
       resetPendingWall();
       resetPendingPortal();
+      resetPendingHammer();
       cancelDrag();
       if (hadPending) {
         updateMakerHint('대기중 작업을 취소했습니다.');
@@ -4222,6 +4521,7 @@ async function boot() {
   setupEvents();
   const initialMapId = 'v2_default';
   setMarbleCountInput(DEFAULT_MARBLE_COUNT);
+  setMarbleSizeInput(DEFAULT_MARBLE_SIZE_SCALE);
   setJsonViewerOpen(false);
   if (elements.mapNameInput) {
     elements.mapNameInput.value = initialMapId;

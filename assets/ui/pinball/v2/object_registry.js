@@ -11,12 +11,13 @@ const DEFAULT_STAGE = {
 };
 
 const DEFAULT_OBJECT_COLORS = {
-  wall: '#ffffff',
-  box: '#00dfff',
-  circle: '#ffd84d',
+  wall: '#ff7cc8',
+  box: '#ff4fa8',
+  circle: '#ff62bf',
   portal: '#b68cff',
-  burst: '#ffb347',
-  hammer: '#00dfff',
+  burst: '#5dff7a',
+  hammer: '#ffa557',
+  diamond: '#6affea',
 };
 
 function toFiniteNumber(value, fallback) {
@@ -199,6 +200,7 @@ function compileDiamond(raw, entityId) {
       rotation: rotationDeg,
       restitution: toFiniteNumber(raw.restitution, 1.4),
       density: toFiniteNumber(raw.density, 1),
+      color: typeof raw.color === 'string' ? raw.color : DEFAULT_OBJECT_COLORS.diamond,
     },
     entityId,
     false,
@@ -706,7 +708,9 @@ function createBurstBumperBehavior(def, env) {
       if (marbles.length === 0 || destroyed) {
         return;
       }
-      const radius = Math.max(0.12, toFiniteNumber(def.triggerRadius, toFiniteNumber(def.radius, 0.68) + 0.45));
+      const baseTriggerRadius = Math.max(0.12, toFiniteNumber(def.triggerRadius, toFiniteNumber(def.radius, 0.68) + 0.45));
+      const layerRatio = Math.max(0.2, Math.min(1, activeLayers / totalLayers));
+      const radius = baseTriggerRadius * layerRatio;
       const radiusSq = radius * radius;
       for (let index = 0; index < marbles.length; index += 1) {
         const marble = marbles[index];

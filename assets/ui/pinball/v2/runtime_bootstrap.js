@@ -80,6 +80,9 @@ const control = {
   rngSeed: 0x9e3779b9,
   rng: createDeterministicRng(0x9e3779b9),
   lastSnapshotHash: '',
+  spinStartedAt: 0,
+  skillWarmupMs: 5000,
+  skillDisabled: true,
 };
 
 function setStatus(text) {
@@ -121,6 +124,42 @@ function getPhysics() {
 function getBox2D() {
   const physics = getPhysics();
   return physics && physics.Box2D ? physics.Box2D : null;
+}
+
+function setSkillsEnabled(enabled) {
+  const nextEnabled = enabled === true;
+  if (window.options && typeof window.options === 'object') {
+    window.options.useSkills = nextEnabled;
+  }
+  const roulette = getRoulette();
+  const marbles = roulette && Array.isArray(roulette._marbles) ? roulette._marbles : [];
+  if (!nextEnabled) {
+    for (let index = 0; index < marbles.length; index += 1) {
+      const marble = marbles[index];
+      if (marble) {
+        marble.skill = 0;
+      }
+    }
+  }
+  control.skillDisabled = !nextEnabled;
+}
+
+function updateSkillPolicy(nowMs) {
+  const roulette = getRoulette();
+  if (!roulette) {
+    setSkillsEnabled(false);
+    return;
+  }
+  const running = roulette._isRunning === true && control.paused === false;
+  if (!running) {
+    setSkillsEnabled(false);
+    return;
+  }
+  const warmupUntil = toFiniteNumber(control.spinStartedAt, 0) + Math.max(0, toFiniteNumber(control.skillWarmupMs, 5000));
+  const inWarmup = nowMs < warmupUntil;
+  const slowNearGoal = toFiniteNumber(roulette._timeScale, 1) < 0.999
+    || toFiniteNumber(roulette._goalDist, Number.POSITIVE_INFINITY) < 5;
+  setSkillsEnabled(!(inWarmup || slowNearGoal));
 }
 
 function getSortedMarbleIds(physics) {
@@ -301,8 +340,10 @@ function startTickLoop() {
   }
   control.tickStarted = true;
   const tick = () => {
+    const now = Date.now();
+    updateSkillPolicy(now);
     if (control.behaviorRuntime && typeof control.behaviorRuntime.tick === 'function') {
-      control.behaviorRuntime.tick(Date.now());
+      control.behaviorRuntime.tick(now);
       refreshDestroyedEntityIds();
     }
     window.requestAnimationFrame(tick);
@@ -374,6 +415,8 @@ async function applyMapJson(rawMapJson) {
 
   control.paused = true;
   control.goalReceived = false;
+  control.spinStartedAt = 0;
+  setSkillsEnabled(false);
   control.mapId = compiled.mapId;
   control.mapJson = mapJson;
   control.compiledMap = compiled;
@@ -419,6 +462,10 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
   const preserveRunning = options && options.preserveRunning === true;
 
   control.goalReceived = false;
+  if (!preserveRunning || !runningBefore) {
+    control.spinStartedAt = 0;
+    setSkillsEnabled(false);
+  }
   control.mapId = compiled.mapId;
   control.mapJson = mapJson;
   control.compiledMap = compiled;
@@ -461,6 +508,7 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
     control.paused = pausedBefore;
     if (control.paused) {
       roulette._isRunning = false;
+      setSkillsEnabled(false);
     }
   }
 
@@ -830,8 +878,11 @@ async function restoreSnapshot(snapshot, opts = {}) {
   applyEngineState(snapshot.engineState);
   roulette._isRunning = false;
   control.paused = true;
+  control.spinStartedAt = 0;
+  setSkillsEnabled(false);
   if (opts.autoResume === true) {
     control.paused = false;
+    control.spinStartedAt = Date.now();
     roulette.start();
   }
 }
@@ -888,6 +939,8 @@ async function start() {
   setWinningRank(control.winningRank);
   control.goalReceived = false;
   control.paused = false;
+  control.spinStartedAt = Date.now();
+  setSkillsEnabled(false);
   roulette._isRunning = false;
   roulette.start();
   postBridge('spinStarted', {
@@ -901,6 +954,8 @@ async function start() {
 async function pause() {
   await ensureRouletteReady();
   control.paused = true;
+  control.spinStartedAt = 0;
+  setSkillsEnabled(false);
   const roulette = getRoulette();
   if (roulette) {
     roulette._isRunning = false;
@@ -913,6 +968,8 @@ async function reset() {
   const roulette = await ensureRouletteReady();
   control.paused = true;
   control.goalReceived = false;
+  control.spinStartedAt = 0;
+  setSkillsEnabled(false);
   if (control.compiledMap && control.compiledMap.sourceMap) {
     await applyMapJson(control.compiledMap.sourceMap);
   } else {
@@ -992,6 +1049,7 @@ async function init(payload = {}) {
     await start();
   } else {
     await pause();
+    setSkillsEnabled(false);
   }
 
   postBridge('ready', {

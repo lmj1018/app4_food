@@ -185,7 +185,7 @@
     }
     .engine-body {
       display: grid;
-      grid-template-columns: minmax(520px, 1.45fr) minmax(300px, 0.65fr) 360px;
+      grid-template-columns: minmax(620px, 1.58fr) minmax(240px, 0.52fr) 360px;
       gap: 0;
       min-height: 0;
       flex: 1;
@@ -409,7 +409,7 @@
     .tool-shape.wall {
       width: 18px;
       height: 0;
-      border-top: 3px solid #4f6fdb;
+      border-top: 3px solid #ff7cc8;
       left: 6px;
       top: 10px;
       transform: rotate(-18deg);
@@ -418,8 +418,8 @@
       width: 11px;
       height: 11px;
       border-radius: 50%;
-      background: #ffd166;
-      border: 1px solid rgba(255, 224, 145, 0.95);
+      background: #ff62bf;
+      border: 1px solid rgba(255, 176, 225, 0.95);
       left: 10px;
       top: 5px;
     }
@@ -427,16 +427,16 @@
       width: 12px;
       height: 12px;
       transform: rotate(45deg);
-      background: #74d4ff;
-      border: 1px solid rgba(165, 228, 255, 0.92);
+      background: #6affea;
+      border: 1px solid rgba(184, 255, 245, 0.94);
       left: 10px;
       top: 5px;
     }
     .tool-shape.box {
       width: 18px;
       height: 8px;
-      background: #62c2ff;
-      border: 1px solid rgba(162, 221, 255, 0.9);
+      background: #ff4fa8;
+      border: 1px solid rgba(255, 173, 224, 0.92);
       left: 6px;
       top: 7px;
       border-radius: 2px;
@@ -444,7 +444,7 @@
     .tool-shape.rotor {
       width: 20px;
       height: 4px;
-      background: #ef476f;
+      background: #ff66c8;
       border-radius: 2px;
       left: 5px;
       top: 9px;
@@ -481,10 +481,10 @@
       width: 12px;
       height: 12px;
       border-radius: 50%;
-      background: #ff9f6e;
+      background: #5dff7a;
       left: 10px;
       top: 5px;
-      box-shadow: 0 0 0 3px rgba(255, 169, 120, 0.45);
+      box-shadow: 0 0 0 3px rgba(93, 255, 122, 0.4);
     }
     .tool-shape.spawn {
       width: 16px;
@@ -791,16 +791,24 @@
                 <input id="viewZoomInput" type="number" min="0.05" max="10" step="0.05" value="0.2">
               </div>
               <div class="maker-row">
+                <label for="marbleSizeInput">공 크기</label>
+                <input id="marbleSizeInput" type="number" min="0.4" max="3" step="0.1" value="1.0">
+              </div>
+              <div class="maker-row">
                 <label for="stageGoalInput">goalY</label>
-                <input id="stageGoalInput" type="number" min="20" max="500" step="1" value="210">
+                <input id="stageGoalInput" type="number" min="20" max="2000" step="1" value="210">
               </div>
               <div class="maker-row">
                 <label for="stageZoomInput">zoomY</label>
-                <input id="stageZoomInput" type="number" min="10" max="500" step="0.5" value="200">
+                <input id="stageZoomInput" type="number" min="10" max="2000" step="0.5" value="200">
               </div>
               <div class="maker-toolbar">
                 <button id="applyViewZoomButton">뷰 줌 적용</button>
+                <button id="applyMarbleSizeButton">공 크기 적용</button>
+              </div>
+              <div class="maker-toolbar">
                 <button id="fitStageButton">스테이지 자동맞춤</button>
+                <span></span>
               </div>
               <button id="applyStageButton" class="primary">스테이지 값 적용</button>
             </div>
@@ -810,8 +818,8 @@
               <div class="tool-palette">
                 <button type="button" class="maker-tool-button active" data-maker-tool="select"><span class="tool-icon"><span class="tool-shape select"></span></span><span class="tool-label">선택</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="spawn_point"><span class="tool-icon"><span class="tool-shape spawn"></span></span><span class="tool-label">공 시작점</span></button>
-                <button type="button" class="maker-tool-button" data-maker-tool="wall_segment"><span class="tool-icon"><span class="tool-shape wall"></span></span><span class="tool-label">벽 2점(드래그)</span></button>
-                <button type="button" class="maker-tool-button" data-maker-tool="wall_polyline"><span class="tool-icon"><span class="tool-shape wall"></span></span><span class="tool-label">연속선(다점)</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="wall_segment"><span class="tool-icon"><span class="tool-shape wall"></span></span><span class="tool-label">일반 벽선</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="wall_polyline"><span class="tool-icon"><span class="tool-shape wall"></span></span><span class="tool-label">다점 벽선</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="peg_circle"><span class="tool-icon"><span class="tool-shape peg"></span></span><span class="tool-label">원형 핀</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="diamond_block"><span class="tool-icon"><span class="tool-shape diamond"></span></span><span class="tool-label">마름모</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="box_block"><span class="tool-icon"><span class="tool-shape box"></span></span><span class="tool-label">박스</span></button>
@@ -823,8 +831,8 @@
               <select id="makerToolSelect" class="hidden-tool-select" aria-hidden="true" tabindex="-1">
                 <option value="select">선택</option>
                 <option value="spawn_point">공 시작점</option>
-                <option value="wall_segment">벽 2점(드래그)</option>
-                <option value="wall_polyline">연속선(다점)</option>
+                <option value="wall_segment">일반 벽선</option>
+                <option value="wall_polyline">다점 벽선</option>
                 <option value="peg_circle">원형 핀</option>
                 <option value="diamond_block">마름모</option>
                 <option value="box_block">박스</option>
