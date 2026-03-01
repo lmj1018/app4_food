@@ -185,18 +185,54 @@
     }
     .engine-body {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 420px;
+      grid-template-columns: minmax(460px, 1fr) minmax(260px, 0.5fr) 360px;
       gap: 0;
       min-height: 0;
       flex: 1;
       height: 100%;
     }
+    .maker-board {
+      min-height: 0;
+      border-right: 1px solid #2c3d63;
+      background: rgba(10, 18, 34, 0.95);
+      display: flex;
+      flex-direction: column;
+    }
+    .maker-board-head {
+      padding: 10px 12px;
+      border-bottom: 1px solid #2f426d;
+      font-size: 12px;
+      font-weight: 700;
+      color: #9ec0ff;
+      background: #121f3d;
+    }
+    .maker-board-body {
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 10px;
+      overflow: hidden;
+    }
     .engine-view {
       min-height: 0;
       border-right: 1px solid #2c3d63;
-      background: #000;
+      background: #050914;
       position: relative;
       height: 100%;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 10px;
+    }
+    .engine-frame-shell {
+      width: 100%;
+      height: 80%;
+      min-height: 360px;
+      border: 1px solid #2c3d63;
+      border-radius: 10px;
+      overflow: hidden;
+      background: #000;
     }
     iframe {
       width: 100%;
@@ -257,13 +293,45 @@
       border-radius: 8px;
       overflow: hidden;
       background: #0a1225;
+      flex: 1;
+      min-height: 0;
     }
     #makerCanvas {
       width: 100%;
-      height: 440px;
+      height: 100%;
       display: block;
       cursor: crosshair;
       background: linear-gradient(180deg, #0d1a36 0%, #0a142d 100%);
+    }
+    .tool-palette {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+    }
+    .maker-tool-button {
+      border: 1px solid #3a5485;
+      background: linear-gradient(180deg, #1b2a4d 0%, #16243f 100%);
+      color: #d8e4ff;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 8px 6px;
+      cursor: pointer;
+      transition: border-color 0.12s ease, background 0.12s ease, transform 0.05s ease;
+    }
+    .maker-tool-button:hover {
+      border-color: #5f86cb;
+    }
+    .maker-tool-button.active {
+      border-color: #5db0ff;
+      background: linear-gradient(180deg, #256fc5 0%, #1b5aa7 100%);
+      color: #f5fbff;
+    }
+    .maker-tool-button:active {
+      transform: translateY(1px);
+    }
+    .hidden-tool-select {
+      display: none;
     }
     .maker-toolbar {
       display: grid;
@@ -396,13 +464,24 @@
       .engine-body {
         grid-template-columns: 1fr;
       }
+      .maker-board {
+        border-right: 0;
+        border-bottom: 1px solid #2c3d63;
+      }
+      .maker-board-body {
+        min-height: 46vh;
+      }
       .engine-view {
         border-right: 0;
         border-bottom: 1px solid #2c3d63;
-        min-height: 55vh;
+        min-height: 42vh;
+      }
+      .engine-frame-shell {
+        height: 80%;
+        min-height: 320px;
       }
       #makerCanvas {
-        height: 320px;
+        min-height: 300px;
       }
       .floating-controls {
         width: calc(100% - 24px);
@@ -471,11 +550,26 @@
     <section class="engine-wrap">
       <div class="engine-head">엔진 iframe: <code id="engineUrlText">불러오는 중...</code></div>
       <div class="engine-body">
+        <section class="maker-board">
+          <div class="maker-board-head">좌표 맵 제작 영역 (왼쪽)</div>
+          <div class="maker-board-body">
+            <div class="maker-canvas-wrap">
+              <canvas id="makerCanvas" width="360" height="760"></canvas>
+            </div>
+            <div class="maker-toolbar">
+              <button id="applyDraftButton" class="primary">드래프트 맵 적용</button>
+              <button id="clearObjectsButton" class="warn">오브젝트 전체삭제</button>
+            </div>
+            <div class="maker-compact" id="makerHintText">툴을 선택하고 좌표 맵 캔버스를 클릭해 배치하세요.</div>
+          </div>
+        </section>
         <div class="engine-view">
-          <iframe id="engineFrame" title="pinball-v2-engine"></iframe>
+          <div class="engine-frame-shell">
+            <iframe id="engineFrame" title="pinball-v2-engine"></iframe>
+          </div>
         </div>
         <aside class="maker-side">
-          <div class="maker-side-head">맵 메이킹 영역 (우측)</div>
+          <div class="maker-side-head">오브젝트 툴 / 속성 (우측)</div>
           <div class="maker-side-body">
             <div class="maker-group">
               <div class="maker-group-title">뷰/스테이지</div>
@@ -499,27 +593,29 @@
             </div>
 
             <div class="maker-group">
-              <div class="maker-group-title">오브젝트 배치</div>
-              <div class="maker-row">
-                <label for="makerToolSelect">툴</label>
-                <select id="makerToolSelect">
-                  <option value="select">선택</option>
-                  <option value="wall_polyline">벽(2점)</option>
-                  <option value="peg_circle">원형 핀</option>
-                  <option value="box_block">박스</option>
-                  <option value="rotor">회전 바</option>
-                  <option value="portal">포털</option>
-                  <option value="hammer">해머</option>
-                </select>
+              <div class="maker-group-title">오브젝트 툴</div>
+              <div class="tool-palette">
+                <button type="button" class="maker-tool-button active" data-maker-tool="select">선택</button>
+                <button type="button" class="maker-tool-button" data-maker-tool="wall_polyline">벽(2점)</button>
+                <button type="button" class="maker-tool-button" data-maker-tool="peg_circle">원형 핀</button>
+                <button type="button" class="maker-tool-button" data-maker-tool="diamond_block">마름모</button>
+                <button type="button" class="maker-tool-button" data-maker-tool="box_block">박스</button>
+                <button type="button" class="maker-tool-button" data-maker-tool="rotor">회전 바</button>
+                <button type="button" class="maker-tool-button" data-maker-tool="portal">포털</button>
+                <button type="button" class="maker-tool-button" data-maker-tool="hammer">해머</button>
+                <button type="button" class="maker-tool-button" data-maker-tool="burst_bumper">버스트 범퍼</button>
               </div>
-              <div class="maker-canvas-wrap">
-                <canvas id="makerCanvas" width="360" height="760"></canvas>
-              </div>
-              <div class="maker-toolbar">
-                <button id="applyDraftButton" class="primary">드래프트 맵 적용</button>
-                <button id="clearObjectsButton" class="warn">오브젝트 전체삭제</button>
-              </div>
-              <div class="maker-compact" id="makerHintText">툴을 선택하고 캔버스를 클릭해서 맵을 만듭니다.</div>
+              <select id="makerToolSelect" class="hidden-tool-select" aria-hidden="true" tabindex="-1">
+                <option value="select">선택</option>
+                <option value="wall_polyline">벽(2점)</option>
+                <option value="peg_circle">원형 핀</option>
+                <option value="diamond_block">마름모</option>
+                <option value="box_block">박스</option>
+                <option value="rotor">회전 바</option>
+                <option value="portal">포털</option>
+                <option value="hammer">해머</option>
+                <option value="burst_bumper">버스트 범퍼</option>
+              </select>
             </div>
 
             <div class="maker-group">

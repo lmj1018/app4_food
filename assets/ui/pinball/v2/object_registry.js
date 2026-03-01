@@ -41,6 +41,17 @@ function deepClone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function normalizeRotationRad(value, fallback = 0) {
+  const raw = toFiniteNumber(value, fallback);
+  if (!Number.isFinite(raw)) {
+    return fallback;
+  }
+  if (Math.abs(raw) > Math.PI * 2.5) {
+    return degToRad(raw);
+  }
+  return raw;
+}
+
 function withEntityId(entity, entityId) {
   const shape = entity.shape && typeof entity.shape === 'object'
     ? { ...entity.shape }
@@ -96,7 +107,10 @@ function compileWallPolyline(raw, entityId) {
 function compileBox(raw, entityId, forceKinematic = false) {
   const width = Math.max(0.02, toFiniteNumber(raw.width, 0.35));
   const height = Math.max(0.02, toFiniteNumber(raw.height, 0.18));
-  const rotation = toFiniteNumber(raw.rotation, toFiniteNumber(raw.rotationRad, 0));
+  const rotationInput = Number.isFinite(Number(raw.rotationRad))
+    ? toFiniteNumber(raw.rotationRad, 0)
+    : toFiniteNumber(raw.rotation, 0);
+  const rotation = normalizeRotationRad(rotationInput, 0);
   const restitution = clamp(toFiniteNumber(raw.restitution, 0), 0, 5);
   const density = Math.max(0.01, toFiniteNumber(raw.density, 1));
   const angularVelocity = toFiniteNumber(
@@ -157,6 +171,25 @@ function compileCircle(raw, entityId, defaults) {
   );
 }
 
+function compileDiamond(raw, entityId) {
+  const size = Math.max(0.05, toFiniteNumber(raw.size, toFiniteNumber(raw.width, 0.26)));
+  const rotationDeg = Number.isFinite(Number(raw.rotation))
+    ? toFiniteNumber(raw.rotation, 45)
+    : 45;
+  return compileBox(
+    {
+      ...raw,
+      width: Math.max(0.05, toFiniteNumber(raw.width, size)),
+      height: Math.max(0.05, toFiniteNumber(raw.height, size)),
+      rotation: rotationDeg,
+      restitution: toFiniteNumber(raw.restitution, 1.4),
+      density: toFiniteNumber(raw.density, 1),
+    },
+    entityId,
+    false,
+  );
+}
+
 function compileObject(rawObject, entityId) {
   if (!rawObject || typeof rawObject !== 'object') {
     return { entity: null, behavior: null };
@@ -174,6 +207,11 @@ function compileObject(rawObject, entityId) {
         entity: compileBox(rawObject, entityId, false),
         behavior: null,
       };
+    case 'diamond_block':
+      return {
+        entity: compileDiamond(rawObject, entityId),
+        behavior: null,
+      };
     case 'peg_circle':
       return {
         entity: compileCircle(rawObject, entityId, {
@@ -186,6 +224,30 @@ function compileObject(rawObject, entityId) {
           color: '#ffe082',
         }),
         behavior: null,
+      };
+    case 'burst_bumper':
+      return {
+        entity: compileCircle(rawObject, entityId, {
+          radius: 0.68,
+          restitution: 3.2,
+          density: 1,
+          life: -1,
+          x: 11.75,
+          y: 72,
+          color: '#ff9f6e',
+        }),
+        behavior: {
+          kind: 'burst_bumper',
+          oid: toId(rawObject.oid, `burst_${entityId}`),
+          entityId,
+          x: toFiniteNumber(rawObject.x, 11.75),
+          y: toFiniteNumber(rawObject.y, 72),
+          radius: Math.max(0.08, toFiniteNumber(rawObject.radius, 0.68)),
+          triggerRadius: Math.max(0.14, toFiniteNumber(rawObject.triggerRadius, toFiniteNumber(rawObject.radius, 0.68) + 0.45)),
+          force: Math.max(0.1, toFiniteNumber(rawObject.force, toFiniteNumber(rawObject.burstForce, 6.2))),
+          cooldownMs: Math.max(20, toFiniteNumber(rawObject.cooldownMs, toFiniteNumber(rawObject.intervalMs, 420))),
+          upwardBoost: Math.max(0, toFiniteNumber(rawObject.upwardBoost, 0)),
+        },
       };
     case 'rotor':
       return {
@@ -233,13 +295,15 @@ function compileObject(rawObject, entityId) {
             width: Math.max(0.08, toFiniteNumber(rawObject.width, 0.48)),
             height: Math.max(0.03, toFiniteNumber(rawObject.height, 0.12)),
             restitution: toFiniteNumber(rawObject.restitution, 0.08),
+            rotation: toFiniteNumber(rawObject.rotation, 0),
           },
           entityId,
-          false,
+          true,
         ),
         behavior: {
           kind: 'hammer',
           oid: toId(rawObject.oid, `hammer_${entityId}`),
+          entityId,
           x: toFiniteNumber(rawObject.x, 11.75),
           y: toFiniteNumber(rawObject.y, 70),
           dirDeg: toFiniteNumber(rawObject.dirDeg, 90),
@@ -248,6 +312,8 @@ function compileObject(rawObject, entityId) {
           doubleHit: toBoolean(rawObject.doubleHit, false),
           triggerRadius: Math.max(0.2, toFiniteNumber(rawObject.triggerRadius, 1.2)),
           cooldownMs: Math.max(0, toFiniteNumber(rawObject.cooldownMs, 300)),
+          swingDeg: Math.max(0, toFiniteNumber(rawObject.swingDeg, 26)),
+          swingDurationMs: Math.max(40, toFiniteNumber(rawObject.swingDurationMs, 220)),
         },
       };
     default:
@@ -448,10 +514,121 @@ function createPortalBehavior(def, portalByOid, env) {
   };
 }
 
+function createBurstBumperBehavior(def, env) {
+  const cooldownByMarble = {};
+
+  function canTrigger(marbleId, now) {
+    const key = String(marbleId);
+    return toFiniteNumber(cooldownByMarble[key], 0) <= now;
+  }
+
+  function setCooldown(marbleId, now) {
+    cooldownByMarble[String(marbleId)] = now + def.cooldownMs;
+  }
+
+  function triggerBurst(marble, now) {
+    const roulette = env.getRoulette();
+    const physics = roulette && roulette.physics ? roulette.physics : null;
+    const box2d = env.getBox2D();
+    if (!physics || !physics.marbleMap || !box2d || typeof box2d.b2Vec2 !== 'function') {
+      return;
+    }
+    const body = physics.marbleMap[marble.id];
+    if (!body || typeof body.ApplyLinearImpulseToCenter !== 'function') {
+      return;
+    }
+    let dx = toFiniteNumber(marble.x, def.x) - def.x;
+    let dy = toFiniteNumber(marble.y, def.y) - def.y;
+    let distance = Math.hypot(dx, dy);
+    if (distance <= 0.0001) {
+      const rng = typeof env.getRng === 'function' ? env.getRng() : null;
+      const randomDeg = rng && typeof rng.next === 'function' ? rng.next() * 360 : 0;
+      const randomAngle = degToRad(toFiniteNumber(randomDeg, 0));
+      dx = Math.cos(randomAngle);
+      dy = Math.sin(randomAngle);
+      distance = 1;
+    }
+    const nx = dx / distance;
+    const ny = dy / distance;
+    const impulse = Math.max(0.1, toFiniteNumber(def.force, 6.2));
+    const boostY = Math.max(0, toFiniteNumber(def.upwardBoost, 0));
+    const iy = ny * impulse - boostY;
+    try {
+      if (typeof body.SetEnabled === 'function') {
+        body.SetEnabled(true);
+      }
+      if (typeof body.SetAwake === 'function') {
+        body.SetAwake(true);
+      }
+      body.ApplyLinearImpulseToCenter(new box2d.b2Vec2(nx * impulse, iy), true);
+    } catch (_) {
+      return;
+    }
+    setCooldown(marble.id, now);
+  }
+
+  return {
+    kind: 'burst_bumper',
+    oid: def.oid,
+    tick(now) {
+      if (env.isPaused()) {
+        return;
+      }
+      const roulette = env.getRoulette();
+      if (!roulette) {
+        return;
+      }
+      const marbles = Array.isArray(roulette._marbles) ? roulette._marbles : [];
+      if (marbles.length === 0) {
+        return;
+      }
+      const radius = Math.max(0.12, toFiniteNumber(def.triggerRadius, toFiniteNumber(def.radius, 0.68) + 0.45));
+      const radiusSq = radius * radius;
+      for (let index = 0; index < marbles.length; index += 1) {
+        const marble = marbles[index];
+        if (!marble || typeof marble.id !== 'number') {
+          continue;
+        }
+        if (!canTrigger(marble.id, now)) {
+          continue;
+        }
+        const dx = toFiniteNumber(marble.x, NaN) - def.x;
+        const dy = toFiniteNumber(marble.y, NaN) - def.y;
+        if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
+          continue;
+        }
+        if (dx * dx + dy * dy > radiusSq) {
+          continue;
+        }
+        triggerBurst(marble, now);
+      }
+    },
+    serializeState() {
+      return {
+        cooldownByMarble: { ...cooldownByMarble },
+      };
+    },
+    restoreState(rawState) {
+      for (const key of Object.keys(cooldownByMarble)) {
+        delete cooldownByMarble[key];
+      }
+      const safeState = rawState && typeof rawState === 'object' ? rawState : {};
+      const nextCooldown = safeState.cooldownByMarble && typeof safeState.cooldownByMarble === 'object'
+        ? safeState.cooldownByMarble
+        : {};
+      for (const key of Object.keys(nextCooldown)) {
+        cooldownByMarble[key] = toFiniteNumber(nextCooldown[key], 0);
+      }
+    },
+  };
+}
+
 function createHammerBehavior(def, env) {
   let lastFiredAt = 0;
   let queue = [];
   const cooldownByMarble = {};
+  let swingUntil = 0;
+  let baseAngleRad = null;
 
   function canHitMarble(marbleId, now) {
     const key = String(marbleId);
@@ -461,6 +638,56 @@ function createHammerBehavior(def, env) {
 
   function applyCooldown(marbleId, now) {
     cooldownByMarble[String(marbleId)] = now + def.cooldownMs;
+  }
+
+  function getHammerEntry() {
+    const roulette = env.getRoulette();
+    const physics = roulette && roulette.physics ? roulette.physics : null;
+    const entities = physics && Array.isArray(physics.entities) ? physics.entities : [];
+    for (let index = 0; index < entities.length; index += 1) {
+      const entry = entities[index];
+      const entityId = toFiniteNumber(entry && entry.shape && entry.shape.__v2eid, NaN);
+      if (Number.isFinite(entityId) && entityId === toFiniteNumber(def.entityId, -1)) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  function updateSwingVisual(now) {
+    const entry = getHammerEntry();
+    const box2d = env.getBox2D();
+    if (!entry || !entry.body || !box2d || typeof box2d.b2Vec2 !== 'function') {
+      return;
+    }
+    const body = entry.body;
+    const currentAngle = typeof body.GetAngle === 'function' ? body.GetAngle() : 0;
+    if (!Number.isFinite(baseAngleRad)) {
+      baseAngleRad = currentAngle;
+    }
+    const swingDuration = Math.max(40, toFiniteNumber(def.swingDurationMs, 220));
+    const swingDeg = Math.max(0, toFiniteNumber(def.swingDeg, 26));
+    let targetAngle = toFiniteNumber(baseAngleRad, 0);
+    if (swingUntil > now) {
+      const elapsed = swingDuration - (swingUntil - now);
+      const progress = clamp(elapsed / swingDuration, 0, 1);
+      targetAngle += Math.sin(progress * Math.PI) * degToRad(swingDeg);
+    }
+    try {
+      const pos = typeof body.GetPosition === 'function' ? body.GetPosition() : null;
+      const px = pos ? toFiniteNumber(pos.x, toFiniteNumber(def.x, 0)) : toFiniteNumber(def.x, 0);
+      const py = pos ? toFiniteNumber(pos.y, toFiniteNumber(def.y, 0)) : toFiniteNumber(def.y, 0);
+      if (typeof body.SetTransform === 'function') {
+        body.SetTransform(new box2d.b2Vec2(px, py), targetAngle);
+      }
+      if (typeof body.SetAngularVelocity === 'function') {
+        body.SetAngularVelocity(0);
+      }
+      if (typeof body.SetAwake === 'function') {
+        body.SetAwake(true);
+      }
+    } catch (_) {
+    }
   }
 
   function fire(forceScale, now) {
@@ -515,6 +742,7 @@ function createHammerBehavior(def, env) {
       }
       applyCooldown(marble.id, now);
     }
+    swingUntil = Math.max(swingUntil, now + Math.max(40, toFiniteNumber(def.swingDurationMs, 220)));
   }
 
   return {
@@ -544,10 +772,13 @@ function createHammerBehavior(def, env) {
         fire(toFiniteNumber(item.scale, 1), now);
       }
       queue = pending;
+      updateSwingVisual(now);
     },
     serializeState() {
       return {
         lastFiredAt,
+        swingUntil,
+        baseAngleRad: toFiniteNumber(baseAngleRad, 0),
         queue: queue.map((item) => ({ at: item.at, scale: item.scale })),
         cooldownByMarble: { ...cooldownByMarble },
       };
@@ -555,6 +786,8 @@ function createHammerBehavior(def, env) {
     restoreState(rawState) {
       const nextState = rawState && typeof rawState === 'object' ? rawState : {};
       lastFiredAt = toFiniteNumber(nextState.lastFiredAt, 0);
+      swingUntil = toFiniteNumber(nextState.swingUntil, 0);
+      baseAngleRad = toFiniteNumber(nextState.baseAngleRad, 0);
       queue = Array.isArray(nextState.queue)
         ? nextState.queue
             .map((item) => ({
@@ -572,6 +805,7 @@ function createHammerBehavior(def, env) {
       for (const key of Object.keys(nextCooldown)) {
         cooldownByMarble[key] = toFiniteNumber(nextCooldown[key], 0);
       }
+      updateSwingVisual(Date.now());
     },
   };
 }
@@ -580,6 +814,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
   const defs = Array.isArray(behaviorDefs) ? behaviorDefs : [];
   const portalDefs = defs
     .filter((item) => item && item.kind === 'portal')
+    .map((item) => ({ ...item }));
+  const burstDefs = defs
+    .filter((item) => item && item.kind === 'burst_bumper')
     .map((item) => ({ ...item }));
   const hammerDefs = defs
     .filter((item) => item && item.kind === 'hammer')
@@ -593,6 +830,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
   const behaviors = [];
   for (const portalDef of portalDefs) {
     behaviors.push(createPortalBehavior(portalDef, portalByOid, env));
+  }
+  for (const burstDef of burstDefs) {
+    behaviors.push(createBurstBumperBehavior(burstDef, env));
   }
   for (const hammerDef of hammerDefs) {
     behaviors.push(createHammerBehavior(hammerDef, env));
@@ -610,6 +850,7 @@ export function createBehaviorRuntime(env, behaviorDefs) {
     },
     serializeState() {
       const portal = {};
+      const burst = {};
       const hammer = {};
       for (let index = 0; index < behaviors.length; index += 1) {
         const behavior = behaviors[index];
@@ -621,15 +862,18 @@ export function createBehaviorRuntime(env, behaviorDefs) {
         }
         if (behavior.kind === 'portal') {
           portal[behavior.oid] = state;
+        } else if (behavior.kind === 'burst_bumper') {
+          burst[behavior.oid] = state;
         } else if (behavior.kind === 'hammer') {
           hammer[behavior.oid] = state;
         }
       }
-      return { portal, hammer };
+      return { portal, burst, hammer };
     },
     restoreState(rawState) {
       const safeState = rawState && typeof rawState === 'object' ? rawState : {};
       const portalState = safeState.portal && typeof safeState.portal === 'object' ? safeState.portal : {};
+      const burstState = safeState.burst && typeof safeState.burst === 'object' ? safeState.burst : {};
       const hammerState = safeState.hammer && typeof safeState.hammer === 'object' ? safeState.hammer : {};
       for (let index = 0; index < behaviors.length; index += 1) {
         const behavior = behaviors[index];
@@ -638,6 +882,8 @@ export function createBehaviorRuntime(env, behaviorDefs) {
         }
         if (behavior.kind === 'portal') {
           behavior.restoreState(portalState[behavior.oid]);
+        } else if (behavior.kind === 'burst_bumper') {
+          behavior.restoreState(burstState[behavior.oid]);
         } else if (behavior.kind === 'hammer') {
           behavior.restoreState(hammerState[behavior.oid]);
         }

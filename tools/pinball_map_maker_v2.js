@@ -42,6 +42,7 @@ const elements = {
   fitStageButton: document.getElementById('fitStageButton'),
   applyStageButton: document.getElementById('applyStageButton'),
   makerToolSelect: document.getElementById('makerToolSelect'),
+  makerToolButtons: Array.from(document.querySelectorAll('.maker-tool-button')),
   makerCanvas: document.getElementById('makerCanvas'),
   applyDraftButton: document.getElementById('applyDraftButton'),
   clearObjectsButton: document.getElementById('clearObjectsButton'),
@@ -221,6 +222,9 @@ function setBusy(isBusy) {
     elements.duplicateObjectButton,
     elements.deleteObjectButton,
   ];
+  if (Array.isArray(elements.makerToolButtons)) {
+    controls.push(...elements.makerToolButtons);
+  }
   controls.forEach((control) => {
     if (control) {
       control.disabled = isBusy;
@@ -664,6 +668,65 @@ function selectedTool() {
   return String(elements.makerToolSelect && elements.makerToolSelect.value ? elements.makerToolSelect.value : 'select');
 }
 
+function toolDisplayName(tool) {
+  switch (String(tool || '')) {
+    case 'select':
+      return '선택';
+    case 'wall_polyline':
+      return '벽(2점)';
+    case 'peg_circle':
+      return '원형 핀';
+    case 'diamond_block':
+      return '마름모';
+    case 'box_block':
+      return '박스';
+    case 'rotor':
+      return '회전 바';
+    case 'portal':
+      return '포털';
+    case 'hammer':
+      return '해머';
+    case 'burst_bumper':
+      return '버스트 범퍼';
+    default:
+      return String(tool || '툴');
+  }
+}
+
+function syncToolButtons() {
+  if (!Array.isArray(elements.makerToolButtons) || elements.makerToolButtons.length === 0) {
+    return;
+  }
+  const current = selectedTool();
+  for (let index = 0; index < elements.makerToolButtons.length; index += 1) {
+    const button = elements.makerToolButtons[index];
+    const tool = button && button.dataset ? String(button.dataset.makerTool || '') : '';
+    const active = tool === current;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+  }
+}
+
+function setSelectedTool(tool) {
+  const fallback = 'select';
+  const allowed = new Set([
+    'select',
+    'wall_polyline',
+    'peg_circle',
+    'diamond_block',
+    'box_block',
+    'rotor',
+    'portal',
+    'hammer',
+    'burst_bumper',
+  ]);
+  const nextTool = allowed.has(String(tool || '')) ? String(tool) : fallback;
+  if (elements.makerToolSelect) {
+    elements.makerToolSelect.value = nextTool;
+  }
+  syncToolButtons();
+}
+
 function resetPendingWall() {
   editorState.pendingWallStart = null;
 }
@@ -709,6 +772,19 @@ function createObjectByTool(tool, x, y) {
       color: '#62c2ff',
     };
   }
+  if (tool === 'diamond_block') {
+    return {
+      oid: nextOid('diamond'),
+      type: 'diamond_block',
+      x: px,
+      y: py,
+      width: 0.34,
+      height: 0.34,
+      rotation: 45,
+      restitution: 1.5,
+      color: '#74d4ff',
+    };
+  }
   if (tool === 'rotor') {
     return {
       oid: nextOid('rotor'),
@@ -750,6 +826,21 @@ function createObjectByTool(tool, x, y) {
       triggerRadius: 1.2,
       cooldownMs: 320,
       color: '#ffa557',
+    };
+  }
+  if (tool === 'burst_bumper') {
+    return {
+      oid: nextOid('burst'),
+      type: 'burst_bumper',
+      x: px,
+      y: py,
+      radius: 0.72,
+      restitution: 3.2,
+      life: -1,
+      triggerRadius: 1.2,
+      force: 6.2,
+      intervalMs: 420,
+      color: '#ff9f6e',
     };
   }
   return null;
@@ -804,6 +895,20 @@ function populateObjectEditor() {
     if (elements.objExtra2Input) elements.objExtra2Input.value = String(round1(toFinite(p2[1], 0)));
     if (elements.objExtra1Label) elements.objExtra1Label.textContent = '점2 x';
     if (elements.objExtra2Label) elements.objExtra2Label.textContent = '점2 y';
+  } else if (obj.type === 'burst_bumper') {
+    if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
+    if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
+    if (elements.objExtra1Input) elements.objExtra1Input.value = String(round1(toFinite(obj.triggerRadius, toFinite(obj.radius, 0.7) + 0.45)));
+    if (elements.objExtra2Input) elements.objExtra2Input.value = String(round1(toFinite(obj.restitution, 3.2)));
+    if (elements.objExtra1Label) elements.objExtra1Label.textContent = 'triggerR';
+    if (elements.objExtra2Label) elements.objExtra2Label.textContent = 'bounce';
+  } else if (obj.type === 'hammer') {
+    if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
+    if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
+    if (elements.objExtra1Input) elements.objExtra1Input.value = String(round1(toFinite(obj.triggerRadius, 1.2)));
+    if (elements.objExtra2Input) elements.objExtra2Input.value = String(Math.round(toFinite(obj.cooldownMs, 320)));
+    if (elements.objExtra1Label) elements.objExtra1Label.textContent = 'triggerR';
+    if (elements.objExtra2Label) elements.objExtra2Label.textContent = 'cooldown';
   } else {
     if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
     if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
@@ -861,6 +966,33 @@ function applyObjectEditorValues() {
     const x2 = round1(toFinite(elements.objExtra1Input ? elements.objExtra1Input.value : x1 + 1, x1 + 1));
     const y2 = round1(toFinite(elements.objExtra2Input ? elements.objExtra2Input.value : y1 + 1, y1 + 1));
     obj.points = [[x1, y1], [x2, y2]];
+    refreshCurrentJsonViewer();
+    return;
+  }
+  if (obj.type === 'burst_bumper') {
+    obj.x = round1(toFinite(elements.objXInput ? elements.objXInput.value : obj.x, toFinite(obj.x, 0)));
+    obj.y = round1(toFinite(elements.objYInput ? elements.objYInput.value : obj.y, toFinite(obj.y, 0)));
+    obj.radius = round1(toFinite(elements.objRadiusInput ? elements.objRadiusInput.value : obj.radius, toFinite(obj.radius, 0.72)));
+    obj.triggerRadius = round1(toFinite(
+      elements.objExtra1Input ? elements.objExtra1Input.value : obj.triggerRadius,
+      toFinite(obj.triggerRadius, toFinite(obj.radius, 0.72) + 0.45),
+    ));
+    obj.restitution = round1(toFinite(elements.objExtra2Input ? elements.objExtra2Input.value : obj.restitution, toFinite(obj.restitution, 3.2)));
+    obj.force = round1(toFinite(elements.objForceInput ? elements.objForceInput.value : obj.force, toFinite(obj.force, 6.2)));
+    obj.intervalMs = Math.round(toFinite(elements.objIntervalInput ? elements.objIntervalInput.value : obj.intervalMs, toFinite(obj.intervalMs, 420)));
+    refreshCurrentJsonViewer();
+    return;
+  }
+  if (obj.type === 'hammer') {
+    obj.x = round1(toFinite(elements.objXInput ? elements.objXInput.value : obj.x, toFinite(obj.x, 0)));
+    obj.y = round1(toFinite(elements.objYInput ? elements.objYInput.value : obj.y, toFinite(obj.y, 0)));
+    obj.triggerRadius = round1(toFinite(elements.objExtra1Input ? elements.objExtra1Input.value : obj.triggerRadius, toFinite(obj.triggerRadius, 1.2)));
+    obj.cooldownMs = Math.round(toFinite(elements.objExtra2Input ? elements.objExtra2Input.value : obj.cooldownMs, toFinite(obj.cooldownMs, 320)));
+    obj.radius = round1(toFinite(elements.objRadiusInput ? elements.objRadiusInput.value : obj.radius, toFinite(obj.radius, 0.6)));
+    obj.rotation = round1(toFinite(elements.objRotationInput ? elements.objRotationInput.value : obj.rotation, toFinite(obj.rotation, 0)));
+    obj.dirDeg = Math.round(toFinite(elements.objDirInput ? elements.objDirInput.value : obj.dirDeg, toFinite(obj.dirDeg, 90)));
+    obj.force = round1(toFinite(elements.objForceInput ? elements.objForceInput.value : obj.force, toFinite(obj.force, 4.2)));
+    obj.intervalMs = Math.round(toFinite(elements.objIntervalInput ? elements.objIntervalInput.value : obj.intervalMs, toFinite(obj.intervalMs, 1200)));
     refreshCurrentJsonViewer();
     return;
   }
@@ -1082,18 +1214,26 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
   }
 
   const center = worldToCanvas(layout, obj.x, obj.y);
-  if (obj.type === 'peg_circle' || obj.type === 'portal') {
+  if (obj.type === 'peg_circle' || obj.type === 'portal' || obj.type === 'burst_bumper') {
     const radius = Math.max(0.08, toFinite(obj.radius, 0.6)) * (layout.drawW / WORLD_WIDTH);
     ctx.beginPath();
     ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
+    if (obj.type === 'burst_bumper') {
+      const triggerRadius = Math.max(0.12, toFinite(obj.triggerRadius, toFinite(obj.radius, 0.7) + 0.45)) * (layout.drawW / WORLD_WIDTH);
+      ctx.beginPath();
+      ctx.arc(center.x, center.y, triggerRadius, 0, Math.PI * 2);
+      ctx.strokeStyle = selected ? '#ffd44d' : 'rgba(255, 169, 120, 0.9)';
+      ctx.lineWidth = selected ? 2.2 : 1.5;
+      ctx.stroke();
+    }
     ctx.restore();
     return;
   }
 
-  const width = Math.max(0.08, toFinite(obj.width, obj.type === 'rotor' ? 3 : 1.2));
-  const height = Math.max(0.05, toFinite(obj.height, obj.type === 'rotor' ? 0.12 : 0.2));
+  const width = Math.max(0.08, toFinite(obj.width, obj.type === 'rotor' ? 3 : (obj.type === 'diamond_block' ? 0.32 : 1.2)));
+  const height = Math.max(0.05, toFinite(obj.height, obj.type === 'rotor' ? 0.12 : (obj.type === 'diamond_block' ? 0.32 : 0.2)));
   const rad = (Math.PI / 180) * toFinite(obj.rotation, 0);
   const drawWidth = width * (layout.drawW / WORLD_WIDTH);
   const drawHeight = height * (layout.drawH / layout.stageGoalY);
@@ -1501,6 +1641,7 @@ function setupEvents() {
   });
 
   bindEvent(elements.makerToolSelect, 'change', () => {
+    syncToolButtons();
     resetPendingWall();
     const tool = selectedTool();
     if (tool === 'select') {
@@ -1508,10 +1649,23 @@ function setupEvents() {
     } else if (tool === 'wall_polyline') {
       updateMakerHint('벽 모드: 캔버스를 2번 클릭해 시작/끝점을 지정');
     } else {
-      updateMakerHint(`${tool} 모드: 캔버스 클릭으로 오브젝트 추가`);
+      updateMakerHint(`${toolDisplayName(tool)} 모드: 캔버스 클릭으로 오브젝트 추가`);
     }
     drawMakerCanvas();
   });
+
+  if (Array.isArray(elements.makerToolButtons)) {
+    for (let index = 0; index < elements.makerToolButtons.length; index += 1) {
+      const button = elements.makerToolButtons[index];
+      bindEvent(button, 'click', () => {
+        const tool = button && button.dataset ? button.dataset.makerTool : '';
+        setSelectedTool(tool);
+        if (elements.makerToolSelect) {
+          elements.makerToolSelect.dispatchEvent(new Event('change'));
+        }
+      });
+    }
+  }
 
   bindEvent(elements.makerCanvas, 'click', (event) => {
     handleMakerCanvasClick(event);
@@ -1707,6 +1861,7 @@ async function boot() {
   setWorkingMapJson(buildDefaultMapJson(initialMapId), initialMapId);
   syncStageInputsFromMap();
   syncObjectList();
+  setSelectedTool('select');
   drawMakerCanvas();
   updateMakerHint('툴을 선택하고 캔버스를 클릭해서 맵 오브젝트를 배치하세요.');
   setPlayPauseUi(false);
