@@ -295,13 +295,26 @@
       background: #0a1225;
       flex: 1;
       min-height: 0;
+      position: relative;
     }
-    #makerCanvas {
+    .maker-live-frame {
+      position: absolute;
+      inset: 0;
       width: 100%;
       height: 100%;
-      display: block;
+      border: 0;
+      background: #000;
+      pointer-events: none;
+      z-index: 1;
+    }
+    #makerCanvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
       cursor: crosshair;
-      background: linear-gradient(180deg, #0d1a36 0%, #0a142d 100%);
+      background: transparent;
+      z-index: 2;
     }
     #makerCanvas.panning {
       cursor: grabbing;
@@ -383,47 +396,11 @@
       color: #95acd8;
       line-height: 1.35;
     }
-    .preview-wrap {
-      border: 1px solid #2e436f;
-      border-radius: 8px;
-      background: #0b1430;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      min-height: 0;
-    }
-    .preview-head {
-      padding: 7px 9px;
-      border-bottom: 1px solid #2f426d;
-      font-size: 11px;
-      color: #9ec0ff;
-      background: #121f3d;
-      font-weight: 700;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-    }
-    .preview-toolbar {
+    .maker-sim-toolbar {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: 1fr 1fr auto;
       gap: 6px;
-      padding: 8px;
-      border-bottom: 1px solid #273b63;
-      background: #0f1b34;
-    }
-    .preview-frame-wrap {
-      height: 210px;
-      min-height: 160px;
-      background: #000;
-      border-top: 1px solid #243a64;
-    }
-    #previewFrame {
-      width: 100%;
-      height: 100%;
-      border: 0;
-      display: block;
-      background: #000;
+      align-items: center;
     }
     .preview-status {
       color: #95acd8;
@@ -431,8 +408,10 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 55%;
+      max-width: 220px;
       text-align: right;
+      font-size: 11px;
+      padding-right: 4px;
     }
     .floating-controls {
       position: fixed;
@@ -560,9 +539,6 @@
       #makerCanvas {
         min-height: 300px;
       }
-      .preview-frame-wrap {
-        height: 180px;
-      }
       .floating-controls {
         width: calc(100% - 24px);
         left: 12px;
@@ -639,26 +615,19 @@
           <div class="maker-board-head">좌표 맵 제작 영역 (가운데)</div>
           <div class="maker-board-body">
             <div class="maker-canvas-wrap">
+              <iframe id="previewFrame" class="maker-live-frame" title="pinball-v2-coordinate-live"></iframe>
               <canvas id="makerCanvas" width="360" height="760"></canvas>
+            </div>
+            <div class="maker-sim-toolbar">
+              <button id="previewPlayPauseButton" class="primary">좌표창 시작</button>
+              <button id="previewResetButton">좌표창 리셋</button>
+              <span id="previewStatusText" class="preview-status">좌표창 엔진 연결 대기</span>
             </div>
             <div class="maker-toolbar">
               <button id="applyDraftButton" class="primary">드래프트 맵 적용</button>
               <button id="clearObjectsButton" class="warn">오브젝트 전체삭제</button>
             </div>
             <div class="maker-compact" id="makerHintText">툴을 선택하고 좌표 맵 캔버스를 클릭해 배치하세요.</div>
-            <div class="preview-wrap">
-              <div class="preview-head">
-                <span>좌표창 미니 물리 프리뷰</span>
-                <span id="previewStatusText" class="preview-status">연결 대기</span>
-              </div>
-              <div class="preview-toolbar">
-                <button id="previewPlayPauseButton" class="primary">미리보기 시작</button>
-                <button id="previewResetButton">미리보기 리셋</button>
-              </div>
-              <div class="preview-frame-wrap">
-                <iframe id="previewFrame" title="pinball-v2-preview"></iframe>
-              </div>
-            </div>
           </div>
         </section>
         <aside class="maker-side">

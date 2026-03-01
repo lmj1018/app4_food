@@ -207,7 +207,7 @@ function setPreviewPlayPauseUi(isRunning) {
     return;
   }
   const running = isRunning === true;
-  elements.previewPlayPauseButton.textContent = running ? '미리보기 일시정지' : '미리보기 시작';
+  elements.previewPlayPauseButton.textContent = running ? '좌표창 일시정지' : '좌표창 시작';
   elements.previewPlayPauseButton.classList.toggle('primary', !running);
 }
 
@@ -1679,9 +1679,10 @@ function drawMakerCanvas() {
   }
 
   ctx.clearRect(0, 0, layout.width, layout.height);
-  ctx.fillStyle = '#081226';
+  const hasLiveFrame = !!(elements.previewFrame && elements.previewFrame.src);
+  ctx.fillStyle = hasLiveFrame ? 'rgba(8, 18, 38, 0.12)' : '#081226';
   ctx.fillRect(0, 0, layout.width, layout.height);
-  ctx.strokeStyle = 'rgba(120, 158, 225, 0.2)';
+  ctx.strokeStyle = 'rgba(120, 158, 225, 0.28)';
   ctx.lineWidth = 1;
   for (let x = 0; x <= WORLD_WIDTH; x += 2) {
     const p1 = worldToCanvas(layout, x, 0);
@@ -2231,7 +2232,7 @@ async function waitForEngineApi(timeoutMs = 20000) {
 
 async function waitForPreviewApi(timeoutMs = 20000) {
   if (FILE_PROTOCOL) {
-    throw new Error('file:// 경로에서는 프리뷰 엔진 모듈이 차단됩니다.');
+    throw new Error('file:// 경로에서는 좌표창 엔진 모듈이 차단됩니다.');
   }
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -2241,7 +2242,7 @@ async function waitForPreviewApi(timeoutMs = 20000) {
     }
     await new Promise((resolve) => setTimeout(resolve, 60));
   }
-  throw new Error('프리뷰 엔진 API 대기 시간 초과');
+  throw new Error('좌표창 엔진 API 대기 시간 초과');
 }
 
 async function withEngineAction(action, options = {}) {
@@ -2272,7 +2273,7 @@ async function withPreviewAction(action, options = {}) {
   } catch (error) {
     if (!silent) {
       setStatus(String(error && error.message ? error.message : error), 'error');
-      setPreviewStatus('프리뷰 연결 실패', 'error');
+      setPreviewStatus('좌표창 엔진 연결 실패', 'error');
     }
     return null;
   }
@@ -2332,7 +2333,7 @@ async function syncPreviewFromDraft(options = {}) {
       ensurePreviewCanvasFill();
       const running = readEngineRunning(api);
       setPreviewPlayPauseUi(running);
-      setPreviewStatus(running ? '실행중' : '일시정지');
+      setPreviewStatus(running ? '좌표창 실행중' : '좌표창 일시정지');
     }, { silent: true });
   } finally {
     previewLiveApplyInFlight = false;
@@ -2508,13 +2509,13 @@ async function loadPreviewFrame() {
     return;
   }
   const previewUrl = `../assets/ui/pinball/index_v2.html?editor=1&preview=1&nocache=${Date.now()}`;
-  setPreviewStatus('로딩중...');
+  setPreviewStatus('좌표창 엔진 로딩중...');
   elements.previewFrame.src = previewUrl;
   await new Promise((resolve, reject) => {
     const timeout = window.setTimeout(() => {
       elements.previewFrame.onload = null;
       elements.previewFrame.onerror = null;
-      reject(new Error('프리뷰 iframe 로딩 시간 초과'));
+      reject(new Error('좌표창 iframe 로딩 시간 초과'));
     }, 15000);
     elements.previewFrame.onload = () => {
       window.clearTimeout(timeout);
@@ -2526,18 +2527,18 @@ async function loadPreviewFrame() {
       window.clearTimeout(timeout);
       elements.previewFrame.onload = null;
       elements.previewFrame.onerror = null;
-      reject(new Error('프리뷰 iframe 로딩 실패'));
+      reject(new Error('좌표창 iframe 로딩 실패'));
     };
   });
   startPreviewCanvasFillRetry();
   const api = await waitForPreviewApi(30000);
   const initResult = await api.init(readPayload());
   if (!initResult || initResult.ok !== true) {
-    throw new Error(initResult && initResult.reason ? initResult.reason : '프리뷰 초기화 실패');
+    throw new Error(initResult && initResult.reason ? initResult.reason : '좌표창 엔진 초기화 실패');
   }
   ensurePreviewCanvasFill();
   setPreviewPlayPauseUi(readEngineRunning(api));
-  setPreviewStatus('준비완료');
+  setPreviewStatus('좌표창 준비완료');
   await syncPreviewFromDraft({
     preserveMarbles: false,
     preserveRunning: false,
@@ -2891,18 +2892,18 @@ function setupEvents() {
       if (running) {
         const pauseResult = await api.pause();
         if (!pauseResult || pauseResult.ok !== true) {
-          throw new Error(pauseResult && pauseResult.reason ? pauseResult.reason : '미리보기 일시정지 실패');
+        throw new Error(pauseResult && pauseResult.reason ? pauseResult.reason : '좌표창 일시정지 실패');
         }
         setPreviewPlayPauseUi(false);
-        setPreviewStatus('일시정지');
+        setPreviewStatus('좌표창 일시정지');
         return;
       }
       const startResult = await api.start();
       if (!startResult || startResult.ok !== true) {
-        throw new Error(startResult && startResult.reason ? startResult.reason : '미리보기 시작 실패');
+        throw new Error(startResult && startResult.reason ? startResult.reason : '좌표창 시작 실패');
       }
       setPreviewPlayPauseUi(true);
-      setPreviewStatus('실행중');
+      setPreviewStatus('좌표창 실행중');
     }, { silent: false });
   });
 
@@ -2910,10 +2911,10 @@ function setupEvents() {
     await withPreviewAction(async (api) => {
       const result = await api.reset();
       if (!result || result.ok !== true) {
-        throw new Error(result && result.reason ? result.reason : '미리보기 리셋 실패');
+        throw new Error(result && result.reason ? result.reason : '좌표창 리셋 실패');
       }
       setPreviewPlayPauseUi(false);
-      setPreviewStatus('리셋됨');
+      setPreviewStatus('좌표창 리셋됨');
       await syncPreviewFromDraft({
         preserveMarbles: false,
         preserveRunning: false,
@@ -3016,7 +3017,7 @@ async function boot() {
   updateMakerHint('툴을 선택해 배치하고, 선택 모드에서 드래그/핸들로 즉시 수정하세요.');
   setPlayPauseUi(false);
   setPreviewPlayPauseUi(false);
-  setPreviewStatus('연결 대기');
+  setPreviewStatus('좌표창 엔진 연결 대기');
   if (FILE_PROTOCOL) {
     setStatus('현재 file:// 경로입니다. tools/start_pinball_map_maker_v2.bat 로 실행하세요', 'warn');
     return;
