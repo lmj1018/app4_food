@@ -2,15 +2,12 @@ const SLOT_IDS = ['slot1', 'slot2', 'slot3'];
 const FILE_PROTOCOL = window.location.protocol === 'file:';
 
 let mapCatalog = [];
+let workingMapJson = null;
 
 const elements = {
-  mapJsonInput: document.getElementById('mapJsonInput'),
   mapsDirStatus: document.getElementById('mapsDirStatus'),
   mapSelect: document.getElementById('mapSelect'),
   refreshMapListButton: document.getElementById('refreshMapListButton'),
-  loadSelectedMapButton: document.getElementById('loadSelectedMapButton'),
-  newMapIdInput: document.getElementById('newMapIdInput'),
-  newMapTitleInput: document.getElementById('newMapTitleInput'),
   saveSelectedMapButton: document.getElementById('saveSelectedMapButton'),
   saveAsNewMapButton: document.getElementById('saveAsNewMapButton'),
   mapIdInput: document.getElementById('mapIdInput'),
@@ -30,19 +27,24 @@ const elements = {
   engineUrlText: document.getElementById('engineUrlText'),
 };
 
+function deepClone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
 function setStatus(message, kind = 'ok') {
-  const text = String(message ?? '');
   if (!elements.statusBox) {
     return;
   }
-  elements.statusBox.textContent = text;
+  elements.statusBox.textContent = String(message ?? '');
   if (kind === 'error') {
     elements.statusBox.style.color = '#ff9898';
-  } else if (kind === 'warn') {
-    elements.statusBox.style.color = '#ffcf84';
-  } else {
-    elements.statusBox.style.color = '#7df4bc';
+    return;
   }
+  if (kind === 'warn') {
+    elements.statusBox.style.color = '#ffcf84';
+    return;
+  }
+  elements.statusBox.style.color = '#7df4bc';
 }
 
 function setMapsDirStatus(message, kind = 'ok') {
@@ -97,9 +99,9 @@ function bindEvent(element, eventName, handler) {
 }
 
 function setBusy(isBusy) {
-  const buttons = [
+  const controls = [
+    elements.mapSelect,
     elements.refreshMapListButton,
-    elements.loadSelectedMapButton,
     elements.saveSelectedMapButton,
     elements.saveAsNewMapButton,
     elements.applyButton,
@@ -109,9 +111,9 @@ function setBusy(isBusy) {
     elements.quickSaveButton,
     elements.quickLoadButton,
   ];
-  buttons.forEach((button) => {
-    if (button) {
-      button.disabled = isBusy;
+  controls.forEach((control) => {
+    if (control) {
+      control.disabled = isBusy;
     }
   });
 }
@@ -139,11 +141,10 @@ function readCandidates() {
 function readPayload() {
   const mapId = String(elements.mapIdInput.value || '').trim() || 'v2_default';
   const winningRank = Math.max(1, Math.floor(Number(elements.winningRankInput.value) || 1));
-  const candidates = readCandidates();
   return {
     mapId,
     winningRank,
-    candidates,
+    candidates: readCandidates(),
     autoStart: false,
   };
 }
@@ -162,48 +163,33 @@ function buildDefaultMapJson(mapId = 'v2_custom_map') {
   };
 }
 
-function prettyJson(value) {
-  return JSON.stringify(value, null, 2);
-}
-
-function writeMapJsonEditor(mapJson) {
-  if (!elements.mapJsonInput) {
-    return;
+function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
+  const fallbackId = String(fallbackMapId || '').trim() || 'v2_custom_map';
+  const source = rawMapJson && typeof rawMapJson === 'object' && !Array.isArray(rawMapJson)
+    ? deepClone(rawMapJson)
+    : buildDefaultMapJson(fallbackId);
+  if (typeof source.id !== 'string' || !source.id.trim()) {
+    source.id = fallbackId;
+  } else {
+    source.id = source.id.trim();
   }
-  elements.mapJsonInput.value = prettyJson(mapJson);
-}
-
-function parseMapJsonText() {
-  const rawText = String(elements.mapJsonInput && elements.mapJsonInput.value ? elements.mapJsonInput.value : '').trim();
-  if (!rawText) {
-    throw new Error('맵 JSON 입력칸이 비어 있습니다');
+  if (typeof source.title !== 'string' || !source.title.trim()) {
+    source.title = source.id;
+  } else {
+    source.title = source.title.trim();
   }
-  let parsed;
-  try {
-    parsed = JSON.parse(rawText);
-  } catch (error) {
-    throw new Error(`맵 JSON 파싱 실패: ${String(error && error.message ? error.message : error)}`);
+  if (!Number.isFinite(Number(source.schemaVersion))) {
+    source.schemaVersion = 1;
+  } else {
+    source.schemaVersion = Math.max(1, Math.floor(Number(source.schemaVersion)));
   }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('맵 JSON 형식이 올바르지 않습니다');
+  if (!source.stage || typeof source.stage !== 'object' || Array.isArray(source.stage)) {
+    source.stage = {};
   }
-  const fallbackMapId = String(elements.mapIdInput.value || '').trim() || `v2_custom_${Date.now()}`;
-  if (typeof parsed.id !== 'string' || !parsed.id.trim()) {
-    parsed.id = fallbackMapId;
+  if (!Array.isArray(source.objects)) {
+    source.objects = [];
   }
-  if (typeof parsed.title !== 'string' || !parsed.title.trim()) {
-    parsed.title = parsed.id;
-  }
-  if (!Number.isFinite(Number(parsed.schemaVersion))) {
-    parsed.schemaVersion = 1;
-  }
-  if (!parsed.stage || typeof parsed.stage !== 'object' || Array.isArray(parsed.stage)) {
-    parsed.stage = {};
-  }
-  if (!Array.isArray(parsed.objects)) {
-    parsed.objects = [];
-  }
-  return parsed;
+  return source;
 }
 
 function syncMapIdInputFromMapJson(mapJson) {
@@ -213,6 +199,22 @@ function syncMapIdInputFromMapJson(mapJson) {
   if (mapId) {
     elements.mapIdInput.value = mapId;
   }
+}
+
+function setWorkingMapJson(rawMapJson, fallbackMapId = '') {
+  const fallbackId = fallbackMapId || String(elements.mapIdInput.value || '').trim() || 'v2_custom_map';
+  const normalized = normalizeMapJson(rawMapJson, fallbackId);
+  workingMapJson = deepClone(normalized);
+  syncMapIdInputFromMapJson(normalized);
+  return deepClone(normalized);
+}
+
+function getWorkingMapJson(fallbackMapId = '') {
+  if (workingMapJson && typeof workingMapJson === 'object') {
+    return deepClone(workingMapJson);
+  }
+  const fallbackId = fallbackMapId || String(elements.mapIdInput.value || '').trim() || 'v2_custom_map';
+  return setWorkingMapJson(buildDefaultMapJson(fallbackId), fallbackId);
 }
 
 function sanitizeMapId(value) {
@@ -248,8 +250,7 @@ function renderMapCatalog(preferredMapId = '') {
   const options = mapCatalog
     .map((entry) => {
       const mapId = String(entry && entry.id ? entry.id : '');
-      const title = String(entry && entry.title ? entry.title : mapId);
-      return `<option value="${mapId}">${title} (${mapId})</option>`;
+      return `<option value="${mapId}">${mapId}</option>`;
     })
     .join('');
   elements.mapSelect.innerHTML = options || '<option value="">등록된 맵 없음</option>';
@@ -276,6 +277,19 @@ async function callMapMakerApi(path, options = {}) {
     throw new Error(String(reason));
   }
   return payload;
+}
+
+function normalizeManifestData(raw) {
+  const safe = raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? raw
+    : {};
+  const maps = Array.isArray(safe.maps)
+    ? safe.maps.filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+    : [];
+  return {
+    version: Number.isFinite(Number(safe.version)) ? Number(safe.version) : 1,
+    maps,
+  };
 }
 
 async function fetchManifestFromServer() {
@@ -317,14 +331,13 @@ async function refreshMapCatalog(preferredMapId = '') {
     })
     .map((entry) => ({
       id: String(entry.id).trim(),
-      title: String(entry.title || entry.id).trim(),
       file: String(entry.file).trim(),
       enabled: entry.enabled !== false,
       sort: Number.isFinite(Number(entry.sort)) ? Number(entry.sort) : 9999,
     }));
   renderMapCatalog(preferredMapId || String(elements.mapIdInput.value || '').trim());
   const selectedMapId = selectedMapIdFromDropdown();
-  if (selectedMapId && elements.mapIdInput) {
+  if (selectedMapId) {
     elements.mapIdInput.value = selectedMapId;
   }
   if (mapCatalog.length > 0) {
@@ -334,57 +347,18 @@ async function refreshMapCatalog(preferredMapId = '') {
   }
 }
 
-function seedNewMapInputsFromCurrentMap(mapJson) {
-  if (elements.newMapIdInput) {
-    const nextId = mapJson && typeof mapJson.id === 'string' && mapJson.id.trim()
-      ? mapJson.id.trim()
-      : 'v2_custom_map';
-    elements.newMapIdInput.value = nextId;
-  }
-  if (elements.newMapTitleInput) {
-    const nextTitle = mapJson && typeof mapJson.title === 'string' && mapJson.title.trim()
-      ? mapJson.title.trim()
-      : 'V2 Custom Map';
-    elements.newMapTitleInput.value = nextTitle;
-  }
-}
-
-async function loadSelectedCatalogMap() {
-  const entry = selectedMapCatalogEntry();
-  if (!entry) {
-    throw new Error('로드할 맵을 먼저 선택하세요');
-  }
-  const mapPayload = await callMapMakerApi(`map?mapId=${encodeURIComponent(entry.id)}&nocache=${Date.now()}`);
-  if (mapPayload.mapJson && typeof mapPayload.mapJson === 'object') {
-    writeMapJsonEditor(mapPayload.mapJson);
-    seedNewMapInputsFromCurrentMap(mapPayload.mapJson);
-  }
-  elements.mapIdInput.value = entry.id;
-  await applyMapAndCandidates();
-  await withEngineAction(async (api) => {
-    await syncMapJsonEditorFromEngine(api);
-  });
-  seedNewMapInputsFromCurrentMap(parseMapJsonText());
-  setStatus(`선택 맵 로드 완료: ${entry.title} (${entry.id})`);
-}
-
-async function syncMapJsonEditorFromEngine(api) {
+async function syncMapJsonFromEngine(api) {
   if (!api || typeof api.getCurrentMapJson !== 'function') {
-    const fallback = buildDefaultMapJson(String(elements.mapIdInput.value || '').trim() || 'v2_custom_map');
-    writeMapJsonEditor(fallback);
-    seedNewMapInputsFromCurrentMap(fallback);
-    return;
+    const fallbackId = String(elements.mapIdInput.value || '').trim() || 'v2_custom_map';
+    setWorkingMapJson(buildDefaultMapJson(fallbackId), fallbackId);
+    return getWorkingMapJson(fallbackId);
   }
   const mapJson = api.getCurrentMapJson();
   if (mapJson && typeof mapJson === 'object') {
-    writeMapJsonEditor(mapJson);
-    syncMapIdInputFromMapJson(mapJson);
-    seedNewMapInputsFromCurrentMap(mapJson);
-  } else {
-    const fallback = buildDefaultMapJson(String(elements.mapIdInput.value || '').trim() || 'v2_custom_map');
-    writeMapJsonEditor(fallback);
-    seedNewMapInputsFromCurrentMap(fallback);
+    return setWorkingMapJson(mapJson);
   }
+  const fallbackId = String(elements.mapIdInput.value || '').trim() || 'v2_custom_map';
+  return setWorkingMapJson(buildDefaultMapJson(fallbackId), fallbackId);
 }
 
 function getFrameWindow() {
@@ -415,12 +389,10 @@ function readEngineFrameDiagnostics() {
       readyState: '',
       statusText: '',
       bootError: '',
-      href: '',
     };
   }
   let readyState = '';
   let statusText = '';
-  let href = '';
   try {
     readyState = frameWindow.document && frameWindow.document.readyState
       ? String(frameWindow.document.readyState)
@@ -430,9 +402,6 @@ function readEngineFrameDiagnostics() {
       : null;
     statusText = statusElement && typeof statusElement.textContent === 'string'
       ? statusElement.textContent.trim()
-      : '';
-    href = frameWindow.location && frameWindow.location.href
-      ? String(frameWindow.location.href)
       : '';
   } catch (_) {
   }
@@ -448,7 +417,6 @@ function readEngineFrameDiagnostics() {
     readyState,
     statusText,
     bootError,
-    href,
   };
 }
 
@@ -529,18 +497,23 @@ async function loadEngineFrame() {
   if (!initResult || initResult.ok !== true) {
     throw new Error(initResult && initResult.reason ? initResult.reason : '초기화에 실패했습니다');
   }
-  await syncMapJsonEditorFromEngine(api);
+  await syncMapJsonFromEngine(api);
   setPlayPauseUi(readEngineRunning(api));
   setStatus(`엔진 준비 완료: 맵=${payload.mapId}, 볼=${payload.candidates.length}`);
 }
 
-async function withEngineAction(action) {
+async function withEngineAction(action, options = {}) {
+  const shouldRethrow = options.rethrow === true;
   setBusy(true);
   try {
     const api = await waitForEngineApi();
-    await action(api);
+    return await action(api);
   } catch (error) {
     setStatus(String(error && error.message ? error.message : error), 'error');
+    if (shouldRethrow) {
+      throw error;
+    }
+    return null;
   } finally {
     setBusy(false);
   }
@@ -555,21 +528,19 @@ async function applyMapAndCandidates() {
       if (!mapResult || mapResult.ok !== true) {
         throw new Error(mapResult && mapResult.reason ? mapResult.reason : '맵 로드에 실패했습니다');
       }
-      await syncMapJsonEditorFromEngine(api);
+      await syncMapJsonFromEngine(api);
     } else {
       if (typeof api.applyMapJson !== 'function') {
         throw new Error('엔진이 맵 JSON 적용 API를 지원하지 않습니다');
       }
-      const mapJson = parseMapJsonText();
-      if (mapJson.id !== payload.mapId) {
-        mapJson.id = payload.mapId;
-      }
+      const mapJson = getWorkingMapJson(payload.mapId);
+      mapJson.id = payload.mapId;
+      mapJson.title = payload.mapId;
       const mapResult = await api.applyMapJson(mapJson);
       if (!mapResult || mapResult.ok !== true) {
         throw new Error(mapResult && mapResult.reason ? mapResult.reason : '맵 JSON 적용에 실패했습니다');
       }
-      writeMapJsonEditor(mapJson);
-      seedNewMapInputsFromCurrentMap(mapJson);
+      setWorkingMapJson(mapJson, payload.mapId);
     }
     const rankResult = api.setWinningRank(payload.winningRank);
     if (!rankResult || rankResult.ok !== true) {
@@ -584,20 +555,20 @@ async function applyMapAndCandidates() {
       elements.mapSelect.value = payload.mapId;
     }
     setStatus(`맵 적용 완료: 맵=${payload.mapId}, 후보=${payload.candidates.length}`);
-  });
+  }, { rethrow: true });
 }
 
-function normalizeManifestData(raw) {
-  const safe = raw && typeof raw === 'object' && !Array.isArray(raw)
-    ? raw
-    : {};
-  const maps = Array.isArray(safe.maps)
-    ? safe.maps.filter((item) => item && typeof item === 'object' && !Array.isArray(item))
-    : [];
-  return {
-    version: Number.isFinite(Number(safe.version)) ? Number(safe.version) : 1,
-    maps,
-  };
+async function loadSelectedCatalogMap() {
+  const entry = selectedMapCatalogEntry();
+  if (!entry) {
+    throw new Error('로드할 맵을 먼저 선택하세요');
+  }
+  const mapPayload = await callMapMakerApi(`map?mapId=${encodeURIComponent(entry.id)}&nocache=${Date.now()}`);
+  if (mapPayload.mapJson && typeof mapPayload.mapJson === 'object') {
+    setWorkingMapJson(mapPayload.mapJson, entry.id);
+  }
+  elements.mapIdInput.value = entry.id;
+  await applyMapAndCandidates();
 }
 
 function updateMapsDirConnectedStatus() {
@@ -618,59 +589,61 @@ async function saveMapViaServer(payload) {
   return result;
 }
 
+async function getCurrentMapJsonForSave() {
+  const api = await waitForEngineApi();
+  if (api && typeof api.getCurrentMapJson === 'function') {
+    const fromEngine = api.getCurrentMapJson();
+    if (fromEngine && typeof fromEngine === 'object') {
+      return setWorkingMapJson(fromEngine);
+    }
+  }
+  const fallbackId = String(elements.mapIdInput.value || '').trim() || 'v2_custom_map';
+  return getWorkingMapJson(fallbackId);
+}
+
 async function saveSelectedMapOverwrite() {
   const selected = selectedMapCatalogEntry();
   if (!selected) {
     throw new Error('덮어쓸 맵을 목록에서 먼저 선택하세요');
   }
-  const mapJson = parseMapJsonText();
+  const mapJson = await getCurrentMapJsonForSave();
   mapJson.id = selected.id;
-  if (typeof mapJson.title !== 'string' || !mapJson.title.trim()) {
-    mapJson.title = selected.title || selected.id;
-  }
+  mapJson.title = selected.id;
   const result = await saveMapViaServer({
     mode: 'selected',
     selectedMapId: selected.id,
     mapJson,
   });
   await refreshMapCatalog(result.mapId || selected.id);
-  syncMapIdInputFromMapJson(mapJson);
-  seedNewMapInputsFromCurrentMap(mapJson);
-  setStatus(`선택 맵 저장 완료: ${selected.title} (${selected.id})`);
+  if (elements.mapSelect) {
+    elements.mapSelect.value = selected.id;
+  }
+  elements.mapIdInput.value = selected.id;
+  setWorkingMapJson(mapJson, selected.id);
+  setStatus(`선택 맵 저장 완료: ${selected.id}`);
 }
 
 async function saveAsNewMap() {
-  const mapJson = parseMapJsonText();
-  const newId = sanitizeMapId(elements.newMapIdInput ? elements.newMapIdInput.value : '');
-  const newTitle = String(elements.newMapTitleInput && elements.newMapTitleInput.value
-    ? elements.newMapTitleInput.value
-    : '')
-    .trim() || newId;
+  const newId = sanitizeMapId(String(elements.mapIdInput.value || '').trim());
+  const mapJson = await getCurrentMapJsonForSave();
   mapJson.id = newId;
-  mapJson.title = newTitle;
+  mapJson.title = newId;
   const result = await saveMapViaServer({
     mode: 'new',
     newMapId: newId,
-    newMapTitle: newTitle,
+    newMapTitle: newId,
     mapJson,
   });
   await refreshMapCatalog(result.mapId || newId);
-  syncMapIdInputFromMapJson(mapJson);
-  seedNewMapInputsFromCurrentMap(mapJson);
-  setStatus(`새 맵 저장 완료: ${newTitle} (${newId})`);
+  if (elements.mapSelect && mapCatalog.some((entry) => entry.id === newId)) {
+    elements.mapSelect.value = newId;
+  }
+  elements.mapIdInput.value = newId;
+  setWorkingMapJson(mapJson, newId);
+  setStatus(`새 맵 저장 완료: ${newId}`);
 }
 
 function setupEvents() {
-  bindEvent(elements.mapIdInput, 'change', () => {
-    const mapId = String(elements.mapIdInput.value || '').trim();
-    if (!mapId) {
-      return;
-    }
-    if (elements.newMapIdInput && !String(elements.newMapIdInput.value || '').trim()) {
-      elements.newMapIdInput.value = mapId;
-    }
-  });
-
   bindEvent(elements.refreshMapListButton, 'click', async () => {
     setBusy(true);
     try {
@@ -682,7 +655,10 @@ function setupEvents() {
     }
   });
 
-  bindEvent(elements.loadSelectedMapButton, 'click', async () => {
+  bindEvent(elements.mapSelect, 'change', async () => {
+    if (!selectedMapCatalogEntry()) {
+      return;
+    }
     setBusy(true);
     try {
       await loadSelectedCatalogMap();
@@ -715,22 +691,6 @@ function setupEvents() {
     }
   });
 
-  bindEvent(elements.mapSelect, 'change', () => {
-    const entry = selectedMapCatalogEntry();
-    if (!entry) {
-      return;
-    }
-    if (elements.mapIdInput) {
-      elements.mapIdInput.value = entry.id;
-    }
-    if (elements.newMapIdInput) {
-      elements.newMapIdInput.value = entry.id;
-    }
-    if (elements.newMapTitleInput) {
-      elements.newMapTitleInput.value = entry.title || entry.id;
-    }
-  });
-
   bindEvent(elements.reloadButton, 'click', async () => {
     setBusy(true);
     try {
@@ -743,7 +703,13 @@ function setupEvents() {
   });
 
   bindEvent(elements.applyButton, 'click', async () => {
-    await applyMapAndCandidates();
+    setBusy(true);
+    try {
+      await applyMapAndCandidates();
+    } catch (_) {
+    } finally {
+      setBusy(false);
+    }
   });
 
   bindEvent(elements.playPauseToggleButton, 'click', async () => {
@@ -804,9 +770,8 @@ function setupEvents() {
 
 async function boot() {
   setupEvents();
-  const initialMap = buildDefaultMapJson(String(elements.mapIdInput.value || '').trim() || 'v2_custom_map');
-  writeMapJsonEditor(initialMap);
-  seedNewMapInputsFromCurrentMap(initialMap);
+  const initialMapId = String(elements.mapIdInput.value || '').trim() || 'v2_default';
+  setWorkingMapJson(buildDefaultMapJson(initialMapId), initialMapId);
   updateMapsDirConnectedStatus();
   setPlayPauseUi(false);
   if (FILE_PROTOCOL) {
@@ -816,7 +781,7 @@ async function boot() {
   setBusy(true);
   try {
     try {
-      await refreshMapCatalog(String(elements.mapIdInput.value || '').trim());
+      await refreshMapCatalog(initialMapId);
     } catch (catalogError) {
       setStatus(`맵 목록 갱신 실패: ${String(catalogError && catalogError.message ? catalogError.message : catalogError)}`, 'warn');
     }
