@@ -22,17 +22,19 @@
     body {
       margin: 0;
       width: 100%;
-      height: 100%;
+      height: 100vh;
       background: radial-gradient(circle at 12% 10%, #15274f 0%, var(--bg) 54%);
       color: var(--text);
       font-family: Segoe UI, Arial, sans-serif;
       padding-bottom: 58px;
+      overflow: hidden;
     }
     .layout {
       display: grid;
       grid-template-columns: 320px minmax(760px, 1fr);
+      grid-template-rows: minmax(0, 1fr);
       gap: 12px;
-      height: 100%;
+      height: calc(100vh - 58px);
       padding: 12px;
     }
     .panel {
@@ -43,6 +45,7 @@
       display: flex;
       flex-direction: column;
       min-height: 0;
+      height: 100%;
     }
     .panel-head {
       padding: 10px 12px;
@@ -171,6 +174,7 @@
       background: #090f1d;
       display: flex;
       flex-direction: column;
+      height: 100%;
     }
     .engine-head {
       padding: 8px 12px;
@@ -185,12 +189,14 @@
       gap: 0;
       min-height: 0;
       flex: 1;
+      height: 100%;
     }
     .engine-view {
       min-height: 0;
       border-right: 1px solid #2c3d63;
       background: #000;
       position: relative;
+      height: 100%;
     }
     iframe {
       width: 100%;
@@ -359,10 +365,33 @@
       gap: 5px;
       flex-wrap: nowrap;
     }
+    .group-bottom {
+      margin-top: auto;
+    }
+    .json-viewer {
+      display: none;
+      border: 1px solid #2f426b;
+      border-radius: 8px;
+      background: #0a1429;
+      max-height: 270px;
+      overflow: auto;
+    }
+    .json-viewer.open {
+      display: block;
+    }
+    #currentJsonText {
+      margin: 0;
+      padding: 10px;
+      font-family: Consolas, Menlo, monospace;
+      font-size: 12px;
+      color: #c8d9ff;
+      white-space: pre;
+    }
     @media (max-width: 1140px) {
       .layout {
         grid-template-columns: 1fr;
         grid-template-rows: auto 1fr;
+        height: calc(100vh - 58px);
       }
       .engine-body {
         grid-template-columns: 1fr;
@@ -422,6 +451,20 @@
         </div>
         <div class="inline-note">
           불러오기는 기본적으로 일시정지 상태로 복원됩니다.
+        </div>
+        <div class="group group-bottom">
+          <div class="group-title">1) 테스트 공 개수 / 현재 JSON 확인</div>
+          <div class="row">
+            <label for="marbleCountInput">테스트 공 개수</label>
+            <input id="marbleCountInput" type="number" min="1" max="256" step="1" value="32">
+          </div>
+          <div class="btn-row">
+            <button id="applyMarbleCountButton">공 개수 적용</button>
+            <button id="toggleJsonViewButton">현재 작업 JSON 보기</button>
+          </div>
+          <div id="currentJsonViewer" class="json-viewer">
+            <pre id="currentJsonText"></pre>
+          </div>
         </div>
       </div>
     </section>

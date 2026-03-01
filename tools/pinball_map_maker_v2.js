@@ -3,6 +3,8 @@ const FILE_PROTOCOL = window.location.protocol === 'file:';
 const DEFAULT_MARBLE_COUNT = 32;
 const DEFAULT_WINNING_RANK = 1;
 const WORLD_WIDTH = 24;
+const MIN_MARBLE_COUNT = 1;
+const MAX_MARBLE_COUNT = 256;
 let engineCanvasFillTimer = 0;
 
 let mapCatalog = [];
@@ -25,6 +27,11 @@ const elements = {
   resetButton: document.getElementById('resetButton'),
   quickSaveButton: document.getElementById('quickSaveButton'),
   quickLoadButton: document.getElementById('quickLoadButton'),
+  marbleCountInput: document.getElementById('marbleCountInput'),
+  applyMarbleCountButton: document.getElementById('applyMarbleCountButton'),
+  toggleJsonViewButton: document.getElementById('toggleJsonViewButton'),
+  currentJsonViewer: document.getElementById('currentJsonViewer'),
+  currentJsonText: document.getElementById('currentJsonText'),
   statusBox: document.getElementById('statusBox'),
   engineFrame: document.getElementById('engineFrame'),
   engineUrlText: document.getElementById('engineUrlText'),
@@ -78,6 +85,54 @@ function round1(value) {
 
 function round2(value) {
   return Math.round(value * 100) / 100;
+}
+
+function getCurrentMarbleCount() {
+  const raw = elements.marbleCountInput ? elements.marbleCountInput.value : DEFAULT_MARBLE_COUNT;
+  const parsed = Math.floor(toFinite(raw, DEFAULT_MARBLE_COUNT));
+  const safe = clamp(parsed, MIN_MARBLE_COUNT, MAX_MARBLE_COUNT);
+  if (elements.marbleCountInput) {
+    elements.marbleCountInput.value = String(safe);
+  }
+  return safe;
+}
+
+function setMarbleCountInput(count) {
+  if (!elements.marbleCountInput) {
+    return;
+  }
+  const safe = clamp(Math.floor(toFinite(count, DEFAULT_MARBLE_COUNT)), MIN_MARBLE_COUNT, MAX_MARBLE_COUNT);
+  elements.marbleCountInput.value = String(safe);
+}
+
+function isJsonViewerOpen() {
+  return !!(elements.currentJsonViewer && elements.currentJsonViewer.classList.contains('open'));
+}
+
+function refreshCurrentJsonViewer(force = false) {
+  if (!elements.currentJsonText) {
+    return;
+  }
+  if (!force && !isJsonViewerOpen()) {
+    return;
+  }
+  const mapJson = workingMapJson && typeof workingMapJson === 'object'
+    ? workingMapJson
+    : buildDefaultMapJson(resolveCurrentMapId());
+  elements.currentJsonText.textContent = JSON.stringify(mapJson, null, 2);
+}
+
+function setJsonViewerOpen(open) {
+  const isOpen = open === true;
+  if (elements.currentJsonViewer) {
+    elements.currentJsonViewer.classList.toggle('open', isOpen);
+  }
+  if (elements.toggleJsonViewButton) {
+    elements.toggleJsonViewButton.textContent = isOpen ? '현재 작업 JSON 숨기기' : '현재 작업 JSON 보기';
+  }
+  if (isOpen) {
+    refreshCurrentJsonViewer(true);
+  }
 }
 
 function setStatus(message, kind = 'ok') {
@@ -137,6 +192,9 @@ function setBusy(isBusy) {
     elements.resetButton,
     elements.quickSaveButton,
     elements.quickLoadButton,
+    elements.marbleCountInput,
+    elements.applyMarbleCountButton,
+    elements.toggleJsonViewButton,
     elements.viewZoomInput,
     elements.stageGoalInput,
     elements.stageZoomInput,
@@ -170,9 +228,10 @@ function setBusy(isBusy) {
   });
 }
 
-function buildAutoCandidates() {
+function buildAutoCandidates(count = getCurrentMarbleCount()) {
+  const safeCount = clamp(Math.floor(toFinite(count, DEFAULT_MARBLE_COUNT)), MIN_MARBLE_COUNT, MAX_MARBLE_COUNT);
   const list = [];
-  for (let index = 0; index < DEFAULT_MARBLE_COUNT; index += 1) {
+  for (let index = 0; index < safeCount; index += 1) {
     list.push(`후보 ${String(index + 1).padStart(2, '0')}`);
   }
   return list;
@@ -201,10 +260,11 @@ function resolveCurrentMapId() {
 }
 
 function readPayload() {
+  const marbleCount = getCurrentMarbleCount();
   return {
     mapId: resolveCurrentMapId(),
     winningRank: DEFAULT_WINNING_RANK,
-    candidates: buildAutoCandidates(),
+    candidates: buildAutoCandidates(marbleCount),
     autoStart: false,
   };
 }
@@ -264,6 +324,7 @@ function setWorkingMapJson(rawMapJson, fallbackMapId = '') {
   const fallbackId = fallbackMapId || resolveCurrentMapId();
   const normalized = normalizeMapJson(rawMapJson, fallbackId);
   workingMapJson = deepClone(normalized);
+  refreshCurrentJsonViewer();
   return deepClone(normalized);
 }
 
@@ -800,6 +861,7 @@ function applyObjectEditorValues() {
     const x2 = round1(toFinite(elements.objExtra1Input ? elements.objExtra1Input.value : x1 + 1, x1 + 1));
     const y2 = round1(toFinite(elements.objExtra2Input ? elements.objExtra2Input.value : y1 + 1, y1 + 1));
     obj.points = [[x1, y1], [x2, y2]];
+    refreshCurrentJsonViewer();
     return;
   }
   obj.x = round1(toFinite(elements.objXInput ? elements.objXInput.value : obj.x, toFinite(obj.x, 0)));
@@ -812,6 +874,7 @@ function applyObjectEditorValues() {
   obj.dirDeg = Math.round(toFinite(elements.objDirInput ? elements.objDirInput.value : obj.dirDeg, toFinite(obj.dirDeg, 90)));
   obj.force = round1(toFinite(elements.objForceInput ? elements.objForceInput.value : obj.force, toFinite(obj.force, 4.2)));
   obj.intervalMs = Math.round(toFinite(elements.objIntervalInput ? elements.objIntervalInput.value : obj.intervalMs, toFinite(obj.intervalMs, 1200)));
+  refreshCurrentJsonViewer();
 }
 
 function duplicateSelectedObject() {
@@ -832,6 +895,7 @@ function duplicateSelectedObject() {
   const objects = getObjects();
   objects.push(copy);
   editorState.selectedIndex = objects.length - 1;
+  refreshCurrentJsonViewer();
 }
 
 function deleteSelectedObject() {
@@ -842,9 +906,11 @@ function deleteSelectedObject() {
   objects.splice(editorState.selectedIndex, 1);
   if (objects.length === 0) {
     editorState.selectedIndex = -1;
+    refreshCurrentJsonViewer();
     return;
   }
   editorState.selectedIndex = Math.min(editorState.selectedIndex, objects.length - 1);
+  refreshCurrentJsonViewer();
 }
 
 function clearAllObjects() {
@@ -852,6 +918,7 @@ function clearAllObjects() {
   mapJson.objects = [];
   editorState.selectedIndex = -1;
   editorState.pendingWallStart = null;
+  refreshCurrentJsonViewer();
 }
 
 function applyStageInputsToDraft() {
@@ -859,6 +926,7 @@ function applyStageInputsToDraft() {
   mapJson.stage.goalY = Math.max(20, toFinite(elements.stageGoalInput ? elements.stageGoalInput.value : mapJson.stage.goalY, mapJson.stage.goalY));
   mapJson.stage.zoomY = Math.max(10, toFinite(elements.stageZoomInput ? elements.stageZoomInput.value : mapJson.stage.zoomY, mapJson.stage.zoomY));
   syncStageInputsFromMap();
+  refreshCurrentJsonViewer();
 }
 
 function autoFitStageFromObjects() {
@@ -885,6 +953,7 @@ function autoFitStageFromObjects() {
   mapJson.stage.goalY = Math.max(40, Math.ceil(maxY + 10));
   mapJson.stage.zoomY = Math.max(20, round1(mapJson.stage.goalY - 4));
   syncStageInputsFromMap();
+  refreshCurrentJsonViewer();
 }
 
 function getCanvasLayout() {
@@ -1124,6 +1193,7 @@ function addObjectAt(tool, x, y) {
   }
   editorState.selectedIndex = objects.length - 1;
   syncObjectList();
+  refreshCurrentJsonViewer();
   drawMakerCanvas();
 }
 
@@ -1363,6 +1433,26 @@ async function saveAsNewMap() {
 }
 
 function setupEvents() {
+  bindEvent(elements.marbleCountInput, 'change', () => {
+    getCurrentMarbleCount();
+  });
+
+  bindEvent(elements.applyMarbleCountButton, 'click', async () => {
+    const marbleCount = getCurrentMarbleCount();
+    await withEngineAction(async (api) => {
+      const candidateResult = await api.setCandidates(buildAutoCandidates(marbleCount));
+      if (!candidateResult || candidateResult.ok !== true) {
+        throw new Error(candidateResult && candidateResult.reason ? candidateResult.reason : '공 개수 적용에 실패했습니다');
+      }
+      setPlayPauseUi(readEngineRunning(api));
+      setStatus(`테스트 공 개수 적용 완료: ${marbleCount}개`);
+    });
+  });
+
+  bindEvent(elements.toggleJsonViewButton, 'click', () => {
+    setJsonViewerOpen(!isJsonViewerOpen());
+  });
+
   bindEvent(elements.refreshMapListButton, 'click', async () => {
     setBusy(true);
     try {
@@ -1609,6 +1699,8 @@ function setupEvents() {
 async function boot() {
   setupEvents();
   const initialMapId = 'v2_default';
+  setMarbleCountInput(DEFAULT_MARBLE_COUNT);
+  setJsonViewerOpen(false);
   if (elements.mapNameInput) {
     elements.mapNameInput.value = initialMapId;
   }
