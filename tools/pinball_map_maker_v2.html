@@ -30,7 +30,7 @@
     }
     .layout {
       display: grid;
-      grid-template-columns: 360px minmax(600px, 1fr);
+      grid-template-columns: 320px minmax(760px, 1fr);
       gap: 12px;
       height: 100%;
       padding: 12px;
@@ -179,14 +179,109 @@
       color: var(--muted);
       font-size: 12px;
     }
+    .engine-body {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 420px;
+      gap: 0;
+      min-height: 0;
+      flex: 1;
+    }
+    .engine-view {
+      min-height: 0;
+      border-right: 1px solid #2c3d63;
+      background: #000;
+      position: relative;
+    }
     iframe {
       width: 100%;
       height: 100%;
       border: 0;
       display: block;
       background: #000;
-      flex: 1;
       min-height: 0;
+    }
+    .maker-side {
+      min-height: 0;
+      background: rgba(12, 20, 38, 0.96);
+      display: flex;
+      flex-direction: column;
+    }
+    .maker-side-head {
+      padding: 10px 12px;
+      border-bottom: 1px solid #2f426d;
+      font-size: 12px;
+      font-weight: 700;
+      color: #9ec0ff;
+      background: #121f3d;
+    }
+    .maker-side-body {
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      overflow: auto;
+    }
+    .maker-group {
+      border: 1px solid #2f426d;
+      border-radius: 10px;
+      background: #0f1a34;
+      padding: 9px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .maker-group-title {
+      font-size: 12px;
+      color: #a9c7ff;
+      font-weight: 700;
+    }
+    .maker-row {
+      display: grid;
+      grid-template-columns: 84px 1fr;
+      gap: 6px;
+      align-items: center;
+    }
+    .maker-row label {
+      color: #99aed7;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .maker-canvas-wrap {
+      border: 1px solid #395281;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #0a1225;
+    }
+    #makerCanvas {
+      width: 100%;
+      height: 440px;
+      display: block;
+      cursor: crosshair;
+      background: linear-gradient(180deg, #0d1a36 0%, #0a142d 100%);
+    }
+    .maker-toolbar {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    #objectList {
+      min-height: 136px;
+      resize: vertical;
+      font-family: Consolas, Menlo, monospace;
+      font-size: 12px;
+    }
+    .object-props {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    .object-props .maker-row {
+      grid-template-columns: 80px 1fr;
+    }
+    .maker-compact {
+      font-size: 11px;
+      color: #95acd8;
+      line-height: 1.35;
     }
     .floating-controls {
       position: fixed;
@@ -269,6 +364,17 @@
         grid-template-columns: 1fr;
         grid-template-rows: auto 1fr;
       }
+      .engine-body {
+        grid-template-columns: 1fr;
+      }
+      .engine-view {
+        border-right: 0;
+        border-bottom: 1px solid #2c3d63;
+        min-height: 55vh;
+      }
+      #makerCanvas {
+        height: 320px;
+      }
       .floating-controls {
         width: calc(100% - 24px);
         left: 12px;
@@ -321,7 +427,120 @@
     </section>
     <section class="engine-wrap">
       <div class="engine-head">엔진 iframe: <code id="engineUrlText">불러오는 중...</code></div>
-      <iframe id="engineFrame" title="pinball-v2-engine"></iframe>
+      <div class="engine-body">
+        <div class="engine-view">
+          <iframe id="engineFrame" title="pinball-v2-engine"></iframe>
+        </div>
+        <aside class="maker-side">
+          <div class="maker-side-head">맵 메이킹 영역 (우측)</div>
+          <div class="maker-side-body">
+            <div class="maker-group">
+              <div class="maker-group-title">뷰/스테이지</div>
+              <div class="maker-row">
+                <label for="viewZoomInput">뷰 줌</label>
+                <input id="viewZoomInput" type="number" min="0.05" max="10" step="0.05" value="0.2">
+              </div>
+              <div class="maker-row">
+                <label for="stageGoalInput">goalY</label>
+                <input id="stageGoalInput" type="number" min="20" max="500" step="1" value="210">
+              </div>
+              <div class="maker-row">
+                <label for="stageZoomInput">zoomY</label>
+                <input id="stageZoomInput" type="number" min="10" max="500" step="0.5" value="200">
+              </div>
+              <div class="maker-toolbar">
+                <button id="applyViewZoomButton">뷰 줌 적용</button>
+                <button id="fitStageButton">스테이지 자동맞춤</button>
+              </div>
+              <button id="applyStageButton" class="primary">스테이지 값 적용</button>
+            </div>
+
+            <div class="maker-group">
+              <div class="maker-group-title">오브젝트 배치</div>
+              <div class="maker-row">
+                <label for="makerToolSelect">툴</label>
+                <select id="makerToolSelect">
+                  <option value="select">선택</option>
+                  <option value="wall_polyline">벽(2점)</option>
+                  <option value="peg_circle">원형 핀</option>
+                  <option value="box_block">박스</option>
+                  <option value="rotor">회전 바</option>
+                  <option value="portal">포털</option>
+                  <option value="hammer">해머</option>
+                </select>
+              </div>
+              <div class="maker-canvas-wrap">
+                <canvas id="makerCanvas" width="360" height="760"></canvas>
+              </div>
+              <div class="maker-toolbar">
+                <button id="applyDraftButton" class="primary">드래프트 맵 적용</button>
+                <button id="clearObjectsButton" class="warn">오브젝트 전체삭제</button>
+              </div>
+              <div class="maker-compact" id="makerHintText">툴을 선택하고 캔버스를 클릭해서 맵을 만듭니다.</div>
+            </div>
+
+            <div class="maker-group">
+              <div class="maker-group-title">선택 오브젝트 편집</div>
+              <select id="objectList" size="7"></select>
+              <div class="object-props">
+                <div class="maker-row">
+                  <label for="objOidInput">oid</label>
+                  <input id="objOidInput" type="text" placeholder="obj_x">
+                </div>
+                <div class="maker-row">
+                  <label for="objColorInput">color</label>
+                  <input id="objColorInput" type="text" placeholder="#66aaff">
+                </div>
+                <div class="maker-row">
+                  <label for="objXInput">x</label>
+                  <input id="objXInput" type="number" step="0.1">
+                </div>
+                <div class="maker-row">
+                  <label for="objYInput">y</label>
+                  <input id="objYInput" type="number" step="0.1">
+                </div>
+                <div class="maker-row">
+                  <label id="objExtra1Label" for="objExtra1Input">폭/점2 x</label>
+                  <input id="objExtra1Input" type="number" step="0.1">
+                </div>
+                <div class="maker-row">
+                  <label id="objExtra2Label" for="objExtra2Input">높이/점2 y</label>
+                  <input id="objExtra2Input" type="number" step="0.1">
+                </div>
+                <div class="maker-row">
+                  <label for="objRadiusInput">radius</label>
+                  <input id="objRadiusInput" type="number" step="0.05">
+                </div>
+                <div class="maker-row">
+                  <label for="objRotationInput">rotation</label>
+                  <input id="objRotationInput" type="number" step="0.1">
+                </div>
+                <div class="maker-row">
+                  <label for="objPairInput">pair</label>
+                  <input id="objPairInput" type="text" placeholder="portal_x">
+                </div>
+                <div class="maker-row">
+                  <label for="objDirInput">dirDeg</label>
+                  <input id="objDirInput" type="number" step="1">
+                </div>
+                <div class="maker-row">
+                  <label for="objForceInput">force</label>
+                  <input id="objForceInput" type="number" step="0.1">
+                </div>
+                <div class="maker-row">
+                  <label for="objIntervalInput">interval</label>
+                  <input id="objIntervalInput" type="number" step="10">
+                </div>
+              </div>
+              <div class="maker-toolbar">
+                <button id="applyObjectButton">선택 값 반영</button>
+                <button id="duplicateObjectButton">복제</button>
+              </div>
+              <button id="deleteObjectButton" class="warn">선택 오브젝트 삭제</button>
+            </div>
+          </div>
+        </aside>
+      </div>
     </section>
   </div>
   <div class="floating-controls">
