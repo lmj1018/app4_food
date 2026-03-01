@@ -3,11 +3,19 @@
   "maps": [
     {
       "id": "v2_default",
-      "title": "V2 Default Test Map",
+      "title": "v2_default",
       "engine": "v2",
       "file": "v2_default.json",
       "enabled": true,
       "sort": 100
+    },
+    {
+      "id": "m5_start",
+      "title": "m5_start",
+      "engine": "v2",
+      "file": "m5_start.json",
+      "enabled": true,
+      "sort": 110
     }
   ]
 }

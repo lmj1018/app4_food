@@ -1384,10 +1384,19 @@ function populateObjectEditor() {
 }
 
 function syncObjectList() {
+  const objects = getObjects();
   if (!elements.objectList) {
+    if (objects.length === 0) {
+      editorState.selectedIndex = -1;
+      populateObjectEditor();
+      return;
+    }
+    if (editorState.selectedIndex < 0 || editorState.selectedIndex >= objects.length) {
+      editorState.selectedIndex = objects.length - 1;
+    }
+    populateObjectEditor();
     return;
   }
-  const objects = getObjects();
   const options = objects
     .map((obj, index) => {
       const oid = String(obj && obj.oid ? obj.oid : `obj_${index + 1}`);

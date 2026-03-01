@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
   "id": "v2_default",
-  "title": "V2 Default Test Map",
+  "title": "v2_default",
   "stage": {
     "goalY": 210,
     "zoomY": 200,
     "spawn": {
       "x": 8.8,
-      "y": 2.0,
+      "y": 2,
       "columns": 8,
       "spacingX": 0.6,
       "visibleRows": 6
@@ -18,8 +18,14 @@
       "oid": "wall-left",
       "type": "wall_polyline",
       "points": [
-        [2.5, 2.0],
-        [2.5, 212.0]
+        [
+          2.5,
+          2
+        ],
+        [
+          2.5,
+          212
+        ]
       ],
       "color": "#243050"
     },
@@ -27,8 +33,14 @@
       "oid": "wall-right",
       "type": "wall_polyline",
       "points": [
-        [21.0, 2.0],
-        [21.0, 212.0]
+        [
+          21,
+          2
+        ],
+        [
+          21,
+          212
+        ]
       ],
       "color": "#243050"
     },
@@ -36,8 +48,14 @@
       "oid": "funnel-left",
       "type": "wall_polyline",
       "points": [
-        [2.5, 20.0],
-        [10.5, 34.0]
+        [
+          2.5,
+          20
+        ],
+        [
+          10.5,
+          34
+        ]
       ],
       "color": "#3f6be5"
     },
@@ -45,8 +63,14 @@
       "oid": "funnel-right",
       "type": "wall_polyline",
       "points": [
-        [21.0, 20.0],
-        [13.0, 34.0]
+        [
+          21,
+          20
+        ],
+        [
+          13,
+          34
+        ]
       ],
       "color": "#3f6be5"
     },
@@ -54,7 +78,7 @@
       "oid": "peg-center",
       "type": "peg_circle",
       "x": 11.75,
-      "y": 55.0,
+      "y": 55,
       "radius": 0.8,
       "restitution": 2.8,
       "life": 3,
@@ -64,17 +88,17 @@
       "oid": "rotor-main",
       "type": "rotor",
       "x": 11.75,
-      "y": 90.0,
+      "y": 90,
       "width": 3.4,
       "height": 0.12,
-      "angularVelocity": -3.0,
+      "angularVelocity": -3,
       "color": "#ef476f"
     },
     {
       "oid": "portal-a",
       "type": "portal",
       "x": 5.5,
-      "y": 110.0,
+      "y": 110,
       "radius": 0.6,
       "pair": "portal-b",
       "cooldownMs": 900,
@@ -84,8 +108,8 @@
     {
       "oid": "portal-b",
       "type": "portal",
-      "x": 18.0,
-      "y": 152.0,
+      "x": 18,
+      "y": 152,
       "radius": 0.6,
       "pair": "portal-a",
       "cooldownMs": 900,
@@ -96,7 +120,7 @@
       "oid": "hammer-mid",
       "type": "hammer",
       "x": 11.75,
-      "y": 132.0,
+      "y": 132,
       "dirDeg": 90,
       "force": 4.8,
       "intervalMs": 1400,
@@ -108,8 +132,14 @@
       "oid": "goal-ramp-left",
       "type": "wall_polyline",
       "points": [
-        [2.5, 184.0],
-        [10.2, 203.5]
+        [
+          2.5,
+          184
+        ],
+        [
+          10.2,
+          203.5
+        ]
       ],
       "color": "#46b8c8"
     },
@@ -117,8 +147,14 @@
       "oid": "goal-ramp-right",
       "type": "wall_polyline",
       "points": [
-        [21.0, 184.0],
-        [13.3, 203.5]
+        [
+          21,
+          184
+        ],
+        [
+          13.3,
+          203.5
+        ]
       ],
       "color": "#46b8c8"
     }

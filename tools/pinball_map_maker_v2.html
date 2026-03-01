@@ -185,7 +185,7 @@
     }
     .engine-body {
       display: grid;
-      grid-template-columns: minmax(620px, 1.58fr) minmax(240px, 0.52fr) 360px;
+      grid-template-columns: minmax(760px, 2.05fr) minmax(160px, 0.28fr) 350px;
       gap: 0;
       min-height: 0;
       flex: 1;
@@ -845,38 +845,37 @@
 
             <div class="maker-group">
               <div class="maker-group-title">선택 오브젝트 편집</div>
-              <select id="objectList" size="7"></select>
               <div class="object-props">
                 <div class="maker-row">
-                  <label for="objOidInput">oid</label>
+                  <label for="objOidInput">오브젝트 ID</label>
                   <input id="objOidInput" type="text" placeholder="obj_x">
                 </div>
                 <div class="maker-row">
-                  <label for="objColorInput">color</label>
+                  <label for="objColorInput">색상</label>
                   <input id="objColorInput" type="text" placeholder="#66aaff">
                 </div>
                 <div class="maker-row">
-                  <label for="objXInput">x</label>
+                  <label for="objXInput">X 좌표</label>
                   <input id="objXInput" type="number" step="0.1">
                 </div>
                 <div class="maker-row">
-                  <label for="objYInput">y</label>
+                  <label for="objYInput">Y 좌표</label>
                   <input id="objYInput" type="number" step="0.1">
                 </div>
                 <div class="maker-row">
-                  <label id="objExtra1Label" for="objExtra1Input">폭/점2 x</label>
+                  <label id="objExtra1Label" for="objExtra1Input">보조값 1</label>
                   <input id="objExtra1Input" type="number" step="0.1">
                 </div>
                 <div class="maker-row">
-                  <label id="objExtra2Label" for="objExtra2Input">높이/점2 y</label>
+                  <label id="objExtra2Label" for="objExtra2Input">보조값 2</label>
                   <input id="objExtra2Input" type="number" step="0.1">
                 </div>
                 <div class="maker-row">
-                  <label for="objRadiusInput">radius</label>
+                  <label for="objRadiusInput">반지름</label>
                   <input id="objRadiusInput" type="number" step="0.05">
                 </div>
                 <div class="maker-row">
-                  <label for="objRotationInput">rotation</label>
+                  <label for="objRotationInput">회전 각도</label>
                   <input id="objRotationInput" type="number" step="0.1">
                 </div>
                 <div class="maker-row">
@@ -884,19 +883,19 @@
                   <button id="reverseRotationButton" type="button">회전/방향 반전</button>
                 </div>
                 <div class="maker-row">
-                  <label for="objPairInput">pair</label>
+                  <label for="objPairInput">연결 포털</label>
                   <input id="objPairInput" type="text" placeholder="portal_x">
                 </div>
                 <div class="maker-row">
-                  <label id="objDirLabel" for="objDirInput">dirDeg</label>
+                  <label id="objDirLabel" for="objDirInput">방향</label>
                   <input id="objDirInput" type="number" step="1">
                 </div>
                 <div class="maker-row">
-                  <label id="objForceLabel" for="objForceInput">force</label>
+                  <label id="objForceLabel" for="objForceInput">힘</label>
                   <input id="objForceInput" type="number" step="0.1">
                 </div>
                 <div class="maker-row">
-                  <label id="objIntervalLabel" for="objIntervalInput">interval</label>
+                  <label id="objIntervalLabel" for="objIntervalInput">간격(ms)</label>
                   <input id="objIntervalInput" type="number" step="10">
                 </div>
                 <div class="maker-row">
