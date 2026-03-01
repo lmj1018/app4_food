@@ -1,8 +1,7 @@
-const SLOT_IDS = ['slot1', 'slot2', 'slot3', 'slot4', 'slot5', 'slot6', 'slot7', 'slot8'];
+const SLOT_IDS = ['slot1', 'slot2', 'slot3'];
 const MAPS_BASE_URL = '../assets/ui/pinball/maps';
 const FILE_PROTOCOL = window.location.protocol === 'file:';
 
-let mapsDirectoryHandle = null;
 let mapCatalog = [];
 
 const elements = {
@@ -15,7 +14,6 @@ const elements = {
   newMapTitleInput: document.getElementById('newMapTitleInput'),
   saveSelectedMapButton: document.getElementById('saveSelectedMapButton'),
   saveAsNewMapButton: document.getElementById('saveAsNewMapButton'),
-  connectMapsDirButton: document.getElementById('connectMapsDirButton'),
   pullMapButton: document.getElementById('pullMapButton'),
   applyJsonButton: document.getElementById('applyJsonButton'),
   mapIdInput: document.getElementById('mapIdInput'),
@@ -30,13 +28,7 @@ const elements = {
   resetButton: document.getElementById('resetButton'),
   quickSaveButton: document.getElementById('quickSaveButton'),
   quickLoadButton: document.getElementById('quickLoadButton'),
-  slotSelect: document.getElementById('slotSelect'),
-  saveSlotButton: document.getElementById('saveSlotButton'),
-  loadSlotButton: document.getElementById('loadSlotButton'),
-  deleteSlotButton: document.getElementById('deleteSlotButton'),
-  refreshSlotsButton: document.getElementById('refreshSlotsButton'),
   statusBox: document.getElementById('statusBox'),
-  snapshotList: document.getElementById('snapshotList'),
   engineFrame: document.getElementById('engineFrame'),
   engineUrlText: document.getElementById('engineUrlText'),
 };
@@ -113,7 +105,6 @@ function setBusy(isBusy) {
     elements.loadSelectedMapButton,
     elements.saveSelectedMapButton,
     elements.saveAsNewMapButton,
-    elements.connectMapsDirButton,
     elements.pullMapButton,
     elements.applyJsonButton,
     elements.applyButton,
@@ -122,10 +113,6 @@ function setBusy(isBusy) {
     elements.resetButton,
     elements.quickSaveButton,
     elements.quickLoadButton,
-    elements.saveSlotButton,
-    elements.loadSlotButton,
-    elements.deleteSlotButton,
-    elements.refreshSlotsButton,
   ];
   buttons.forEach((button) => {
     if (button) {
@@ -276,13 +263,29 @@ function renderMapCatalog(preferredMapId = '') {
   }
 }
 
-async function fetchManifestFromServer() {
-  const response = await fetch(`${MAPS_BASE_URL}/manifest.json?nocache=${Date.now()}`, { cache: 'no-store' });
-  if (!response.ok) {
-    throw new Error(`manifest 로드 실패: ${response.status}`);
+async function callMapMakerApi(path, options = {}) {
+  const response = await fetch(`/__pinball_v2_api/${path}`, options);
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch (_) {
   }
-  const json = await response.json();
-  return normalizeManifestData(json);
+  if (!response.ok || !payload || payload.ok !== true) {
+    const reason = payload && payload.reason ? payload.reason : `API 오류: ${response.status}`;
+    throw new Error(String(reason));
+  }
+  return payload;
+}
+
+async function fetchManifestFromServer() {
+  const payload = await callMapMakerApi(`maps?nocache=${Date.now()}`);
+  if (payload.mapsDir) {
+    setMapsDirStatus(`저장 경로(자동): ${payload.mapsDir}`, 'ok');
+  }
+  return normalizeManifestData({
+    version: 1,
+    maps: Array.isArray(payload.maps) ? payload.maps : [],
+  });
 }
 
 async function refreshMapCatalog(preferredMapId = '') {
@@ -349,6 +352,11 @@ async function loadSelectedCatalogMap() {
   const entry = selectedMapCatalogEntry();
   if (!entry) {
     throw new Error('로드할 맵을 먼저 선택하세요');
+  }
+  const mapPayload = await callMapMakerApi(`map?mapId=${encodeURIComponent(entry.id)}&nocache=${Date.now()}`);
+  if (mapPayload.mapJson && typeof mapPayload.mapJson === 'object') {
+    writeMapJsonEditor(mapPayload.mapJson);
+    seedNewMapInputsFromCurrentMap(mapPayload.mapJson);
   }
   elements.mapIdInput.value = entry.id;
   await applyMapAndCandidates();
@@ -480,31 +488,10 @@ async function waitForEngineApi(timeoutMs = 20000) {
   throw new Error(`엔진 API 대기 시간 초과. ${formatEngineDiagnostics(diagnostics)}`);
 }
 
-function renderSnapshotList(items) {
-  if (!Array.isArray(items) || items.length === 0) {
-    elements.snapshotList.innerHTML = '<div class="snapshot-item">저장된 스냅샷이 없습니다.</div>';
-    return;
-  }
-  const html = items
-    .map((item) => {
-      const slot = String(item.slotId || '');
-      const label = String(item.label || '');
-      const mapId = String(item.mapId || '');
-      const count = Number(item.marbleCount || 0);
-      return `<div class="snapshot-item"><span class="snapshot-slot">${slot}</span>${label}<br>진행상황 스냅샷 · 맵=${mapId} 볼=${count}</div>`;
-    })
-    .join('');
-  elements.snapshotList.innerHTML = html;
-}
-
-async function refreshSnapshotList() {
-  const api = getEngineApi();
-  if (!api || typeof api.listSnapshots !== 'function') {
-    renderSnapshotList([]);
-    return;
-  }
-  const items = api.listSnapshots();
-  renderSnapshotList(items);
+function selectedSnapshotSlot() {
+  const checked = document.querySelector('input[name="snapshotSlot"]:checked');
+  const slotId = checked && typeof checked.value === 'string' ? checked.value : 'slot1';
+  return SLOT_IDS.includes(slotId) ? slotId : 'slot1';
 }
 
 async function loadEngineFrame() {
@@ -543,7 +530,6 @@ async function loadEngineFrame() {
   }
   await syncMapJsonEditorFromEngine(api);
   setPlayPauseUi(readEngineRunning(api));
-  await refreshSnapshotList();
   setStatus(`엔진 준비 완료: 맵=${payload.mapId}, 볼=${payload.candidates.length}`);
 }
 
@@ -631,111 +617,22 @@ function normalizeManifestData(raw) {
   };
 }
 
-function nextManifestSort(maps) {
-  let maxSort = 0;
-  for (let index = 0; index < maps.length; index += 1) {
-    const entry = maps[index];
-    const value = Number(entry && entry.sort);
-    if (Number.isFinite(value) && value > maxSort) {
-      maxSort = value;
-    }
-  }
-  return maxSort + 10;
-}
-
-function buildManifestEntry(mapJson, fileName, existingEntry, existingMaps) {
-  const current = existingEntry && typeof existingEntry === 'object' ? existingEntry : {};
-  return {
-    ...current,
-    id: String(mapJson.id || '').trim(),
-    title: String(mapJson.title || mapJson.id || '').trim() || String(mapJson.id || '').trim(),
-    engine: 'v2',
-    file: fileName,
-    enabled: current.enabled === false ? false : true,
-    sort: Number.isFinite(Number(current.sort)) ? Number(current.sort) : nextManifestSort(existingMaps),
-  };
-}
-
 function updateMapsDirConnectedStatus() {
-  if (mapsDirectoryHandle) {
-    setMapsDirStatus('저장 경로: 연결됨 (assets/ui/pinball/maps 폴더)', 'ok');
-    return;
-  }
-  setMapsDirStatus('저장 경로: 미연결 (연결 버튼으로 1회 선택)', 'warn');
+  setMapsDirStatus('저장 경로(자동): assets/ui/pinball/maps', 'ok');
 }
 
-async function connectMapsDirectory() {
-  if (typeof window.showDirectoryPicker !== 'function') {
-    throw new Error('이 브라우저는 폴더 직접 연결을 지원하지 않습니다 (Chrome/Edge 권장)');
-  }
-  mapsDirectoryHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
-  try {
-    await mapsDirectoryHandle.getFileHandle('manifest.json', { create: true });
-  } catch (_) {
-  }
-  updateMapsDirConnectedStatus();
-  setStatus('저장 경로 연결 완료. 이제 선택 맵 저장/새 맵 저장을 사용할 수 있습니다.');
-}
-
-async function ensureMapsDirectoryConnected() {
-  if (!mapsDirectoryHandle) {
-    throw new Error('먼저 "저장 경로 연결" 버튼으로 assets/ui/pinball/maps 폴더를 선택하세요');
-  }
-  if (typeof mapsDirectoryHandle.queryPermission === 'function') {
-    const permission = await mapsDirectoryHandle.queryPermission({ mode: 'readwrite' });
-    if (permission === 'denied') {
-      throw new Error('저장 폴더 쓰기 권한이 거부되었습니다. 다시 연결하세요');
-    }
-  }
-  return mapsDirectoryHandle;
-}
-
-async function readJsonFromHandle(fileHandle, fallbackValue) {
-  try {
-    const file = await fileHandle.getFile();
-    const text = await file.text();
-    if (!String(text || '').trim()) {
-      return fallbackValue;
-    }
-    return JSON.parse(text);
-  } catch (_) {
-    return fallbackValue;
-  }
-}
-
-async function writeJsonToHandle(fileHandle, jsonValue) {
-  const writable = await fileHandle.createWritable();
-  try {
-    await writable.write(prettyJson(jsonValue));
-  } finally {
-    await writable.close();
-  }
-}
-
-async function saveMapToConnectedDirectory(mapJson, fileName) {
-  const dirHandle = await ensureMapsDirectoryConnected();
-  const mapHandle = await dirHandle.getFileHandle(fileName, { create: true });
-  await writeJsonToHandle(mapHandle, mapJson);
-
-  const manifestHandle = await dirHandle.getFileHandle('manifest.json', { create: true });
-  const manifestRaw = await readJsonFromHandle(manifestHandle, { version: 1, maps: [] });
-  const manifestData = normalizeManifestData(manifestRaw);
-  const maps = Array.isArray(manifestData.maps) ? manifestData.maps.slice() : [];
-
-  const existingIndex = maps.findIndex((entry) => {
-    const id = entry && typeof entry.id === 'string' ? entry.id : '';
-    const file = entry && typeof entry.file === 'string' ? entry.file : '';
-    return id === mapJson.id || file === fileName;
+async function saveMapViaServer(payload) {
+  const result = await callMapMakerApi('save', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
   });
-  const existingEntry = existingIndex >= 0 ? maps[existingIndex] : null;
-  const nextEntry = buildManifestEntry(mapJson, fileName, existingEntry, maps);
-  if (existingIndex >= 0) {
-    maps[existingIndex] = nextEntry;
-  } else {
-    maps.push(nextEntry);
+  if (result.mapsDir) {
+    setMapsDirStatus(`저장 경로(자동): ${result.mapsDir}`, 'ok');
   }
-  manifestData.maps = maps;
-  await writeJsonToHandle(manifestHandle, manifestData);
+  return result;
 }
 
 async function saveSelectedMapOverwrite() {
@@ -748,8 +645,12 @@ async function saveSelectedMapOverwrite() {
   if (typeof mapJson.title !== 'string' || !mapJson.title.trim()) {
     mapJson.title = selected.title || selected.id;
   }
-  await saveMapToConnectedDirectory(mapJson, selected.file);
-  await refreshMapCatalog(selected.id);
+  const result = await saveMapViaServer({
+    mode: 'selected',
+    selectedMapId: selected.id,
+    mapJson,
+  });
+  await refreshMapCatalog(result.mapId || selected.id);
   syncMapIdInputFromMapJson(mapJson);
   seedNewMapInputsFromCurrentMap(mapJson);
   setStatus(`선택 맵 저장 완료: ${selected.title} (${selected.id})`);
@@ -764,21 +665,16 @@ async function saveAsNewMap() {
     .trim() || newId;
   mapJson.id = newId;
   mapJson.title = newTitle;
-  const fileName = buildMapFileName(newId);
-  await saveMapToConnectedDirectory(mapJson, fileName);
-  await refreshMapCatalog(newId);
+  const result = await saveMapViaServer({
+    mode: 'new',
+    newMapId: newId,
+    newMapTitle: newTitle,
+    mapJson,
+  });
+  await refreshMapCatalog(result.mapId || newId);
   syncMapIdInputFromMapJson(mapJson);
   seedNewMapInputsFromCurrentMap(mapJson);
   setStatus(`새 맵 저장 완료: ${newTitle} (${newId})`);
-}
-
-function setupSlotOptions() {
-  elements.slotSelect.innerHTML = SLOT_IDS.map((slotId) => `<option value="${slotId}">${slotId}</option>`).join('');
-}
-
-function selectedSlot() {
-  const value = String(elements.slotSelect.value || '').trim();
-  return SLOT_IDS.includes(value) ? value : 'slot1';
 }
 
 function setupEvents() {
@@ -921,74 +817,29 @@ function setupEvents() {
 
   bindEvent(elements.quickSaveButton, 'click', async () => {
     await withEngineAction(async (api) => {
-      const result = await api.saveSnapshot('quick');
+      const slotId = selectedSnapshotSlot();
+      const result = await api.saveSnapshot(slotId);
       if (!result || result.ok !== true) {
-        throw new Error(result && result.reason ? result.reason : '빠른 저장에 실패했습니다');
+        throw new Error(result && result.reason ? result.reason : '퀵 세이브에 실패했습니다');
       }
-      await refreshSnapshotList();
-      setStatus(`빠른 저장 완료(현재 진행상황): ${result.meta ? result.meta.label : '성공'}`);
+      setStatus(`${slotId} 퀵 세이브 완료 (덮어쓰기)`);
     });
   });
 
   bindEvent(elements.quickLoadButton, 'click', async () => {
     await withEngineAction(async (api) => {
-      const result = await api.loadSnapshot('quick', { autoResume: false });
-      if (!result || result.ok !== true) {
-        throw new Error(result && result.reason ? result.reason : '빠른 불러오기에 실패했습니다');
-      }
-      await refreshSnapshotList();
-      setPlayPauseUi(false);
-      setStatus('진행상황 스냅샷으로 복원되었습니다 (일시정지)');
-    });
-  });
-
-  bindEvent(elements.saveSlotButton, 'click', async () => {
-    await withEngineAction(async (api) => {
-      const slotId = selectedSlot();
-      const result = await api.saveSnapshot(slotId);
-      if (!result || result.ok !== true) {
-        throw new Error(result && result.reason ? result.reason : `저장에 실패했습니다 (${slotId})`);
-      }
-      await refreshSnapshotList();
-      setStatus(`${slotId} 저장 완료(현재 진행상황): ${result.meta ? result.meta.label : '성공'}`);
-    });
-  });
-
-  bindEvent(elements.loadSlotButton, 'click', async () => {
-    await withEngineAction(async (api) => {
-      const slotId = selectedSlot();
+      const slotId = selectedSnapshotSlot();
       const result = await api.loadSnapshot(slotId, { autoResume: false });
       if (!result || result.ok !== true) {
-        throw new Error(result && result.reason ? result.reason : `불러오기에 실패했습니다 (${slotId})`);
+        throw new Error(result && result.reason ? result.reason : '퀵 로드에 실패했습니다');
       }
-      await refreshSnapshotList();
       setPlayPauseUi(false);
-      setStatus('진행상황 스냅샷으로 복원되었습니다 (일시정지)');
-    });
-  });
-
-  bindEvent(elements.deleteSlotButton, 'click', async () => {
-    await withEngineAction(async (api) => {
-      const slotId = selectedSlot();
-      const result = api.deleteSnapshot(slotId);
-      if (!result || result.ok !== true) {
-        throw new Error(result && result.reason ? result.reason : `삭제에 실패했습니다 (${slotId})`);
-      }
-      await refreshSnapshotList();
-      setStatus(`${slotId} 삭제 완료`);
-    });
-  });
-
-  bindEvent(elements.refreshSlotsButton, 'click', async () => {
-    await withEngineAction(async () => {
-      await refreshSnapshotList();
-      setStatus('스냅샷 목록을 새로고침했습니다');
+      setStatus(`${slotId} 퀵 로드 완료 (일시정지 복원)`);
     });
   });
 }
 
 async function boot() {
-  setupSlotOptions();
   setupEvents();
   const initialMap = buildDefaultMapJson(String(elements.mapIdInput.value || '').trim() || 'v2_custom_map');
   writeMapJsonEditor(initialMap);
