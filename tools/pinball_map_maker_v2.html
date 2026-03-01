@@ -303,6 +303,9 @@
       cursor: crosshair;
       background: linear-gradient(180deg, #0d1a36 0%, #0a142d 100%);
     }
+    #makerCanvas.panning {
+      cursor: grabbing;
+    }
     .tool-palette {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -356,6 +359,57 @@
       font-size: 11px;
       color: #95acd8;
       line-height: 1.35;
+    }
+    .preview-wrap {
+      border: 1px solid #2e436f;
+      border-radius: 8px;
+      background: #0b1430;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .preview-head {
+      padding: 7px 9px;
+      border-bottom: 1px solid #2f426d;
+      font-size: 11px;
+      color: #9ec0ff;
+      background: #121f3d;
+      font-weight: 700;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .preview-toolbar {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      padding: 8px;
+      border-bottom: 1px solid #273b63;
+      background: #0f1b34;
+    }
+    .preview-frame-wrap {
+      height: 210px;
+      min-height: 160px;
+      background: #000;
+      border-top: 1px solid #243a64;
+    }
+    #previewFrame {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      display: block;
+      background: #000;
+    }
+    .preview-status {
+      color: #95acd8;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 55%;
+      text-align: right;
     }
     .floating-controls {
       position: fixed;
@@ -483,6 +537,9 @@
       #makerCanvas {
         min-height: 300px;
       }
+      .preview-frame-wrap {
+        height: 180px;
+      }
       .floating-controls {
         width: calc(100% - 24px);
         left: 12px;
@@ -566,6 +623,19 @@
               <button id="clearObjectsButton" class="warn">오브젝트 전체삭제</button>
             </div>
             <div class="maker-compact" id="makerHintText">툴을 선택하고 좌표 맵 캔버스를 클릭해 배치하세요.</div>
+            <div class="preview-wrap">
+              <div class="preview-head">
+                <span>좌표창 미니 물리 프리뷰</span>
+                <span id="previewStatusText" class="preview-status">연결 대기</span>
+              </div>
+              <div class="preview-toolbar">
+                <button id="previewPlayPauseButton" class="primary">미리보기 시작</button>
+                <button id="previewResetButton">미리보기 리셋</button>
+              </div>
+              <div class="preview-frame-wrap">
+                <iframe id="previewFrame" title="pinball-v2-preview"></iframe>
+              </div>
+            </div>
           </div>
         </section>
         <aside class="maker-side">

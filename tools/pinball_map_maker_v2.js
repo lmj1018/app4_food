@@ -6,16 +6,26 @@ const WORLD_WIDTH = 24;
 const MIN_MARBLE_COUNT = 1;
 const MAX_MARBLE_COUNT = 256;
 const LIVE_APPLY_DEBOUNCE_MS = 120;
+const CANVAS_MIN_ZOOM = 0.35;
+const CANVAS_MAX_ZOOM = 6;
 let engineCanvasFillTimer = 0;
 let liveApplyTimer = 0;
 let liveApplyInFlight = false;
 let liveApplyPending = false;
+let previewLiveApplyInFlight = false;
+let previewCanvasFillTimer = 0;
 
 let mapCatalog = [];
 let workingMapJson = null;
 const editorState = {
   selectedIndex: -1,
   pendingWallStart: null,
+  canvasZoom: 1,
+  canvasPanX: 0,
+  canvasPanY: 0,
+  isCanvasPanning: false,
+  canvasPanLastX: 0,
+  canvasPanLastY: 0,
 };
 
 const elements = {
@@ -39,6 +49,10 @@ const elements = {
   statusBox: document.getElementById('statusBox'),
   engineFrame: document.getElementById('engineFrame'),
   engineUrlText: document.getElementById('engineUrlText'),
+  previewFrame: document.getElementById('previewFrame'),
+  previewPlayPauseButton: document.getElementById('previewPlayPauseButton'),
+  previewResetButton: document.getElementById('previewResetButton'),
+  previewStatusText: document.getElementById('previewStatusText'),
   viewZoomInput: document.getElementById('viewZoomInput'),
   stageGoalInput: document.getElementById('stageGoalInput'),
   stageZoomInput: document.getElementById('stageZoomInput'),
@@ -170,6 +184,31 @@ function setPlayPauseUi(isRunning) {
   }
 }
 
+function setPreviewPlayPauseUi(isRunning) {
+  if (!elements.previewPlayPauseButton) {
+    return;
+  }
+  const running = isRunning === true;
+  elements.previewPlayPauseButton.textContent = running ? '미리보기 일시정지' : '미리보기 시작';
+  elements.previewPlayPauseButton.classList.toggle('primary', !running);
+}
+
+function setPreviewStatus(text, kind = 'ok') {
+  if (!elements.previewStatusText) {
+    return;
+  }
+  elements.previewStatusText.textContent = String(text || '');
+  if (kind === 'error') {
+    elements.previewStatusText.style.color = '#ff9898';
+    return;
+  }
+  if (kind === 'warn') {
+    elements.previewStatusText.style.color = '#ffcf84';
+    return;
+  }
+  elements.previewStatusText.style.color = '#9ec0ff';
+}
+
 function readEngineRunning(api) {
   if (!api || typeof api.getState !== 'function') {
     return false;
@@ -197,6 +236,8 @@ function setBusy(isBusy) {
     elements.resetButton,
     elements.quickSaveButton,
     elements.quickLoadButton,
+    elements.previewPlayPauseButton,
+    elements.previewResetButton,
     elements.marbleCountInput,
     elements.applyMarbleCountButton,
     elements.toggleJsonViewButton,
@@ -487,8 +528,26 @@ function getFrameWindow() {
     : null;
 }
 
+function getPreviewFrameWindow() {
+  return elements.previewFrame && elements.previewFrame.contentWindow
+    ? elements.previewFrame.contentWindow
+    : null;
+}
+
 function getEngineApi() {
   const frameWindow = getFrameWindow();
+  if (!frameWindow) {
+    return null;
+  }
+  const api = frameWindow.__appPinballV2;
+  if (!api || typeof api !== 'object') {
+    return null;
+  }
+  return api;
+}
+
+function getPreviewApi() {
+  const frameWindow = getPreviewFrameWindow();
   if (!frameWindow) {
     return null;
   }
@@ -551,6 +610,62 @@ function startEngineCanvasFillRetry() {
     if (applied || tries >= 40) {
       window.clearInterval(engineCanvasFillTimer);
       engineCanvasFillTimer = 0;
+    }
+  }, 80);
+}
+
+function ensurePreviewCanvasFill() {
+  const frameWindow = getPreviewFrameWindow();
+  if (!frameWindow || !frameWindow.document) {
+    return false;
+  }
+  let documentRef = null;
+  try {
+    documentRef = frameWindow.document;
+  } catch (_) {
+    return false;
+  }
+  const canvas = documentRef.querySelector('canvas');
+  if (!canvas) {
+    return false;
+  }
+  if (documentRef.__v2PreviewContextMenuBlocked !== true) {
+    documentRef.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+    });
+    documentRef.__v2PreviewContextMenuBlocked = true;
+  }
+  if (documentRef.documentElement) {
+    documentRef.documentElement.style.width = '100%';
+    documentRef.documentElement.style.height = '100%';
+    documentRef.documentElement.style.overflow = 'hidden';
+  }
+  if (documentRef.body) {
+    documentRef.body.style.width = '100%';
+    documentRef.body.style.height = '100%';
+    documentRef.body.style.margin = '0';
+    documentRef.body.style.overflow = 'hidden';
+  }
+  canvas.style.display = 'block';
+  canvas.style.width = '100%';
+  canvas.style.height = '100%';
+  canvas.style.maxWidth = '100%';
+  canvas.style.maxHeight = '100%';
+  return true;
+}
+
+function startPreviewCanvasFillRetry() {
+  if (previewCanvasFillTimer) {
+    window.clearInterval(previewCanvasFillTimer);
+    previewCanvasFillTimer = 0;
+  }
+  let tries = 0;
+  previewCanvasFillTimer = window.setInterval(() => {
+    tries += 1;
+    const applied = ensurePreviewCanvasFill();
+    if (applied || tries >= 40) {
+      window.clearInterval(previewCanvasFillTimer);
+      previewCanvasFillTimer = 0;
     }
   }, 80);
 }
@@ -1115,17 +1230,21 @@ function getCanvasLayout() {
   const padding = 22 * dpr;
   const usableW = Math.max(20, width - padding * 2);
   const usableH = Math.max(20, height - padding * 2);
-  const scale = Math.max(0.001, Math.min(usableW / WORLD_WIDTH, usableH / stageGoalY));
+  const fitScale = Math.max(0.001, Math.min(usableW / WORLD_WIDTH, usableH / stageGoalY));
+  const zoom = clamp(toFinite(editorState.canvasZoom, 1), CANVAS_MIN_ZOOM, CANVAS_MAX_ZOOM);
+  const scale = fitScale * zoom;
   const drawW = WORLD_WIDTH * scale;
   const drawH = stageGoalY * scale;
-  const offsetX = (width - drawW) / 2;
-  const offsetY = (height - drawH) / 2;
+  const offsetX = (width - drawW) / 2 + toFinite(editorState.canvasPanX, 0);
+  const offsetY = (height - drawH) / 2 + toFinite(editorState.canvasPanY, 0);
   return {
     canvas,
     dpr,
     width,
     height,
     padding,
+    fitScale,
+    zoom,
     scale,
     offsetX,
     offsetY,
@@ -1325,6 +1444,85 @@ function readCanvasWorldPoint(event) {
   return canvasToWorld(layout, x, y);
 }
 
+function setCanvasPanningState(active) {
+  editorState.isCanvasPanning = active === true;
+  if (elements.makerCanvas) {
+    elements.makerCanvas.classList.toggle('panning', editorState.isCanvasPanning);
+  }
+}
+
+function handleMakerCanvasWheel(event) {
+  if (!elements.makerCanvas) {
+    return;
+  }
+  event.preventDefault();
+  const oldLayout = getCanvasLayout();
+  if (!oldLayout) {
+    return;
+  }
+  const rect = oldLayout.canvas.getBoundingClientRect();
+  const px = (event.clientX - rect.left) * oldLayout.dpr;
+  const py = (event.clientY - rect.top) * oldLayout.dpr;
+  const worldPoint = canvasToWorld(oldLayout, px, py);
+
+  const direction = event.deltaY < 0 ? 1 : -1;
+  const zoomFactor = direction > 0 ? 1.12 : 1 / 1.12;
+  const previousZoom = clamp(toFinite(editorState.canvasZoom, 1), CANVAS_MIN_ZOOM, CANVAS_MAX_ZOOM);
+  const nextZoom = clamp(previousZoom * zoomFactor, CANVAS_MIN_ZOOM, CANVAS_MAX_ZOOM);
+  if (Math.abs(nextZoom - previousZoom) < 0.0001) {
+    return;
+  }
+  editorState.canvasZoom = nextZoom;
+
+  const newLayout = getCanvasLayout();
+  if (!newLayout) {
+    drawMakerCanvas();
+    return;
+  }
+  const pinned = worldToCanvas(newLayout, worldPoint.x, worldPoint.y);
+  editorState.canvasPanX += px - pinned.x;
+  editorState.canvasPanY += py - pinned.y;
+  drawMakerCanvas();
+  updateMakerHint(`좌표맵 줌: ${round2(nextZoom)}x`);
+}
+
+function beginMakerCanvasPan(event) {
+  if (event.button !== 1) {
+    return;
+  }
+  event.preventDefault();
+  const layout = getCanvasLayout();
+  if (!layout) {
+    return;
+  }
+  editorState.canvasPanLastX = event.clientX * layout.dpr;
+  editorState.canvasPanLastY = event.clientY * layout.dpr;
+  setCanvasPanningState(true);
+}
+
+function updateMakerCanvasPan(event) {
+  if (!editorState.isCanvasPanning) {
+    return;
+  }
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const currentX = event.clientX * dpr;
+  const currentY = event.clientY * dpr;
+  const dx = currentX - toFinite(editorState.canvasPanLastX, currentX);
+  const dy = currentY - toFinite(editorState.canvasPanLastY, currentY);
+  editorState.canvasPanLastX = currentX;
+  editorState.canvasPanLastY = currentY;
+  editorState.canvasPanX += dx;
+  editorState.canvasPanY += dy;
+  drawMakerCanvas();
+}
+
+function endMakerCanvasPan() {
+  if (!editorState.isCanvasPanning) {
+    return;
+  }
+  setCanvasPanningState(false);
+}
+
 function addObjectAt(tool, x, y) {
   const objects = getObjects();
   if (tool === 'wall_polyline') {
@@ -1391,6 +1589,21 @@ async function waitForEngineApi(timeoutMs = 20000) {
   throw new Error(`엔진 API 대기 시간 초과. ${formatEngineDiagnostics(diagnostics)}`);
 }
 
+async function waitForPreviewApi(timeoutMs = 20000) {
+  if (FILE_PROTOCOL) {
+    throw new Error('file:// 경로에서는 프리뷰 엔진 모듈이 차단됩니다.');
+  }
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const api = getPreviewApi();
+    if (api && typeof api.init === 'function') {
+      return api;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 60));
+  }
+  throw new Error('프리뷰 엔진 API 대기 시간 초과');
+}
+
 async function withEngineAction(action, options = {}) {
   const shouldRethrow = options.rethrow === true;
   setBusy(true);
@@ -1408,6 +1621,84 @@ async function withEngineAction(action, options = {}) {
   }
 }
 
+async function withPreviewAction(action, options = {}) {
+  if (!elements.previewFrame) {
+    return null;
+  }
+  const silent = options.silent !== false;
+  try {
+    const api = await waitForPreviewApi(8000);
+    return await action(api);
+  } catch (error) {
+    if (!silent) {
+      setStatus(String(error && error.message ? error.message : error), 'error');
+      setPreviewStatus('프리뷰 연결 실패', 'error');
+    }
+    return null;
+  }
+}
+
+async function applyDraftMapToApi(api, options = {}) {
+  if (!api || typeof api !== 'object') {
+    return { ok: false, reason: 'api unavailable' };
+  }
+  const mapId = resolveCurrentMapId();
+  const mapJson = getWorkingMapJson(mapId);
+  mapJson.id = mapId;
+  mapJson.title = mapId;
+
+  const useLive = options.live !== false && typeof api.applyMapJsonLive === 'function';
+  let result = null;
+  if (useLive) {
+    result = await api.applyMapJsonLive(mapJson, {
+      preserveMarbles: options.preserveMarbles !== false,
+      preserveRunning: options.preserveRunning !== false,
+    });
+  } else {
+    result = await api.applyMapJson(mapJson);
+  }
+  if (!result || result.ok !== true) {
+    throw new Error(result && result.reason ? result.reason : '드래프트 맵 적용 실패');
+  }
+
+  const rankResult = api.setWinningRank(DEFAULT_WINNING_RANK);
+  if (!rankResult || rankResult.ok !== true) {
+    throw new Error('당첨 순위 설정 실패');
+  }
+
+  if (options.updateCandidates === true) {
+    const candidateResult = await api.setCandidates(buildAutoCandidates(getCurrentMarbleCount()));
+    if (!candidateResult || candidateResult.ok !== true) {
+      throw new Error(candidateResult && candidateResult.reason ? candidateResult.reason : '후보 설정 실패');
+    }
+  }
+
+  return { ok: true, mapId };
+}
+
+async function syncPreviewFromDraft(options = {}) {
+  if (previewLiveApplyInFlight) {
+    return;
+  }
+  previewLiveApplyInFlight = true;
+  try {
+    await withPreviewAction(async (api) => {
+      await applyDraftMapToApi(api, {
+        live: true,
+        preserveMarbles: options.preserveMarbles !== false,
+        preserveRunning: options.preserveRunning !== false,
+        updateCandidates: options.updateCandidates === true,
+      });
+      ensurePreviewCanvasFill();
+      const running = readEngineRunning(api);
+      setPreviewPlayPauseUi(running);
+      setPreviewStatus(running ? '실행중' : '일시정지');
+    }, { silent: true });
+  } finally {
+    previewLiveApplyInFlight = false;
+  }
+}
+
 async function applyDraftLiveNow(reason = '') {
   if (liveApplyInFlight) {
     liveApplyPending = true;
@@ -1416,27 +1707,23 @@ async function applyDraftLiveNow(reason = '') {
   liveApplyInFlight = true;
   try {
     const api = await waitForEngineApi(8000);
-    const mapId = resolveCurrentMapId();
-    const mapJson = getWorkingMapJson(mapId);
-    mapJson.id = mapId;
-    mapJson.title = mapId;
-
-    let result = null;
-    if (typeof api.applyMapJsonLive === 'function') {
-      result = await api.applyMapJsonLive(mapJson, { preserveMarbles: true, preserveRunning: true });
-    } else {
-      result = await api.applyMapJson(mapJson);
-    }
-    if (!result || result.ok !== true) {
-      throw new Error(result && result.reason ? result.reason : '실시간 드래프트 적용 실패');
-    }
-
-    setWorkingMapJson(mapJson, mapId);
+    await applyDraftMapToApi(api, {
+      live: true,
+      preserveMarbles: true,
+      preserveRunning: true,
+      updateCandidates: false,
+    });
+    setWorkingMapJson(getWorkingMapJson(resolveCurrentMapId()), resolveCurrentMapId());
     ensureEngineCanvasFill();
     syncViewZoomInputFromEngine();
     const running = readEngineRunning(api);
     setPlayPauseUi(running);
     applyViewZoomToEngine(!running);
+    await syncPreviewFromDraft({
+      preserveMarbles: true,
+      preserveRunning: true,
+      updateCandidates: false,
+    });
     if (reason) {
       setStatus(`실시간 적용: ${reason}`);
     }
@@ -1493,6 +1780,11 @@ async function applyMapAndCandidates() {
     syncViewZoomInputFromEngine();
     setPlayPauseUi(readEngineRunning(api));
     applyViewZoomToEngine(true);
+    await syncPreviewFromDraft({
+      preserveMarbles: false,
+      preserveRunning: false,
+      updateCandidates: true,
+    });
     setStatus(`맵 자동 적용 완료: ${payload.mapId}`);
   }, { rethrow: true });
 }
@@ -1569,6 +1861,48 @@ async function loadEngineFrame() {
   setPlayPauseUi(readEngineRunning(api));
   applyViewZoomToEngine(true);
   setStatus(`엔진 준비 완료: 맵=${resolveCurrentMapId()}`);
+}
+
+async function loadPreviewFrame() {
+  if (!elements.previewFrame) {
+    return;
+  }
+  const previewUrl = `../assets/ui/pinball/index_v2.html?editor=1&preview=1&nocache=${Date.now()}`;
+  setPreviewStatus('로딩중...');
+  elements.previewFrame.src = previewUrl;
+  await new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      elements.previewFrame.onload = null;
+      elements.previewFrame.onerror = null;
+      reject(new Error('프리뷰 iframe 로딩 시간 초과'));
+    }, 15000);
+    elements.previewFrame.onload = () => {
+      window.clearTimeout(timeout);
+      elements.previewFrame.onload = null;
+      elements.previewFrame.onerror = null;
+      resolve();
+    };
+    elements.previewFrame.onerror = () => {
+      window.clearTimeout(timeout);
+      elements.previewFrame.onload = null;
+      elements.previewFrame.onerror = null;
+      reject(new Error('프리뷰 iframe 로딩 실패'));
+    };
+  });
+  startPreviewCanvasFillRetry();
+  const api = await waitForPreviewApi(30000);
+  const initResult = await api.init(readPayload());
+  if (!initResult || initResult.ok !== true) {
+    throw new Error(initResult && initResult.reason ? initResult.reason : '프리뷰 초기화 실패');
+  }
+  ensurePreviewCanvasFill();
+  setPreviewPlayPauseUi(readEngineRunning(api));
+  setPreviewStatus('준비완료');
+  await syncPreviewFromDraft({
+    preserveMarbles: false,
+    preserveRunning: false,
+    updateCandidates: true,
+  });
 }
 
 async function saveMapViaServer(payload) {
@@ -1667,6 +2001,11 @@ function setupEvents() {
       setPlayPauseUi(readEngineRunning(api));
       setStatus(`테스트 공 개수 적용 완료: ${marbleCount}개`);
     });
+    await syncPreviewFromDraft({
+      preserveMarbles: false,
+      preserveRunning: false,
+      updateCandidates: true,
+    });
   });
 
   bindEvent(elements.toggleJsonViewButton, 'click', () => {
@@ -1749,6 +2088,28 @@ function setupEvents() {
 
   bindEvent(elements.makerCanvas, 'click', (event) => {
     handleMakerCanvasClick(event);
+  });
+
+  bindEvent(elements.makerCanvas, 'wheel', (event) => {
+    handleMakerCanvasWheel(event);
+  });
+
+  bindEvent(elements.makerCanvas, 'mousedown', (event) => {
+    beginMakerCanvasPan(event);
+  });
+
+  bindEvent(elements.makerCanvas, 'auxclick', (event) => {
+    if (event.button === 1) {
+      event.preventDefault();
+    }
+  });
+
+  window.addEventListener('mousemove', (event) => {
+    updateMakerCanvasPan(event);
+  });
+
+  window.addEventListener('mouseup', () => {
+    endMakerCanvasPan();
   });
 
   bindEvent(elements.makerCanvas, 'contextmenu', (event) => {
@@ -1841,6 +2202,11 @@ function setupEvents() {
     setBusy(true);
     try {
       await loadEngineFrame();
+      try {
+        await loadPreviewFrame();
+      } catch (previewError) {
+        setPreviewStatus(String(previewError && previewError.message ? previewError.message : previewError), 'error');
+      }
       if (selectedMapCatalogEntry()) {
         await loadSelectedCatalogMap();
       }
@@ -1849,6 +2215,43 @@ function setupEvents() {
     } finally {
       setBusy(false);
     }
+  });
+
+  bindEvent(elements.previewPlayPauseButton, 'click', async () => {
+    await withPreviewAction(async (api) => {
+      const running = readEngineRunning(api);
+      if (running) {
+        const pauseResult = await api.pause();
+        if (!pauseResult || pauseResult.ok !== true) {
+          throw new Error(pauseResult && pauseResult.reason ? pauseResult.reason : '미리보기 일시정지 실패');
+        }
+        setPreviewPlayPauseUi(false);
+        setPreviewStatus('일시정지');
+        return;
+      }
+      const startResult = await api.start();
+      if (!startResult || startResult.ok !== true) {
+        throw new Error(startResult && startResult.reason ? startResult.reason : '미리보기 시작 실패');
+      }
+      setPreviewPlayPauseUi(true);
+      setPreviewStatus('실행중');
+    }, { silent: false });
+  });
+
+  bindEvent(elements.previewResetButton, 'click', async () => {
+    await withPreviewAction(async (api) => {
+      const result = await api.reset();
+      if (!result || result.ok !== true) {
+        throw new Error(result && result.reason ? result.reason : '미리보기 리셋 실패');
+      }
+      setPreviewPlayPauseUi(false);
+      setPreviewStatus('리셋됨');
+      await syncPreviewFromDraft({
+        preserveMarbles: false,
+        preserveRunning: false,
+        updateCandidates: true,
+      });
+    }, { silent: false });
   });
 
   bindEvent(elements.playPauseToggleButton, 'click', async () => {
@@ -1930,6 +2333,8 @@ async function boot() {
   drawMakerCanvas();
   updateMakerHint('툴을 선택하고 캔버스를 클릭해서 맵 오브젝트를 배치하세요.');
   setPlayPauseUi(false);
+  setPreviewPlayPauseUi(false);
+  setPreviewStatus('연결 대기');
   if (FILE_PROTOCOL) {
     setStatus('현재 file:// 경로입니다. tools/start_pinball_map_maker_v2.bat 로 실행하세요', 'warn');
     return;
@@ -1938,6 +2343,11 @@ async function boot() {
   try {
     await refreshMapCatalog(initialMapId);
     await loadEngineFrame();
+    try {
+      await loadPreviewFrame();
+    } catch (previewError) {
+      setPreviewStatus(String(previewError && previewError.message ? previewError.message : previewError), 'error');
+    }
     if (selectedMapCatalogEntry()) {
       await loadSelectedCatalogMap();
     }
