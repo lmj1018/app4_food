@@ -1,5 +1,4 @@
 const SLOT_IDS = ['slot1', 'slot2', 'slot3'];
-const MAPS_BASE_URL = '../assets/ui/pinball/maps';
 const FILE_PROTOCOL = window.location.protocol === 'file:';
 
 let mapCatalog = [];
@@ -14,8 +13,6 @@ const elements = {
   newMapTitleInput: document.getElementById('newMapTitleInput'),
   saveSelectedMapButton: document.getElementById('saveSelectedMapButton'),
   saveAsNewMapButton: document.getElementById('saveAsNewMapButton'),
-  pullMapButton: document.getElementById('pullMapButton'),
-  applyJsonButton: document.getElementById('applyJsonButton'),
   mapIdInput: document.getElementById('mapIdInput'),
   marbleCountInput: document.getElementById('marbleCountInput'),
   winningRankInput: document.getElementById('winningRankInput'),
@@ -105,8 +102,6 @@ function setBusy(isBusy) {
     elements.loadSelectedMapButton,
     elements.saveSelectedMapButton,
     elements.saveAsNewMapButton,
-    elements.pullMapButton,
-    elements.applyJsonButton,
     elements.applyButton,
     elements.reloadButton,
     elements.playPauseToggleButton,
@@ -226,10 +221,6 @@ function sanitizeMapId(value) {
   return cleaned || `v2_map_${Date.now()}`;
 }
 
-function buildMapFileName(mapId) {
-  return `${sanitizeMapId(mapId)}.json`;
-}
-
 function selectedMapIdFromDropdown() {
   const value = String(elements.mapSelect && elements.mapSelect.value ? elements.mapSelect.value : '').trim();
   return value || '';
@@ -237,6 +228,13 @@ function selectedMapIdFromDropdown() {
 
 function selectedMapCatalogEntry() {
   const mapId = selectedMapIdFromDropdown();
+  if (!mapId) {
+    return null;
+  }
+  return mapCatalog.find((entry) => entry && entry.id === mapId) || null;
+}
+
+function lookupMapCatalogById(mapId) {
   if (!mapId) {
     return null;
   }
@@ -271,6 +269,9 @@ async function callMapMakerApi(path, options = {}) {
   } catch (_) {
   }
   if (!response.ok || !payload || payload.ok !== true) {
+    if (response.status === 404) {
+      throw new Error('맵 메이커 전용 서버가 아닙니다. tools/start_pinball_map_maker_v2.bat 로 실행하세요');
+    }
     const reason = payload && payload.reason ? payload.reason : `API 오류: ${response.status}`;
     throw new Error(String(reason));
   }
@@ -470,7 +471,7 @@ function formatEngineDiagnostics(diagnostics) {
 
 async function waitForEngineApi(timeoutMs = 20000) {
   if (FILE_PROTOCOL) {
-    throw new Error('file:// 경로에서는 엔진 모듈이 차단될 수 있습니다. 로컬 서버로 열어주세요 (예: python -m http.server 8080)');
+    throw new Error('file:// 경로에서는 엔진 모듈이 차단됩니다. tools/start_pinball_map_maker_v2.bat 로 실행하세요');
   }
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -548,11 +549,28 @@ async function withEngineAction(action) {
 async function applyMapAndCandidates() {
   await withEngineAction(async (api) => {
     const payload = readPayload();
-    const mapResult = await api.loadMapById(payload.mapId);
-    if (!mapResult || mapResult.ok !== true) {
-      throw new Error(mapResult && mapResult.reason ? mapResult.reason : '맵 로드에 실패했습니다');
+    const catalogEntry = lookupMapCatalogById(payload.mapId);
+    if (catalogEntry) {
+      const mapResult = await api.loadMapById(payload.mapId);
+      if (!mapResult || mapResult.ok !== true) {
+        throw new Error(mapResult && mapResult.reason ? mapResult.reason : '맵 로드에 실패했습니다');
+      }
+      await syncMapJsonEditorFromEngine(api);
+    } else {
+      if (typeof api.applyMapJson !== 'function') {
+        throw new Error('엔진이 맵 JSON 적용 API를 지원하지 않습니다');
+      }
+      const mapJson = parseMapJsonText();
+      if (mapJson.id !== payload.mapId) {
+        mapJson.id = payload.mapId;
+      }
+      const mapResult = await api.applyMapJson(mapJson);
+      if (!mapResult || mapResult.ok !== true) {
+        throw new Error(mapResult && mapResult.reason ? mapResult.reason : '맵 JSON 적용에 실패했습니다');
+      }
+      writeMapJsonEditor(mapJson);
+      seedNewMapInputsFromCurrentMap(mapJson);
     }
-    await syncMapJsonEditorFromEngine(api);
     const rankResult = api.setWinningRank(payload.winningRank);
     if (!rankResult || rankResult.ok !== true) {
       throw new Error('당첨 순위 설정에 실패했습니다');
@@ -562,45 +580,10 @@ async function applyMapAndCandidates() {
       throw new Error(candidateResult && candidateResult.reason ? candidateResult.reason : '후보 설정에 실패했습니다');
     }
     setPlayPauseUi(readEngineRunning(api));
-    if (elements.mapSelect && mapCatalog.some((entry) => entry.id === payload.mapId)) {
+    if (elements.mapSelect && catalogEntry) {
       elements.mapSelect.value = payload.mapId;
     }
-    setStatus(`맵 설정 적용 완료(테스트 반영): 맵=${payload.mapId}, 후보=${payload.candidates.length}`);
-  });
-}
-
-async function applyMapJsonFromEditor() {
-  await withEngineAction(async (api) => {
-    if (typeof api.applyMapJson !== 'function') {
-      throw new Error('엔진이 맵 JSON 적용 API를 지원하지 않습니다');
-    }
-    const payload = readPayload();
-    const mapJson = parseMapJsonText();
-    const mapResult = await api.applyMapJson(mapJson);
-    if (!mapResult || mapResult.ok !== true) {
-      throw new Error(mapResult && mapResult.reason ? mapResult.reason : '맵 JSON 적용에 실패했습니다');
-    }
-    syncMapIdInputFromMapJson(mapJson);
-    seedNewMapInputsFromCurrentMap(mapJson);
-    writeMapJsonEditor(mapJson);
-    const rankResult = api.setWinningRank(payload.winningRank);
-    if (!rankResult || rankResult.ok !== true) {
-      throw new Error('당첨 순위 설정에 실패했습니다');
-    }
-    const candidateResult = await api.setCandidates(payload.candidates);
-    if (!candidateResult || candidateResult.ok !== true) {
-      throw new Error(candidateResult && candidateResult.reason ? candidateResult.reason : '후보 설정에 실패했습니다');
-    }
-    setPlayPauseUi(readEngineRunning(api));
-    setStatus(`JSON 맵 적용 완료: 맵=${mapJson.id}, 후보=${payload.candidates.length}`);
-  });
-}
-
-async function pullMapJsonFromEngine() {
-  await withEngineAction(async (api) => {
-    await syncMapJsonEditorFromEngine(api);
-    const mapJson = parseMapJsonText();
-    setStatus(`현재 맵 JSON을 가져왔습니다: ${mapJson.id}`);
+    setStatus(`맵 적용 완료: 맵=${payload.mapId}, 후보=${payload.candidates.length}`);
   });
 }
 
@@ -710,18 +693,6 @@ function setupEvents() {
     }
   });
 
-  bindEvent(elements.connectMapsDirButton, 'click', async () => {
-    setBusy(true);
-    try {
-      await connectMapsDirectory();
-    } catch (error) {
-      setMapsDirStatus(String(error && error.message ? error.message : error), 'error');
-      setStatus(String(error && error.message ? error.message : error), 'error');
-    } finally {
-      setBusy(false);
-    }
-  });
-
   bindEvent(elements.saveSelectedMapButton, 'click', async () => {
     setBusy(true);
     try {
@@ -742,14 +713,6 @@ function setupEvents() {
     } finally {
       setBusy(false);
     }
-  });
-
-  bindEvent(elements.pullMapButton, 'click', async () => {
-    await pullMapJsonFromEngine();
-  });
-
-  bindEvent(elements.applyJsonButton, 'click', async () => {
-    await applyMapJsonFromEditor();
   });
 
   bindEvent(elements.mapSelect, 'change', () => {
@@ -847,7 +810,7 @@ async function boot() {
   updateMapsDirConnectedStatus();
   setPlayPauseUi(false);
   if (FILE_PROTOCOL) {
-    setStatus('현재 file:// 경로입니다. 버튼 동작을 위해 로컬 서버로 열어주세요: python -m http.server 8080 후 http://localhost:8080/tools/pinball_map_maker_v2.html', 'warn');
+    setStatus('현재 file:// 경로입니다. tools/start_pinball_map_maker_v2.bat 로 실행하세요', 'warn');
     return;
   }
   setBusy(true);

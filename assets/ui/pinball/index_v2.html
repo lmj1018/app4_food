@@ -58,8 +58,25 @@
   <div id="v2Status" class="status">v2 booting...</div>
   <script>
     window.__v2BootError = '';
+    const __V2_BENIGN_ERRORS = [
+      'ResizeObserver loop completed with undelivered notifications.',
+      'ResizeObserver loop limit exceeded',
+    ];
+    function __isV2BenignError(message) {
+      const text = typeof message === 'string' ? message : '';
+      if (!text) {
+        return false;
+      }
+      return __V2_BENIGN_ERRORS.some((keyword) => text.includes(keyword));
+    }
     window.addEventListener('error', (event) => {
       const message = event && event.message ? String(event.message) : 'Unknown script error';
+      if (__isV2BenignError(message)) {
+        if (event && typeof event.preventDefault === 'function') {
+          event.preventDefault();
+        }
+        return;
+      }
       window.__v2BootError = message;
       const element = document.getElementById('v2Status');
       if (element) {
@@ -71,6 +88,12 @@
       const message = typeof reason === 'string'
         ? reason
         : (reason && reason.message ? String(reason.message) : 'Unhandled promise rejection');
+      if (__isV2BenignError(message)) {
+        if (event && typeof event.preventDefault === 'function') {
+          event.preventDefault();
+        }
+        return;
+      }
       window.__v2BootError = message;
       const element = document.getElementById('v2Status');
       if (element) {

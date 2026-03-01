@@ -38,11 +38,17 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $scriptDir '..')
 $selectedPort = Resolve-AvailablePort -PreferredPort $Port
 $targetPage = "http://127.0.0.1:$selectedPort/tools/pinball_map_maker_v2.html"
+$serverScript = Join-Path $scriptDir 'pinball_map_maker_v2_server.py'
 
 Set-Location $repoRoot
 
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
   Write-Host '[오류] python 명령을 찾을 수 없습니다. Python 설치 후 다시 실행하세요.' -ForegroundColor Red
+  exit 1
+}
+
+if (-not (Test-Path $serverScript)) {
+  Write-Host "[오류] 서버 스크립트를 찾을 수 없습니다: $serverScript" -ForegroundColor Red
   exit 1
 }
 
@@ -60,5 +66,5 @@ if ($selectedPort -ne $Port) {
   Write-Host "요청 포트 $Port 사용 불가 -> 자동으로 $selectedPort 포트를 사용합니다." -ForegroundColor Yellow
 }
 
-& python -m http.server $selectedPort --bind 127.0.0.1
+& python $serverScript --host 127.0.0.1 --port $selectedPort
 exit $LASTEXITCODE
