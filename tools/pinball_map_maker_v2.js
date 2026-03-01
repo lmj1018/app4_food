@@ -131,7 +131,7 @@ function renderSnapshotList(items) {
       const label = String(item.label || '');
       const mapId = String(item.mapId || '');
       const count = Number(item.marbleCount || 0);
-      return `<div class="snapshot-item"><span class="snapshot-slot">${slot}</span>${label}<br>맵=${mapId} 볼=${count}</div>`;
+      return `<div class="snapshot-item"><span class="snapshot-slot">${slot}</span>${label}<br>진행상황 스냅샷 · 맵=${mapId} 볼=${count}</div>`;
     })
     .join('');
   elements.snapshotList.innerHTML = html;
@@ -191,7 +191,7 @@ async function applyMapAndCandidates() {
     if (!candidateResult || candidateResult.ok !== true) {
       throw new Error(candidateResult && candidateResult.reason ? candidateResult.reason : '후보 설정에 실패했습니다');
     }
-    setStatus(`맵 적용 완료: 맵=${payload.mapId}, 후보=${payload.candidates.length}`);
+    setStatus(`맵 설정 적용 완료(테스트 반영): 맵=${payload.mapId}, 후보=${payload.candidates.length}`);
   });
 }
 
@@ -264,7 +264,7 @@ function setupEvents() {
         throw new Error(result && result.reason ? result.reason : '빠른 저장에 실패했습니다');
       }
       await refreshSnapshotList();
-      setStatus(`빠른 저장 완료: ${result.meta ? result.meta.label : '성공'}`);
+      setStatus(`빠른 저장 완료(현재 진행상황): ${result.meta ? result.meta.label : '성공'}`);
     });
   });
 
@@ -275,7 +275,7 @@ function setupEvents() {
         throw new Error(result && result.reason ? result.reason : '빠른 불러오기에 실패했습니다');
       }
       await refreshSnapshotList();
-      setStatus('스냅샷으로 복원되었습니다 (일시정지)');
+      setStatus('진행상황 스냅샷으로 복원되었습니다 (일시정지)');
     });
   });
 
@@ -287,7 +287,7 @@ function setupEvents() {
         throw new Error(result && result.reason ? result.reason : `저장에 실패했습니다 (${slotId})`);
       }
       await refreshSnapshotList();
-      setStatus(`${slotId} 저장 완료: ${result.meta ? result.meta.label : '성공'}`);
+      setStatus(`${slotId} 저장 완료(현재 진행상황): ${result.meta ? result.meta.label : '성공'}`);
     });
   });
 
@@ -299,7 +299,7 @@ function setupEvents() {
         throw new Error(result && result.reason ? result.reason : `불러오기에 실패했습니다 (${slotId})`);
       }
       await refreshSnapshotList();
-      setStatus('스냅샷으로 복원되었습니다 (일시정지)');
+      setStatus('진행상황 스냅샷으로 복원되었습니다 (일시정지)');
     });
   });
 

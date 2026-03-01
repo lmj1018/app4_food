@@ -57,6 +57,21 @@
       flex-direction: column;
       gap: 10px;
     }
+    .group {
+      border: 1px solid #2d436c;
+      border-radius: 10px;
+      padding: 10px;
+      background: #0c1731;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .group-title {
+      font-size: 12px;
+      color: #9ec0ff;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
     .row {
       display: grid;
       grid-template-columns: 100px 1fr;
@@ -121,6 +136,9 @@
       font-size: 12px;
       color: var(--muted);
       line-height: 1.35;
+    }
+    .inline-note.strong {
+      color: #ffd79b;
     }
     .status {
       font-size: 12px;
@@ -191,53 +209,67 @@
     <section class="panel">
       <div class="panel-head">핀볼 V2 스냅샷 제어판</div>
       <div class="panel-body">
-        <div class="row">
-          <label for="mapIdInput">맵 ID</label>
-          <input id="mapIdInput" type="text" value="v2_default">
+        <div class="group">
+          <div class="group-title">1) 맵 설정 적용 (파일 저장 아님)</div>
+          <div class="inline-note">여기서는 테스트할 맵/후보 조건만 엔진에 반영합니다. 맵 파일 자체를 저장하는 기능은 별도 구현이 필요합니다.</div>
+          <div class="row">
+            <label for="mapIdInput">맵 ID</label>
+            <input id="mapIdInput" type="text" value="v2_default">
+          </div>
+          <div class="row">
+            <label for="marbleCountInput">볼 개수</label>
+            <input id="marbleCountInput" type="number" min="1" max="200" value="32">
+          </div>
+          <div class="row">
+            <label for="winningRankInput">당첨 순위</label>
+            <input id="winningRankInput" type="number" min="1" max="200" value="1">
+          </div>
+          <div class="row">
+            <label for="candidatesInput">후보 목록</label>
+            <textarea id="candidatesInput" placeholder="선택 사항입니다. 한 줄에 후보 1개씩 입력하세요. 비워두면 볼 개수 기준으로 자동 생성됩니다."></textarea>
+          </div>
+          <div class="btn-row">
+            <button id="applyButton" class="primary">맵 적용</button>
+            <button id="reloadButton">엔진 다시 불러오기</button>
+          </div>
         </div>
-        <div class="row">
-          <label for="marbleCountInput">볼 개수</label>
-          <input id="marbleCountInput" type="number" min="1" max="200" value="32">
+        <div class="group">
+          <div class="group-title">2) 테스트 실행 제어</div>
+          <div class="btn-row">
+            <button id="startButton" class="primary">시작</button>
+            <button id="pauseButton">일시정지</button>
+          </div>
+          <div class="btn-row">
+            <button id="resetButton">리셋</button>
+            <button id="stateButton">상태 읽기</button>
+          </div>
         </div>
-        <div class="row">
-          <label for="winningRankInput">당첨 순위</label>
-          <input id="winningRankInput" type="number" min="1" max="200" value="1">
-        </div>
-        <div class="row">
-          <label for="candidatesInput">후보 목록</label>
-          <textarea id="candidatesInput" placeholder="선택 사항입니다. 한 줄에 후보 1개씩 입력하세요. 비워두면 볼 개수 기준으로 자동 생성됩니다."></textarea>
-        </div>
-        <div class="btn-row">
-          <button id="applyButton" class="primary">맵 적용</button>
-          <button id="reloadButton">엔진 다시 불러오기</button>
-        </div>
-        <div class="btn-row">
-          <button id="startButton" class="primary">시작</button>
-          <button id="pauseButton">일시정지</button>
-        </div>
-        <div class="btn-row">
-          <button id="resetButton">리셋</button>
-          <button id="stateButton">상태 읽기</button>
-        </div>
-        <div class="btn-row">
-          <button id="quickSaveButton">빠른 저장</button>
-          <button id="quickLoadButton">빠른 불러오기</button>
-        </div>
-        <div class="row">
-          <label for="slotSelect">슬롯</label>
-          <select id="slotSelect"></select>
-        </div>
-        <div class="btn-row">
-          <button id="saveSlotButton">슬롯 저장</button>
-          <button id="loadSlotButton">슬롯 불러오기</button>
-        </div>
-        <div class="btn-row">
-          <button id="deleteSlotButton" class="warn">슬롯 삭제</button>
-          <button id="refreshSlotsButton">슬롯 목록 새로고침</button>
+        <div class="group">
+          <div class="group-title">3) 현재 진행상황 스냅샷 (메모리 저장)</div>
+          <div class="inline-note strong">빠른/슬롯 저장은 "현재 공 위치·속도·런타임 상태" 저장입니다. 탭을 닫으면 사라집니다.</div>
+          <div class="btn-row">
+            <button id="quickSaveButton">빠른 저장</button>
+            <button id="quickLoadButton">빠른 불러오기</button>
+          </div>
+          <div class="row">
+            <label for="slotSelect">슬롯</label>
+            <select id="slotSelect"></select>
+          </div>
+          <div class="btn-row">
+            <button id="saveSlotButton">슬롯 저장</button>
+            <button id="loadSlotButton">슬롯 불러오기</button>
+          </div>
+          <div class="btn-row">
+            <button id="deleteSlotButton" class="warn">슬롯 삭제</button>
+            <button id="refreshSlotsButton">슬롯 목록 새로고침</button>
+          </div>
         </div>
         <div id="statusBox" class="status">엔진 연결을 기다리는 중...</div>
         <div class="inline-note">
-          불러오기는 기본적으로 일시정지 상태로 복원됩니다. 계속하려면 시작을 누르세요.
+          작업 순서: 맵 설정 입력 → 맵 적용 → 시작/일시정지로 테스트 → 저장 지점에서 빠른 저장/슬롯 저장 → 불러오기 후 시작으로 재개
+        </div>
+        <div class="inline-note">
+          불러오기는 기본적으로 일시정지 상태로 복원됩니다.
         </div>
         <div class="snapshot-list" id="snapshotList"></div>
       </div>
