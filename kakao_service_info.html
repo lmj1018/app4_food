@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>메추 - 서비스 소개</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --card: #171a21;
+      --text: #e9edf5;
+      --sub: #a7b0c0;
+      --line: #2a3040;
+      --accent: #29d3ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+      background: linear-gradient(180deg, #0c0f14 0%, #111520 100%);
+      color: var(--text);
+      line-height: 1.55;
+    }
+    .wrap {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 24px 16px 56px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 18px;
+      margin-top: 14px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 28px;
+      font-weight: 800;
+    }
+    h2 {
+      margin: 0 0 10px;
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+    p { margin: 8px 0; color: var(--text); }
+    .sub { color: var(--sub); font-size: 14px; }
+    ul { margin: 8px 0 0 18px; padding: 0; }
+    li { margin: 4px 0; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+    }
+    .shot {
+      border: 1px dashed #3a4154;
+      border-radius: 10px;
+      padding: 16px;
+      min-height: 130px;
+      color: var(--sub);
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+    .badge {
+      display: inline-block;
+      font-size: 12px;
+      color: #9de8ff;
+      border: 1px solid #2b5f70;
+      background: #122630;
+      padding: 4px 8px;
+      border-radius: 999px;
+      margin-bottom: 8px;
+    }
+    a { color: #7cd8ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="badge">카카오 심사 제출용 소개 페이지</div>
+      <h1>메추 (Mechu)</h1>
+      <p class="sub">사용자 위치 기반 음식점 검색/추천 앱</p>
+      <p>
+        메추는 현재 위치 주변의 음식점을 검색하고, 룰렛/핀볼 방식으로 랜덤 추천 결과를 제공하는 모바일 앱입니다.
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>주요 기능</h2>
+      <ul>
+        <li>통합검색: 키워드(음식/가게명) 기반 주변 검색</li>
+        <li>주변식당 기준 룰렛: 주변 음식점 후보 중 랜덤 추천</li>
+        <li>음식 기준 룰렛: 음식 카테고리 기반 랜덤 추천</li>
+        <li>테마추천: 미니게임(핀볼) 결과 기반 추천</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>카카오 API 사용 목적</h2>
+      <p>
+        본 앱은 <strong>카카오 로컬 API</strong>를 사용하여 키워드 검색/좌표 기반 검색으로 음식점 후보를 조회합니다.
+      </p>
+      <ul>
+        <li>사용 목적: 사용자 현재 위치 기반 음식점 검색 및 추천</li>
+        <li>대상 데이터: 장소명, 주소, 좌표, 카테고리 등 검색 결과 메타데이터</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>서비스 화면</h2>
+      <div class="grid">
+        <div class="shot">통합검색 화면 캡처 첨부</div>
+        <div class="shot">주변식당 기준 화면 캡처 첨부</div>
+        <div class="shot">룰렛/결과 화면 캡처 첨부</div>
+      </div>
+      <p class="sub">실제 제출 시 위 영역 대신 앱 화면 이미지로 교체하세요.</p>
+    </div>
+
+    <div class="card">
+      <h2>서비스 정보</h2>
+      <p>앱 패키지명: <code>com.foodpicker.app</code></p>
+      <p>운영 주체: 송시온(개인개발자)</p>
+      <p>문의: <a href="mailto:lmj10182@naver.com">lmj10182@naver.com</a></p>
+      <p>
+        개인정보처리방침 URL:
+        <a href="./privacy_policy.html" target="_blank" rel="noopener noreferrer">./privacy_policy.html</a>
+      </p>
+      <p class="sub">본 페이지와 개인정보처리방침은 심사 제출용으로 함께 배포합니다.</p>
+    </div>
+  </div>
+</body>
+</html>
