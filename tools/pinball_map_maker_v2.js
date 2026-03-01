@@ -6,8 +6,8 @@ const WORLD_WIDTH = 24;
 const MIN_MARBLE_COUNT = 1;
 const MAX_MARBLE_COUNT = 256;
 const LIVE_APPLY_DEBOUNCE_MS = 120;
-const CANVAS_MIN_ZOOM = 0.35;
-const CANVAS_MAX_ZOOM = 6;
+const CANVAS_MIN_ZOOM = 0.18;
+const CANVAS_MAX_ZOOM = 14;
 let engineCanvasFillTimer = 0;
 let liveApplyTimer = 0;
 let liveApplyInFlight = false;
@@ -20,6 +20,7 @@ let workingMapJson = null;
 const editorState = {
   selectedIndex: -1,
   pendingWallStart: null,
+  pendingWallOid: '',
   pendingPortalOid: '',
   canvasZoom: 1,
   canvasPanX: 0,
@@ -30,6 +31,7 @@ const editorState = {
   canvasHoverWorld: null,
   dragState: null,
   suppressClickOnce: false,
+  isMiniMapDragging: false,
 };
 
 const elements = {
@@ -65,6 +67,7 @@ const elements = {
   applyStageButton: document.getElementById('applyStageButton'),
   makerToolSelect: document.getElementById('makerToolSelect'),
   makerToolButtons: Array.from(document.querySelectorAll('.maker-tool-button')),
+  miniMapCanvas: document.getElementById('miniMapCanvas'),
   makerCanvas: document.getElementById('makerCanvas'),
   applyDraftButton: document.getElementById('applyDraftButton'),
   clearObjectsButton: document.getElementById('clearObjectsButton'),
@@ -122,6 +125,44 @@ function normalizeDeg(value) {
     deg += 360;
   }
   return deg;
+}
+
+function snapAngleDeg(valueDeg, stepDeg = 45) {
+  const step = Math.max(1, toFinite(stepDeg, 45));
+  return normalizeDeg(Math.round(toFinite(valueDeg, 0) / step) * step);
+}
+
+function snapPointBy45(anchor, point) {
+  const ax = toFinite(anchor && anchor.x, 0);
+  const ay = toFinite(anchor && anchor.y, 0);
+  const px = toFinite(point && point.x, ax);
+  const py = toFinite(point && point.y, ay);
+  const dx = px - ax;
+  const dy = py - ay;
+  const length = Math.hypot(dx, dy);
+  if (length <= 0.0001) {
+    return { x: ax, y: ay };
+  }
+  const angle = Math.atan2(dy, dx);
+  const snapped = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+  return {
+    x: round1(ax + Math.cos(snapped) * length),
+    y: round1(ay + Math.sin(snapped) * length),
+  };
+}
+
+function isTypingTarget(target) {
+  if (!target || !(target instanceof HTMLElement)) {
+    return false;
+  }
+  if (target.isContentEditable) {
+    return true;
+  }
+  const tag = String(target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button') {
+    return true;
+  }
+  return false;
 }
 
 function getCurrentMarbleCount() {
@@ -821,7 +862,7 @@ function toolDisplayName(tool) {
     case 'select':
       return '선택';
     case 'wall_polyline':
-      return '벽2점연결';
+      return '연속벽2점연결';
     case 'peg_circle':
       return '원형 핀';
     case 'diamond_block':
@@ -877,6 +918,7 @@ function setSelectedTool(tool) {
 
 function resetPendingWall() {
   editorState.pendingWallStart = null;
+  editorState.pendingWallOid = '';
 }
 
 function resetPendingPortal() {
@@ -960,6 +1002,7 @@ function createObjectByTool(tool, x, y) {
       x: px,
       y: py,
       radius: 0.6,
+      triggerRadius: 1.05,
       pair: '',
       cooldownMs: 900,
       exitImpulse: 2.4,
@@ -1022,7 +1065,10 @@ function clearObjectEditor() {
   if (elements.objExtra1Input) elements.objExtra1Input.value = '';
   if (elements.objExtra2Input) elements.objExtra2Input.value = '';
   if (elements.objRadiusInput) elements.objRadiusInput.value = '';
-  if (elements.objRotationInput) elements.objRotationInput.value = '';
+  if (elements.objRotationInput) {
+    elements.objRotationInput.value = '';
+    elements.objRotationInput.disabled = true;
+  }
   if (elements.objPairInput) elements.objPairInput.value = '';
   if (elements.objDirInput) elements.objDirInput.value = '';
   if (elements.objForceInput) elements.objForceInput.value = '';
@@ -1045,22 +1091,40 @@ function populateObjectEditor() {
   if (elements.objOidInput) elements.objOidInput.value = String(obj.oid || '');
   if (elements.objColorInput) elements.objColorInput.value = String(obj.color || '');
   if (elements.objRadiusInput) elements.objRadiusInput.value = String(round1(toFinite(obj.radius, 0.6)));
-  if (elements.objRotationInput) elements.objRotationInput.value = String(round1(toFinite(obj.rotation, 0)));
+  if (elements.objRotationInput) {
+    const canRotate = supportsRotationHandle(obj);
+    elements.objRotationInput.disabled = !canRotate;
+    elements.objRotationInput.value = canRotate
+      ? String(round1(toFinite(obj.rotation, 0)))
+      : (obj.type === 'hammer' ? '0' : '');
+  }
   if (elements.objPairInput) elements.objPairInput.value = String(obj.pair || '');
   if (elements.objDirInput) {
-    elements.objDirInput.value = obj.type === 'rotor'
-      ? ''
-      : String(Math.round(toFinite(obj.dirDeg, 90)));
+    if (obj.type === 'rotor') {
+      elements.objDirInput.value = '';
+    } else if (obj.type === 'portal') {
+      elements.objDirInput.value = String(Math.round(toFinite(obj.exitDirDeg, 0)));
+    } else {
+      elements.objDirInput.value = String(Math.round(toFinite(obj.dirDeg, 90)));
+    }
   }
   if (elements.objForceInput) {
-    elements.objForceInput.value = obj.type === 'rotor'
-      ? String(round2(toFinite(obj.angularVelocity, 2.2)))
-      : String(round1(toFinite(obj.force, 4.2)));
+    if (obj.type === 'rotor') {
+      elements.objForceInput.value = String(round2(toFinite(obj.angularVelocity, 2.2)));
+    } else if (obj.type === 'portal') {
+      elements.objForceInput.value = String(round1(toFinite(obj.exitImpulse, 2.4)));
+    } else {
+      elements.objForceInput.value = String(round1(toFinite(obj.force, 4.2)));
+    }
   }
   if (elements.objIntervalInput) {
-    elements.objIntervalInput.value = obj.type === 'rotor'
-      ? ''
-      : String(Math.round(toFinite(obj.intervalMs, 1200)));
+    if (obj.type === 'rotor') {
+      elements.objIntervalInput.value = '';
+    } else if (obj.type === 'portal') {
+      elements.objIntervalInput.value = String(Math.round(toFinite(obj.cooldownMs, 900)));
+    } else {
+      elements.objIntervalInput.value = String(Math.round(toFinite(obj.intervalMs, 1200)));
+    }
   }
   if (elements.objHitDistanceInput) {
     elements.objHitDistanceInput.value = obj.type === 'hammer'
@@ -1069,16 +1133,22 @@ function populateObjectEditor() {
     elements.objHitDistanceInput.disabled = obj.type !== 'hammer';
   }
   if (elements.reverseRotationButton) {
-    elements.reverseRotationButton.disabled = !supportsRotationHandle(obj);
+    elements.reverseRotationButton.disabled = !(supportsRotationHandle(obj) || obj.type === 'hammer');
   }
   if (elements.objDirLabel) {
-    elements.objDirLabel.textContent = obj.type === 'rotor' ? 'dirDeg(미사용)' : 'dirDeg';
+    elements.objDirLabel.textContent = obj.type === 'rotor'
+      ? 'dirDeg(미사용)'
+      : (obj.type === 'portal' ? 'exitDir' : 'dirDeg');
   }
   if (elements.objForceLabel) {
-    elements.objForceLabel.textContent = obj.type === 'rotor' ? 'angVel' : 'force';
+    elements.objForceLabel.textContent = obj.type === 'rotor'
+      ? 'angVel'
+      : (obj.type === 'portal' ? 'exitImp' : 'force');
   }
   if (elements.objIntervalLabel) {
-    elements.objIntervalLabel.textContent = obj.type === 'rotor' ? 'interval(미사용)' : 'interval';
+    elements.objIntervalLabel.textContent = obj.type === 'rotor'
+      ? 'interval(미사용)'
+      : (obj.type === 'portal' ? 'cooldown' : 'interval');
   }
 
   if (obj.type === 'wall_polyline') {
@@ -1103,6 +1173,13 @@ function populateObjectEditor() {
     if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
     if (elements.objExtra1Input) elements.objExtra1Input.value = String(round1(toFinite(obj.triggerRadius, 1.2)));
     if (elements.objExtra2Input) elements.objExtra2Input.value = String(Math.round(toFinite(obj.cooldownMs, 320)));
+    if (elements.objExtra1Label) elements.objExtra1Label.textContent = 'triggerR';
+    if (elements.objExtra2Label) elements.objExtra2Label.textContent = 'cooldown';
+  } else if (obj.type === 'portal') {
+    if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
+    if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
+    if (elements.objExtra1Input) elements.objExtra1Input.value = String(round1(toFinite(obj.triggerRadius, toFinite(obj.radius, 0.6) + 0.45)));
+    if (elements.objExtra2Input) elements.objExtra2Input.value = String(Math.round(toFinite(obj.cooldownMs, 900)));
     if (elements.objExtra1Label) elements.objExtra1Label.textContent = 'triggerR';
     if (elements.objExtra2Label) elements.objExtra2Label.textContent = 'cooldown';
   } else if (obj.type === 'rotor') {
@@ -1202,6 +1279,30 @@ function applyObjectEditorValues() {
     refreshCurrentJsonViewer();
     return;
   }
+  if (obj.type === 'portal') {
+    obj.x = round1(toFinite(elements.objXInput ? elements.objXInput.value : obj.x, toFinite(obj.x, 0)));
+    obj.y = round1(toFinite(elements.objYInput ? elements.objYInput.value : obj.y, toFinite(obj.y, 0)));
+    obj.radius = round1(toFinite(elements.objRadiusInput ? elements.objRadiusInput.value : obj.radius, toFinite(obj.radius, 0.6)));
+    obj.triggerRadius = round1(toFinite(
+      elements.objExtra1Input ? elements.objExtra1Input.value : obj.triggerRadius,
+      toFinite(obj.triggerRadius, toFinite(obj.radius, 0.6) + 0.45),
+    ));
+    obj.cooldownMs = Math.round(toFinite(
+      elements.objExtra2Input ? elements.objExtra2Input.value : obj.cooldownMs,
+      toFinite(obj.cooldownMs, 900),
+    ));
+    obj.pair = String(elements.objPairInput && elements.objPairInput.value ? elements.objPairInput.value : obj.pair || '').trim();
+    obj.exitDirDeg = Math.round(toFinite(
+      elements.objDirInput ? elements.objDirInput.value : obj.exitDirDeg,
+      toFinite(obj.exitDirDeg, 0),
+    ));
+    obj.exitImpulse = round1(toFinite(
+      elements.objForceInput ? elements.objForceInput.value : obj.exitImpulse,
+      toFinite(obj.exitImpulse, 2.4),
+    ));
+    refreshCurrentJsonViewer();
+    return;
+  }
   if (obj.type === 'rotor') {
     obj.x = round1(toFinite(elements.objXInput ? elements.objXInput.value : obj.x, toFinite(obj.x, 0)));
     obj.y = round1(toFinite(elements.objYInput ? elements.objYInput.value : obj.y, toFinite(obj.y, 0)));
@@ -1220,8 +1321,7 @@ function applyObjectEditorValues() {
     obj.y = round1(toFinite(elements.objYInput ? elements.objYInput.value : obj.y, toFinite(obj.y, 0)));
     obj.triggerRadius = round1(toFinite(elements.objExtra1Input ? elements.objExtra1Input.value : obj.triggerRadius, toFinite(obj.triggerRadius, 1.2)));
     obj.cooldownMs = Math.round(toFinite(elements.objExtra2Input ? elements.objExtra2Input.value : obj.cooldownMs, toFinite(obj.cooldownMs, 320)));
-    obj.radius = round1(toFinite(elements.objRadiusInput ? elements.objRadiusInput.value : obj.radius, toFinite(obj.radius, 0.6)));
-    obj.rotation = round1(toFinite(elements.objRotationInput ? elements.objRotationInput.value : obj.rotation, toFinite(obj.rotation, 0)));
+    obj.rotation = 0;
     obj.dirDeg = Math.round(toFinite(elements.objDirInput ? elements.objDirInput.value : obj.dirDeg, toFinite(obj.dirDeg, 90)));
     obj.force = round1(toFinite(elements.objForceInput ? elements.objForceInput.value : obj.force, toFinite(obj.force, 4.2)));
     obj.intervalMs = Math.round(toFinite(elements.objIntervalInput ? elements.objIntervalInput.value : obj.intervalMs, toFinite(obj.intervalMs, 1200)));
@@ -1259,7 +1359,6 @@ function reverseSelectedObjectRotation() {
   }
   if (obj.type === 'hammer') {
     obj.dirDeg = round1(normalizeDeg(toFinite(obj.dirDeg, 90) + 180));
-    obj.rotation = round1(normalizeDeg(-toFinite(obj.rotation, 0)));
     refreshCurrentJsonViewer();
     return `해머 타격 방향 반전 완료 (dirDeg=${obj.dirDeg})`;
   }
@@ -1298,6 +1397,9 @@ function deleteSelectedObject() {
     throw new Error('삭제할 오브젝트를 먼저 선택하세요');
   }
   const removed = objects.splice(editorState.selectedIndex, 1)[0];
+  if (removed && removed.type === 'wall_polyline' && String(removed.oid || '') === editorState.pendingWallOid) {
+    resetPendingWall();
+  }
   if (removed && removed.type === 'portal') {
     const removedOid = String(removed.oid || '').trim();
     for (let index = 0; index < objects.length; index += 1) {
@@ -1323,8 +1425,8 @@ function clearAllObjects() {
   const mapJson = getMutableMap();
   mapJson.objects = [];
   editorState.selectedIndex = -1;
-  editorState.pendingWallStart = null;
-  editorState.pendingPortalOid = '';
+  resetPendingWall();
+  resetPendingPortal();
   resetActiveDrag();
   refreshCurrentJsonViewer();
 }
@@ -1421,6 +1523,165 @@ function canvasToWorld(layout, px, py) {
     x: round1(clamp(nx, 0, 1) * WORLD_WIDTH),
     y: round1(clamp(ny, 0, 1) * layout.stageGoalY),
   };
+}
+
+function canvasToWorldRaw(layout, px, py) {
+  return {
+    x: ((px - layout.offsetX) / Math.max(0.0001, layout.scale)),
+    y: ((py - layout.offsetY) / Math.max(0.0001, layout.scale)),
+  };
+}
+
+function getMiniMapLayout() {
+  const canvas = elements.miniMapCanvas;
+  if (!canvas) {
+    return null;
+  }
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(120, Math.floor(rect.width * dpr));
+  const height = Math.max(160, Math.floor(rect.height * dpr));
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  const stageGoalY = Math.max(20, toFinite(getMutableMap().stage.goalY, 210));
+  const padding = 8 * dpr;
+  const usableW = Math.max(30, width - padding * 2);
+  const usableH = Math.max(30, height - padding * 2);
+  const scale = Math.max(0.001, Math.min(usableW / WORLD_WIDTH, usableH / stageGoalY));
+  const drawW = WORLD_WIDTH * scale;
+  const drawH = stageGoalY * scale;
+  const offsetX = (width - drawW) / 2;
+  const offsetY = (height - drawH) / 2;
+  return {
+    canvas,
+    dpr,
+    width,
+    height,
+    stageGoalY,
+    scale,
+    drawW,
+    drawH,
+    offsetX,
+    offsetY,
+  };
+}
+
+function worldToMiniMap(layout, x, y) {
+  return {
+    x: layout.offsetX + clamp(toFinite(x, 0), 0, WORLD_WIDTH) * layout.scale,
+    y: layout.offsetY + clamp(toFinite(y, 0), 0, layout.stageGoalY) * layout.scale,
+  };
+}
+
+function miniMapToWorld(layout, px, py) {
+  const x = (px - layout.offsetX) / layout.scale;
+  const y = (py - layout.offsetY) / layout.scale;
+  return {
+    x: round1(clamp(x, 0, WORLD_WIDTH)),
+    y: round1(clamp(y, 0, layout.stageGoalY)),
+  };
+}
+
+function centerCanvasToWorld(targetX, targetY) {
+  const layout = getCanvasLayout();
+  if (!layout) {
+    return;
+  }
+  const safeX = clamp(toFinite(targetX, WORLD_WIDTH / 2), 0, WORLD_WIDTH);
+  const safeY = clamp(toFinite(targetY, layout.stageGoalY / 2), 0, layout.stageGoalY);
+  editorState.canvasPanX = (WORLD_WIDTH / 2 - safeX) * layout.scale;
+  editorState.canvasPanY = (layout.stageGoalY / 2 - safeY) * layout.scale;
+  drawMakerCanvas();
+}
+
+function readMiniMapWorldPoint(event) {
+  const layout = getMiniMapLayout();
+  if (!layout) {
+    return null;
+  }
+  const rect = layout.canvas.getBoundingClientRect();
+  const px = (event.clientX - rect.left) * layout.dpr;
+  const py = (event.clientY - rect.top) * layout.dpr;
+  return miniMapToWorld(layout, px, py);
+}
+
+function drawMiniMap(mainLayout = null) {
+  const layout = getMiniMapLayout();
+  if (!layout) {
+    return;
+  }
+  const ctx = layout.canvas.getContext('2d');
+  if (!ctx) {
+    return;
+  }
+  ctx.clearRect(0, 0, layout.width, layout.height);
+  ctx.fillStyle = '#070f22';
+  ctx.fillRect(0, 0, layout.width, layout.height);
+  ctx.strokeStyle = 'rgba(106, 148, 221, 0.34)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(layout.offsetX, layout.offsetY, layout.drawW, layout.drawH);
+
+  const objects = getObjects();
+  for (let index = 0; index < objects.length; index += 1) {
+    const obj = objects[index];
+    if (!obj || typeof obj !== 'object') {
+      continue;
+    }
+    const selected = index === editorState.selectedIndex;
+    const color = selected ? '#ffd44d' : String(obj.color || '#7ab4ff');
+    ctx.strokeStyle = color;
+    ctx.fillStyle = selected ? 'rgba(255,212,77,0.28)' : 'rgba(123,180,255,0.22)';
+    if (obj.type === 'wall_polyline') {
+      const points = Array.isArray(obj.points) ? obj.points : [];
+      if (points.length < 2) {
+        continue;
+      }
+      const first = worldToMiniMap(layout, points[0][0], points[0][1]);
+      ctx.beginPath();
+      ctx.moveTo(first.x, first.y);
+      for (let p = 1; p < points.length; p += 1) {
+        const next = worldToMiniMap(layout, points[p][0], points[p][1]);
+        ctx.lineTo(next.x, next.y);
+      }
+      ctx.stroke();
+      continue;
+    }
+    if (obj.type === 'peg_circle' || obj.type === 'portal' || obj.type === 'burst_bumper') {
+      const center = worldToMiniMap(layout, obj.x, obj.y);
+      const radius = Math.max(1.8, toFinite(obj.radius, 0.6) * layout.scale);
+      ctx.beginPath();
+      ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      continue;
+    }
+    const center = worldToMiniMap(layout, obj.x, obj.y);
+    const width = Math.max(1.8, toFinite(obj.width, 1.2) * layout.scale);
+    const height = Math.max(1.2, toFinite(obj.height, 0.2) * layout.scale);
+    ctx.beginPath();
+    ctx.rect(center.x - width, center.y - height, width * 2, height * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  const main = mainLayout || getCanvasLayout();
+  if (main) {
+    const worldTL = canvasToWorldRaw(main, 0, 0);
+    const worldBR = canvasToWorldRaw(main, main.width, main.height);
+    const left = clamp(Math.min(worldTL.x, worldBR.x), 0, WORLD_WIDTH);
+    const right = clamp(Math.max(worldTL.x, worldBR.x), 0, WORLD_WIDTH);
+    const top = clamp(Math.min(worldTL.y, worldBR.y), 0, main.stageGoalY);
+    const bottom = clamp(Math.max(worldTL.y, worldBR.y), 0, main.stageGoalY);
+    const p1 = worldToMiniMap(layout, left, top);
+    const p2 = worldToMiniMap(layout, right, bottom);
+    ctx.strokeStyle = '#ffd44d';
+    ctx.lineWidth = 1.4;
+    ctx.setLineDash([4, 3]);
+    ctx.strokeRect(p1.x, p1.y, Math.max(2, p2.x - p1.x), Math.max(2, p2.y - p1.y));
+    ctx.setLineDash([]);
+  }
 }
 
 function distancePointToSegment(px, py, ax, ay, bx, by) {
@@ -1538,7 +1799,7 @@ function moveObjectToWorld(obj, targetX, targetY) {
 
 function supportsRotationHandle(obj) {
   const type = String(obj && obj.type ? obj.type : '');
-  return type === 'box_block' || type === 'diamond_block' || type === 'rotor' || type === 'hammer';
+  return type === 'box_block' || type === 'diamond_block' || type === 'rotor';
 }
 
 function getRotationHandleWorld(obj) {
@@ -1635,6 +1896,13 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
       ctx.strokeStyle = selected ? '#ffd44d' : 'rgba(255, 169, 120, 0.9)';
       ctx.lineWidth = selected ? 2.2 : 1.5;
       ctx.stroke();
+    } else if (obj.type === 'portal') {
+      const triggerRadius = Math.max(0.18, toFinite(obj.triggerRadius, toFinite(obj.radius, 0.6) + 0.45)) * layout.scale;
+      ctx.beginPath();
+      ctx.arc(center.x, center.y, triggerRadius, 0, Math.PI * 2);
+      ctx.strokeStyle = selected ? '#ffd44d' : 'rgba(197, 158, 255, 0.92)';
+      ctx.lineWidth = selected ? 2 : 1.4;
+      ctx.stroke();
     }
     ctx.restore();
     return;
@@ -1680,10 +1948,10 @@ function drawMakerCanvas() {
 
   ctx.clearRect(0, 0, layout.width, layout.height);
   const hasLiveFrame = !!(elements.previewFrame && elements.previewFrame.src);
-  ctx.fillStyle = hasLiveFrame ? 'rgba(8, 18, 38, 0.12)' : '#081226';
+  ctx.fillStyle = hasLiveFrame ? 'rgba(8, 18, 38, 0.52)' : '#081226';
   ctx.fillRect(0, 0, layout.width, layout.height);
-  ctx.strokeStyle = 'rgba(120, 158, 225, 0.28)';
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(150, 194, 255, 0.64)';
+  ctx.lineWidth = 1.25;
   for (let x = 0; x <= WORLD_WIDTH; x += 2) {
     const p1 = worldToCanvas(layout, x, 0);
     const p2 = worldToCanvas(layout, x, layout.stageGoalY);
@@ -1770,6 +2038,7 @@ function drawMakerCanvas() {
       ctx.stroke();
     }
   }
+  drawMiniMap(layout);
 }
 
 function readCanvasWorldPoint(event) {
@@ -1805,7 +2074,7 @@ function handleMakerCanvasWheel(event) {
   const worldPoint = canvasToWorld(oldLayout, px, py);
 
   const direction = event.deltaY < 0 ? 1 : -1;
-  const zoomFactor = direction > 0 ? 1.12 : 1 / 1.12;
+  const zoomFactor = direction > 0 ? 1.22 : 1 / 1.22;
   const previousZoom = clamp(toFinite(editorState.canvasZoom, 1), CANVAS_MIN_ZOOM, CANVAS_MAX_ZOOM);
   const nextZoom = clamp(previousZoom * zoomFactor, CANVAS_MIN_ZOOM, CANVAS_MAX_ZOOM);
   if (Math.abs(nextZoom - previousZoom) < 0.0001) {
@@ -1877,6 +2146,10 @@ function updateCanvasHoverPoint(event) {
   }
   const point = readCanvasWorldPoint(event);
   if (!point) {
+    return;
+  }
+  if (selectedTool() === 'wall_polyline' && editorState.pendingWallStart && event.shiftKey) {
+    editorState.canvasHoverWorld = snapPointBy45(editorState.pendingWallStart, point);
     return;
   }
   editorState.canvasHoverWorld = point;
@@ -1965,7 +2238,7 @@ function createHammerFromDrag(startWorld, endWorld) {
   };
 }
 
-function updateObjectByDrag(point) {
+function updateObjectByDrag(point, event = null) {
   const drag = editorState.dragState;
   if (!drag) {
     return false;
@@ -1989,8 +2262,19 @@ function updateObjectByDrag(point) {
     const points = Array.isArray(obj.points) ? obj.points : [];
     const pointIndex = Math.floor(toFinite(drag.pointIndex, -1));
     if (pointIndex >= 0 && pointIndex < points.length) {
-      points[pointIndex][0] = round1(point.x);
-      points[pointIndex][1] = round1(point.y);
+      let nextPoint = { x: point.x, y: point.y };
+      if (event && event.shiftKey) {
+        const anchorIndex = pointIndex === 0 ? 1 : pointIndex - 1;
+        const anchor = points[anchorIndex];
+        if (anchor) {
+          nextPoint = snapPointBy45(
+            { x: toFinite(anchor[0], nextPoint.x), y: toFinite(anchor[1], nextPoint.y) },
+            nextPoint,
+          );
+        }
+      }
+      points[pointIndex][0] = round1(nextPoint.x);
+      points[pointIndex][1] = round1(nextPoint.y);
       drag.moved = true;
       return true;
     }
@@ -2000,7 +2284,10 @@ function updateObjectByDrag(point) {
     const cx = toFinite(obj.x, 0);
     const cy = toFinite(obj.y, 0);
     const angleRad = Math.atan2(point.y - cy, point.x - cx);
-    const nextRotation = round1((angleRad * 180) / Math.PI + 90);
+    let nextRotation = round1((angleRad * 180) / Math.PI + 90);
+    if (event && event.shiftKey) {
+      nextRotation = snapAngleDeg(nextRotation, 45);
+    }
     obj.rotation = normalizeDeg(nextRotation);
     drag.moved = true;
     return true;
@@ -2073,7 +2360,7 @@ function handleMakerCanvasPointerDown(event) {
     return;
   }
   if (tool !== 'select') {
-    addObjectAt(tool, point.x, point.y);
+    addObjectAt(tool, point.x, point.y, { snap45: event.shiftKey === true });
     editorState.suppressClickOnce = true;
     return;
   }
@@ -2112,7 +2399,7 @@ function handleMakerCanvasPointerMove(event) {
     drawMakerCanvas();
     return;
   }
-  const updated = updateObjectByDrag(point);
+  const updated = updateObjectByDrag(point, event);
   if (updated) {
     refreshCurrentJsonViewer();
     populateObjectEditor();
@@ -2128,30 +2415,92 @@ function handleMakerCanvasPointerUp(event) {
   finishDrag();
 }
 
-function addObjectAt(tool, x, y) {
+function beginMiniMapDrag(event) {
+  if (!elements.miniMapCanvas || event.button !== 0) {
+    return;
+  }
+  const point = readMiniMapWorldPoint(event);
+  if (!point) {
+    return;
+  }
+  event.preventDefault();
+  editorState.isMiniMapDragging = true;
+  centerCanvasToWorld(point.x, point.y);
+}
+
+function updateMiniMapDrag(event) {
+  if (!editorState.isMiniMapDragging) {
+    return;
+  }
+  const point = readMiniMapWorldPoint(event);
+  if (!point) {
+    return;
+  }
+  centerCanvasToWorld(point.x, point.y);
+}
+
+function endMiniMapDrag() {
+  if (!editorState.isMiniMapDragging) {
+    return;
+  }
+  editorState.isMiniMapDragging = false;
+}
+
+function addObjectAt(tool, x, y, options = {}) {
   const objects = getObjects();
   if (tool === 'wall_polyline') {
+    const useSnap45 = options.snap45 === true;
     if (!editorState.pendingWallStart) {
       editorState.pendingWallStart = { x, y };
-      updateMakerHint(`벽 시작점 설정됨 (${x}, ${y}) → 다음 클릭으로 끝점/연결`);
+      editorState.pendingWallOid = '';
+      updateMakerHint(`벽 시작점 설정됨 (${x}, ${y}) → 다음 클릭으로 연결 시작`);
       drawMakerCanvas();
       return;
     }
     const start = editorState.pendingWallStart;
-    const length = Math.hypot(toFinite(x, 0) - toFinite(start.x, 0), toFinite(y, 0) - toFinite(start.y, 0));
+    let endPoint = { x: toFinite(x, 0), y: toFinite(y, 0) };
+    if (useSnap45) {
+      endPoint = snapPointBy45(start, endPoint);
+    }
+    const length = Math.hypot(endPoint.x - toFinite(start.x, 0), endPoint.y - toFinite(start.y, 0));
     if (length < 0.06) {
       updateMakerHint('벽 길이가 너무 짧습니다. 다른 위치를 클릭하세요.');
       drawMakerCanvas();
       return;
     }
-    objects.push({
-      oid: nextOid('wall'),
-      type: 'wall_polyline',
-      points: [[start.x, start.y], [x, y]],
-      color: '#4f6fdb',
-    });
-    editorState.pendingWallStart = { x, y };
-    updateMakerHint('벽 연결 추가됨. 계속 클릭하면 이어서 생성됩니다. 우클릭으로 선택 모드 전환');
+    if (!editorState.pendingWallOid) {
+      const created = {
+        oid: nextOid('wall'),
+        type: 'wall_polyline',
+        points: [[start.x, start.y], [endPoint.x, endPoint.y]],
+        color: '#4f6fdb',
+      };
+      objects.push(created);
+      editorState.pendingWallOid = created.oid;
+      editorState.selectedIndex = objects.length - 1;
+    } else {
+      const target = objects.find((item) => item && item.oid === editorState.pendingWallOid);
+      if (!target || target.type !== 'wall_polyline') {
+        editorState.pendingWallOid = '';
+      }
+      const targetWall = objects.find((item) => item && item.oid === editorState.pendingWallOid);
+      if (targetWall && Array.isArray(targetWall.points)) {
+        targetWall.points.push([endPoint.x, endPoint.y]);
+        editorState.selectedIndex = objects.findIndex((item) => item === targetWall);
+      } else {
+        const created = {
+          oid: nextOid('wall'),
+          type: 'wall_polyline',
+          points: [[start.x, start.y], [endPoint.x, endPoint.y]],
+          color: '#4f6fdb',
+        };
+        objects.push(created);
+        editorState.pendingWallOid = created.oid;
+        editorState.selectedIndex = objects.length - 1;
+      }
+    }
+    editorState.pendingWallStart = { x: endPoint.x, y: endPoint.y };
+    updateMakerHint('연속 벽 입력중: 계속 클릭해서 이어 그리고, 우클릭으로 종료');
   } else if (tool === 'portal') {
     const created = createObjectByTool(tool, x, y);
     if (!created) {
@@ -2184,7 +2533,9 @@ function addObjectAt(tool, x, y) {
       resetPendingPortal();
     }
   }
-  editorState.selectedIndex = objects.length - 1;
+  if (tool !== 'wall_polyline') {
+    editorState.selectedIndex = objects.length - 1;
+  }
   syncObjectList();
   refreshCurrentJsonViewer();
   queueLiveDraftApply('오브젝트 추가');
@@ -2207,7 +2558,7 @@ function handleMakerCanvasClick(event) {
     drawMakerCanvas();
     return;
   }
-  addObjectAt(tool, point.x, point.y);
+  addObjectAt(tool, point.x, point.y, { snap45: event.shiftKey === true });
 }
 
 async function waitForEngineApi(timeoutMs = 20000) {
@@ -2707,9 +3058,9 @@ function setupEvents() {
     cancelDrag();
     const tool = selectedTool();
     if (tool === 'select') {
-      updateMakerHint('선택 모드: 클릭 선택, 드래그 이동, 벽 끝점/회전 핸들 드래그 편집');
+      updateMakerHint('선택 모드: 클릭 선택, 드래그 이동, Shift+회전은 45도 스냅');
     } else if (tool === 'wall_polyline') {
-      updateMakerHint('벽 모드: 첫 클릭 시작점, 이후 클릭마다 연결 벽이 계속 생성됩니다');
+      updateMakerHint('벽 모드: 연속 클릭으로 한 벽에 계속 연결, 우클릭 종료, Shift는 45도 스냅');
     } else if (tool === 'portal') {
       updateMakerHint('포털 모드: 두 번 클릭해서 A/B 포털을 자동으로 연결');
     } else if (tool === 'hammer') {
@@ -2755,18 +3106,42 @@ function setupEvents() {
     }
   });
 
+  bindEvent(elements.miniMapCanvas, 'mousedown', (event) => {
+    beginMiniMapDrag(event);
+  });
+  bindEvent(elements.miniMapCanvas, 'contextmenu', (event) => {
+    event.preventDefault();
+  });
+
   window.addEventListener('mousemove', (event) => {
     updateMakerCanvasPan(event);
     handleMakerCanvasPointerMove(event);
+    updateMiniMapDrag(event);
   });
 
   window.addEventListener('mouseup', (event) => {
     endMakerCanvasPan();
     handleMakerCanvasPointerUp(event);
+    endMiniMapDrag();
   });
 
   bindEvent(elements.makerCanvas, 'contextmenu', (event) => {
     event.preventDefault();
+    const tool = selectedTool();
+    if (tool === 'wall_polyline' && editorState.pendingWallStart) {
+      resetPendingWall();
+      updateMakerHint('연속 벽 입력 종료');
+      drawMakerCanvas();
+      setStatus('벽 연결 입력을 종료했습니다.');
+      return;
+    }
+    if (tool === 'portal' && editorState.pendingPortalOid) {
+      resetPendingPortal();
+      updateMakerHint('포털 연결 입력 취소');
+      drawMakerCanvas();
+      setStatus('포털 연결 대기를 취소했습니다.');
+      return;
+    }
     setSelectedTool('select');
     resetPendingWall();
     resetPendingPortal();
@@ -2983,16 +3358,47 @@ function setupEvents() {
   });
 
   window.addEventListener('keydown', (event) => {
-    if (event.key !== 'Escape') {
+    if (isTypingTarget(event.target)) {
       return;
     }
-    const hadPending = !!(editorState.pendingWallStart || editorState.pendingPortalOid || editorState.dragState);
-    resetPendingWall();
-    resetPendingPortal();
-    cancelDrag();
-    if (hadPending) {
-      updateMakerHint('대기중 작업을 취소했습니다.');
-      drawMakerCanvas();
+    const key = String(event.key || '');
+    if (key === 'Delete') {
+      if (editorState.selectedIndex >= 0) {
+        try {
+          deleteSelectedObject();
+          syncObjectList();
+          queueLiveDraftApply('Delete 키 삭제');
+          drawMakerCanvas();
+          setStatus('선택 오브젝트 삭제 완료 (Delete)');
+        } catch (error) {
+          setStatus(String(error && error.message ? error.message : error), 'error');
+        }
+      }
+      return;
+    }
+    if (event.code === 'Space') {
+      event.preventDefault();
+      if (elements.previewPlayPauseButton) {
+        elements.previewPlayPauseButton.click();
+      }
+      return;
+    }
+    if (!event.ctrlKey && !event.metaKey && !event.altKey && (key === 'r' || key === 'R')) {
+      event.preventDefault();
+      if (elements.previewResetButton) {
+        elements.previewResetButton.click();
+      }
+      return;
+    }
+    if (key === 'Escape') {
+      const hadPending = !!(editorState.pendingWallStart || editorState.pendingPortalOid || editorState.dragState);
+      resetPendingWall();
+      resetPendingPortal();
+      cancelDrag();
+      if (hadPending) {
+        updateMakerHint('대기중 작업을 취소했습니다.');
+        drawMakerCanvas();
+      }
     }
   });
 
@@ -3014,7 +3420,7 @@ async function boot() {
   syncObjectList();
   setSelectedTool('select');
   drawMakerCanvas();
-  updateMakerHint('툴을 선택해 배치하고, 선택 모드에서 드래그/핸들로 즉시 수정하세요.');
+  updateMakerHint('툴 배치 후 즉시 반영됩니다. Delete 삭제 / Space 재생·일시정지 / R 리셋');
   setPlayPauseUi(false);
   setPreviewPlayPauseUi(false);
   setPreviewStatus('좌표창 엔진 연결 대기');

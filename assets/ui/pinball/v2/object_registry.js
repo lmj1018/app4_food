@@ -281,6 +281,10 @@ function compileObject(rawObject, entityId) {
           x: toFiniteNumber(rawObject.x, 0),
           y: toFiniteNumber(rawObject.y, 0),
           radius: Math.max(0.12, toFiniteNumber(rawObject.radius, 0.45)),
+          triggerRadius: Math.max(
+            0.2,
+            toFiniteNumber(rawObject.triggerRadius, toFiniteNumber(rawObject.radius, 0.45) + 0.45),
+          ),
           cooldownMs: Math.max(0, toFiniteNumber(rawObject.cooldownMs, 900)),
           preserveVelocity: toBoolean(rawObject.preserveVelocity, false),
           exitImpulse: Math.max(0, toFiniteNumber(rawObject.exitImpulse, 0)),
@@ -295,7 +299,7 @@ function compileObject(rawObject, entityId) {
             width: Math.max(0.08, toFiniteNumber(rawObject.width, 0.48)),
             height: Math.max(0.03, toFiniteNumber(rawObject.height, 0.12)),
             restitution: toFiniteNumber(rawObject.restitution, 0.08),
-            rotation: toFiniteNumber(rawObject.rotation, 0),
+            rotation: 0,
           },
           entityId,
           true,
@@ -469,7 +473,8 @@ function createPortalBehavior(def, portalByOid, env) {
       if (!source || !target) {
         return;
       }
-      const radiusSq = source.radius * source.radius;
+      const triggerRadius = Math.max(0.12, toFiniteNumber(source.triggerRadius, source.radius + 0.45));
+      const radiusSq = triggerRadius * triggerRadius;
       const localTeleported = new Set();
       for (let index = 0; index < marbles.length; index += 1) {
         const marble = marbles[index];
@@ -674,19 +679,24 @@ function createHammerBehavior(def, env) {
       basePosY = currentPos ? toFiniteNumber(currentPos.y, toFiniteNumber(def.y, 0)) : toFiniteNumber(def.y, 0);
     }
     const swingDuration = Math.max(40, toFiniteNumber(def.swingDurationMs, 220));
-    const swingDeg = Math.max(0, toFiniteNumber(def.swingDeg, 26));
     const hitDistance = Math.max(0, toFiniteNumber(def.hitDistance, 0.95));
+    const backDistance = Math.max(0, toFiniteNumber(def.backDistance, hitDistance * 0.45));
     const dirRad = degToRad(toFiniteNumber(def.dirDeg, 90));
-    let targetAngle = toFiniteNumber(baseAngleRad, 0);
-    let swingProgress = 0;
+    const targetAngle = toFiniteNumber(baseAngleRad, 0);
+    let linearOffset = 0;
     if (swingUntil > now) {
       const elapsed = swingDuration - (swingUntil - now);
       const progress = clamp(elapsed / swingDuration, 0, 1);
-      swingProgress = Math.sin(progress * Math.PI);
-      targetAngle += swingProgress * degToRad(swingDeg);
+      if (progress < 0.3) {
+        const windupT = progress / 0.3;
+        linearOffset = -backDistance * (1 - windupT);
+      } else {
+        const strikeT = (progress - 0.3) / 0.7;
+        linearOffset = Math.sin(strikeT * Math.PI) * hitDistance;
+      }
     }
-    const targetX = toFiniteNumber(basePosX, toFiniteNumber(def.x, 0)) + Math.cos(dirRad) * hitDistance * swingProgress;
-    const targetY = toFiniteNumber(basePosY, toFiniteNumber(def.y, 0)) + Math.sin(dirRad) * hitDistance * swingProgress;
+    const targetX = toFiniteNumber(basePosX, toFiniteNumber(def.x, 0)) + Math.cos(dirRad) * linearOffset;
+    const targetY = toFiniteNumber(basePosY, toFiniteNumber(def.y, 0)) + Math.sin(dirRad) * linearOffset;
     try {
       if (typeof body.SetTransform === 'function') {
         body.SetTransform(new box2d.b2Vec2(targetX, targetY), targetAngle);

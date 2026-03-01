@@ -185,7 +185,7 @@
     }
     .engine-body {
       display: grid;
-      grid-template-columns: minmax(260px, 0.5fr) minmax(460px, 1fr) 360px;
+      grid-template-columns: minmax(520px, 1.45fr) minmax(300px, 0.65fr) 360px;
       gap: 0;
       min-height: 0;
       flex: 1;
@@ -213,6 +213,44 @@
       gap: 8px;
       padding: 10px;
       overflow: hidden;
+      flex: 1;
+    }
+    .maker-workspace {
+      display: grid;
+      grid-template-columns: 118px minmax(0, 1fr);
+      gap: 8px;
+      flex: 1;
+      min-height: 0;
+      height: 100%;
+    }
+    .mini-map-wrap {
+      border: 1px solid #325180;
+      border-radius: 8px;
+      background: #0a142c;
+      padding: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-height: 0;
+    }
+    .mini-map-title {
+      font-size: 11px;
+      color: #9ec0ff;
+      font-weight: 700;
+      text-align: center;
+      letter-spacing: 0.2px;
+    }
+    #miniMapCanvas {
+      width: 100%;
+      height: 100%;
+      min-height: 180px;
+      display: block;
+      border-radius: 6px;
+      background: #050914;
+      cursor: grab;
+    }
+    #miniMapCanvas:active {
+      cursor: grabbing;
     }
     .engine-view {
       min-height: 0;
@@ -294,7 +332,8 @@
       overflow: hidden;
       background: #0a1225;
       flex: 1;
-      min-height: 0;
+      min-height: 420px;
+      height: 100%;
       position: relative;
     }
     .maker-live-frame {
@@ -306,12 +345,14 @@
       background: #000;
       pointer-events: none;
       z-index: 1;
+      opacity: 0.64;
     }
     #makerCanvas {
       position: absolute;
       inset: 0;
       width: 100%;
       height: 100%;
+      display: block;
       cursor: crosshair;
       background: transparent;
       z-index: 2;
@@ -356,12 +397,105 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 26px;
-      height: 18px;
-      font-size: 16px;
-      line-height: 1;
-      color: #d9e6ff;
-      text-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
+      width: 32px;
+      height: 22px;
+      border: 1px solid rgba(124, 164, 236, 0.45);
+      border-radius: 6px;
+      background: rgba(8, 18, 36, 0.68);
+      position: relative;
+      overflow: hidden;
+    }
+    .tool-shape {
+      position: absolute;
+      display: block;
+    }
+    .tool-shape.select {
+      width: 14px;
+      height: 14px;
+      border: 2px solid #e6f0ff;
+      border-radius: 50%;
+      left: 8px;
+      top: 4px;
+    }
+    .tool-shape.wall {
+      width: 18px;
+      height: 0;
+      border-top: 3px solid #4f6fdb;
+      left: 6px;
+      top: 10px;
+      transform: rotate(-18deg);
+    }
+    .tool-shape.peg {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: #ffd166;
+      border: 1px solid rgba(255, 224, 145, 0.95);
+      left: 10px;
+      top: 5px;
+    }
+    .tool-shape.diamond {
+      width: 12px;
+      height: 12px;
+      transform: rotate(45deg);
+      background: #74d4ff;
+      border: 1px solid rgba(165, 228, 255, 0.92);
+      left: 10px;
+      top: 5px;
+    }
+    .tool-shape.box {
+      width: 18px;
+      height: 8px;
+      background: #62c2ff;
+      border: 1px solid rgba(162, 221, 255, 0.9);
+      left: 6px;
+      top: 7px;
+      border-radius: 2px;
+    }
+    .tool-shape.rotor {
+      width: 20px;
+      height: 4px;
+      background: #ef476f;
+      border-radius: 2px;
+      left: 5px;
+      top: 9px;
+    }
+    .tool-shape.rotor::after {
+      content: "";
+      position: absolute;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #ffd0da;
+      left: 7px;
+      top: -1px;
+    }
+    .tool-shape.portal {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      border: 3px solid #c18bff;
+      left: 9px;
+      top: 4px;
+      box-sizing: border-box;
+    }
+    .tool-shape.hammer {
+      width: 18px;
+      height: 10px;
+      background: #ffa557;
+      border: 1px solid rgba(255, 206, 165, 0.9);
+      left: 6px;
+      top: 6px;
+      border-radius: 2px;
+    }
+    .tool-shape.burst {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #ff9f6e;
+      left: 10px;
+      top: 5px;
+      box-shadow: 0 0 0 3px rgba(255, 169, 120, 0.45);
     }
     .tool-label {
       font-size: 11px;
@@ -527,6 +661,9 @@
       .maker-board-body {
         min-height: 46vh;
       }
+      .maker-workspace {
+        grid-template-columns: 96px minmax(0, 1fr);
+      }
       .engine-view {
         border-right: 0;
         border-bottom: 1px solid #2c3d63;
@@ -614,9 +751,15 @@
         <section class="maker-board">
           <div class="maker-board-head">좌표 맵 제작 영역 (가운데)</div>
           <div class="maker-board-body">
-            <div class="maker-canvas-wrap">
-              <iframe id="previewFrame" class="maker-live-frame" title="pinball-v2-coordinate-live"></iframe>
-              <canvas id="makerCanvas" width="360" height="760"></canvas>
+            <div class="maker-workspace">
+              <div class="mini-map-wrap">
+                <div class="mini-map-title">미니맵</div>
+                <canvas id="miniMapCanvas" width="120" height="240"></canvas>
+              </div>
+              <div class="maker-canvas-wrap">
+                <iframe id="previewFrame" class="maker-live-frame" title="pinball-v2-coordinate-live"></iframe>
+                <canvas id="makerCanvas" width="360" height="760"></canvas>
+              </div>
             </div>
             <div class="maker-sim-toolbar">
               <button id="previewPlayPauseButton" class="primary">좌표창 시작</button>
@@ -657,19 +800,19 @@
             <div class="maker-group">
               <div class="maker-group-title">오브젝트 툴</div>
               <div class="tool-palette">
-                <button type="button" class="maker-tool-button active" data-maker-tool="select"><span class="tool-icon">⌖</span><span class="tool-label">선택</span></button>
-                <button type="button" class="maker-tool-button" data-maker-tool="wall_polyline"><span class="tool-icon">／</span><span class="tool-label">벽2점연결</span></button>
-                <button type="button" class="maker-tool-button" data-maker-tool="peg_circle"><span class="tool-icon">●</span><span class="tool-label">원형 핀</span></button>
-                <button type="button" class="maker-tool-button" data-maker-tool="diamond_block"><span class="tool-icon">◆</span><span class="tool-label">마름모</span></button>
-                <button type="button" class="maker-tool-button" data-maker-tool="box_block"><span class="tool-icon">▭</span><span class="tool-label">박스</span></button>
-                <button type="button" class="maker-tool-button" data-maker-tool="rotor"><span class="tool-icon">⟲</span><span class="tool-label">회전 바</span></button>
-                <button type="button" class="maker-tool-button" data-maker-tool="portal"><span class="tool-icon">◉</span><span class="tool-label">포털 A/B</span></button>
-                <button type="button" class="maker-tool-button" data-maker-tool="hammer"><span class="tool-icon">▮</span><span class="tool-label">해머</span></button>
-                <button type="button" class="maker-tool-button" data-maker-tool="burst_bumper"><span class="tool-icon">✹</span><span class="tool-label">버스트 범퍼</span></button>
+                <button type="button" class="maker-tool-button active" data-maker-tool="select"><span class="tool-icon"><span class="tool-shape select"></span></span><span class="tool-label">선택</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="wall_polyline"><span class="tool-icon"><span class="tool-shape wall"></span></span><span class="tool-label">연속벽2점연결</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="peg_circle"><span class="tool-icon"><span class="tool-shape peg"></span></span><span class="tool-label">원형 핀</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="diamond_block"><span class="tool-icon"><span class="tool-shape diamond"></span></span><span class="tool-label">마름모</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="box_block"><span class="tool-icon"><span class="tool-shape box"></span></span><span class="tool-label">박스</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="rotor"><span class="tool-icon"><span class="tool-shape rotor"></span></span><span class="tool-label">회전 바</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="portal"><span class="tool-icon"><span class="tool-shape portal"></span></span><span class="tool-label">포털 A/B</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="hammer"><span class="tool-icon"><span class="tool-shape hammer"></span></span><span class="tool-label">해머</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="burst_bumper"><span class="tool-icon"><span class="tool-shape burst"></span></span><span class="tool-label">버스트 범퍼</span></button>
               </div>
               <select id="makerToolSelect" class="hidden-tool-select" aria-hidden="true" tabindex="-1">
                 <option value="select">선택</option>
-                <option value="wall_polyline">벽2점연결</option>
+                <option value="wall_polyline">연속벽2점연결</option>
                 <option value="peg_circle">원형 핀</option>
                 <option value="diamond_block">마름모</option>
                 <option value="box_block">박스</option>
