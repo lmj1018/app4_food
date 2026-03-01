@@ -318,9 +318,15 @@
       border-radius: 8px;
       font-size: 12px;
       font-weight: 700;
-      padding: 8px 6px;
+      padding: 6px 6px 7px;
       cursor: pointer;
       transition: border-color 0.12s ease, background 0.12s ease, transform 0.05s ease;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      min-height: 62px;
     }
     .maker-tool-button:hover {
       border-color: #5f86cb;
@@ -332,6 +338,23 @@
     }
     .maker-tool-button:active {
       transform: translateY(1px);
+    }
+    .tool-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 18px;
+      font-size: 16px;
+      line-height: 1;
+      color: #d9e6ff;
+      text-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
+    }
+    .tool-label {
+      font-size: 11px;
+      line-height: 1.05;
+      letter-spacing: 0;
+      white-space: nowrap;
     }
     .hidden-tool-select {
       display: none;
@@ -665,24 +688,24 @@
             <div class="maker-group">
               <div class="maker-group-title">오브젝트 툴</div>
               <div class="tool-palette">
-                <button type="button" class="maker-tool-button active" data-maker-tool="select">선택</button>
-                <button type="button" class="maker-tool-button" data-maker-tool="wall_polyline">벽(2점)</button>
-                <button type="button" class="maker-tool-button" data-maker-tool="peg_circle">원형 핀</button>
-                <button type="button" class="maker-tool-button" data-maker-tool="diamond_block">마름모</button>
-                <button type="button" class="maker-tool-button" data-maker-tool="box_block">박스</button>
-                <button type="button" class="maker-tool-button" data-maker-tool="rotor">회전 바</button>
-                <button type="button" class="maker-tool-button" data-maker-tool="portal">포털</button>
-                <button type="button" class="maker-tool-button" data-maker-tool="hammer">해머</button>
-                <button type="button" class="maker-tool-button" data-maker-tool="burst_bumper">버스트 범퍼</button>
+                <button type="button" class="maker-tool-button active" data-maker-tool="select"><span class="tool-icon">⌖</span><span class="tool-label">선택</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="wall_polyline"><span class="tool-icon">／</span><span class="tool-label">벽2점연결</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="peg_circle"><span class="tool-icon">●</span><span class="tool-label">원형 핀</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="diamond_block"><span class="tool-icon">◆</span><span class="tool-label">마름모</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="box_block"><span class="tool-icon">▭</span><span class="tool-label">박스</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="rotor"><span class="tool-icon">⟲</span><span class="tool-label">회전 바</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="portal"><span class="tool-icon">◉</span><span class="tool-label">포털 A/B</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="hammer"><span class="tool-icon">▮</span><span class="tool-label">해머</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="burst_bumper"><span class="tool-icon">✹</span><span class="tool-label">버스트 범퍼</span></button>
               </div>
               <select id="makerToolSelect" class="hidden-tool-select" aria-hidden="true" tabindex="-1">
                 <option value="select">선택</option>
-                <option value="wall_polyline">벽(2점)</option>
+                <option value="wall_polyline">벽2점연결</option>
                 <option value="peg_circle">원형 핀</option>
                 <option value="diamond_block">마름모</option>
                 <option value="box_block">박스</option>
                 <option value="rotor">회전 바</option>
-                <option value="portal">포털</option>
+                <option value="portal">포털 A/B</option>
                 <option value="hammer">해머</option>
                 <option value="burst_bumper">버스트 범퍼</option>
               </select>
@@ -725,20 +748,28 @@
                   <input id="objRotationInput" type="number" step="0.1">
                 </div>
                 <div class="maker-row">
+                  <label for="reverseRotationButton">회전 반전</label>
+                  <button id="reverseRotationButton" type="button">회전/방향 반전</button>
+                </div>
+                <div class="maker-row">
                   <label for="objPairInput">pair</label>
                   <input id="objPairInput" type="text" placeholder="portal_x">
                 </div>
                 <div class="maker-row">
-                  <label for="objDirInput">dirDeg</label>
+                  <label id="objDirLabel" for="objDirInput">dirDeg</label>
                   <input id="objDirInput" type="number" step="1">
                 </div>
                 <div class="maker-row">
-                  <label for="objForceInput">force</label>
+                  <label id="objForceLabel" for="objForceInput">force</label>
                   <input id="objForceInput" type="number" step="0.1">
                 </div>
                 <div class="maker-row">
-                  <label for="objIntervalInput">interval</label>
+                  <label id="objIntervalLabel" for="objIntervalInput">interval</label>
                   <input id="objIntervalInput" type="number" step="10">
+                </div>
+                <div class="maker-row">
+                  <label for="objHitDistanceInput">이동거리</label>
+                  <input id="objHitDistanceInput" type="number" step="0.1">
                 </div>
               </div>
               <div class="maker-toolbar">

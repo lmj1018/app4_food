@@ -314,6 +314,7 @@ function compileObject(rawObject, entityId) {
           cooldownMs: Math.max(0, toFiniteNumber(rawObject.cooldownMs, 300)),
           swingDeg: Math.max(0, toFiniteNumber(rawObject.swingDeg, 26)),
           swingDurationMs: Math.max(40, toFiniteNumber(rawObject.swingDurationMs, 220)),
+          hitDistance: Math.max(0, toFiniteNumber(rawObject.hitDistance, toFiniteNumber(rawObject.moveDistance, 0.95))),
         },
       };
     default:
@@ -629,6 +630,8 @@ function createHammerBehavior(def, env) {
   const cooldownByMarble = {};
   let swingUntil = 0;
   let baseAngleRad = null;
+  let basePosX = NaN;
+  let basePosY = NaN;
 
   function canHitMarble(marbleId, now) {
     const key = String(marbleId);
@@ -665,20 +668,28 @@ function createHammerBehavior(def, env) {
     if (!Number.isFinite(baseAngleRad)) {
       baseAngleRad = currentAngle;
     }
+    if (!Number.isFinite(basePosX) || !Number.isFinite(basePosY)) {
+      const currentPos = typeof body.GetPosition === 'function' ? body.GetPosition() : null;
+      basePosX = currentPos ? toFiniteNumber(currentPos.x, toFiniteNumber(def.x, 0)) : toFiniteNumber(def.x, 0);
+      basePosY = currentPos ? toFiniteNumber(currentPos.y, toFiniteNumber(def.y, 0)) : toFiniteNumber(def.y, 0);
+    }
     const swingDuration = Math.max(40, toFiniteNumber(def.swingDurationMs, 220));
     const swingDeg = Math.max(0, toFiniteNumber(def.swingDeg, 26));
+    const hitDistance = Math.max(0, toFiniteNumber(def.hitDistance, 0.95));
+    const dirRad = degToRad(toFiniteNumber(def.dirDeg, 90));
     let targetAngle = toFiniteNumber(baseAngleRad, 0);
+    let swingProgress = 0;
     if (swingUntil > now) {
       const elapsed = swingDuration - (swingUntil - now);
       const progress = clamp(elapsed / swingDuration, 0, 1);
-      targetAngle += Math.sin(progress * Math.PI) * degToRad(swingDeg);
+      swingProgress = Math.sin(progress * Math.PI);
+      targetAngle += swingProgress * degToRad(swingDeg);
     }
+    const targetX = toFiniteNumber(basePosX, toFiniteNumber(def.x, 0)) + Math.cos(dirRad) * hitDistance * swingProgress;
+    const targetY = toFiniteNumber(basePosY, toFiniteNumber(def.y, 0)) + Math.sin(dirRad) * hitDistance * swingProgress;
     try {
-      const pos = typeof body.GetPosition === 'function' ? body.GetPosition() : null;
-      const px = pos ? toFiniteNumber(pos.x, toFiniteNumber(def.x, 0)) : toFiniteNumber(def.x, 0);
-      const py = pos ? toFiniteNumber(pos.y, toFiniteNumber(def.y, 0)) : toFiniteNumber(def.y, 0);
       if (typeof body.SetTransform === 'function') {
-        body.SetTransform(new box2d.b2Vec2(px, py), targetAngle);
+        body.SetTransform(new box2d.b2Vec2(targetX, targetY), targetAngle);
       }
       if (typeof body.SetAngularVelocity === 'function') {
         body.SetAngularVelocity(0);
@@ -779,6 +790,8 @@ function createHammerBehavior(def, env) {
         lastFiredAt,
         swingUntil,
         baseAngleRad: toFiniteNumber(baseAngleRad, 0),
+        basePosX: toFiniteNumber(basePosX, toFiniteNumber(def.x, 0)),
+        basePosY: toFiniteNumber(basePosY, toFiniteNumber(def.y, 0)),
         queue: queue.map((item) => ({ at: item.at, scale: item.scale })),
         cooldownByMarble: { ...cooldownByMarble },
       };
@@ -788,6 +801,8 @@ function createHammerBehavior(def, env) {
       lastFiredAt = toFiniteNumber(nextState.lastFiredAt, 0);
       swingUntil = toFiniteNumber(nextState.swingUntil, 0);
       baseAngleRad = toFiniteNumber(nextState.baseAngleRad, 0);
+      basePosX = toFiniteNumber(nextState.basePosX, toFiniteNumber(def.x, 0));
+      basePosY = toFiniteNumber(nextState.basePosY, toFiniteNumber(def.y, 0));
       queue = Array.isArray(nextState.queue)
         ? nextState.queue
             .map((item) => ({
