@@ -259,6 +259,9 @@ function compileBox(raw, entityId, forceKinematic = false) {
   );
   const linearDamping = Math.max(0, toFiniteNumber(raw.linearDamping, 0));
   const angularDamping = Math.max(0, toFiniteNumber(raw.angularDamping, 0));
+  const fixedRotation = toBoolean(raw.fixedRotation, false);
+  const gravityScale = Math.max(0, toFiniteNumber(raw.gravityScale, 1));
+  const sensor = toBoolean(raw.sensor, false);
   const life = Number.isFinite(Number(raw.life)) ? Math.max(-1, Math.floor(Number(raw.life))) : null;
   const color = typeof raw.color === 'string' ? raw.color : DEFAULT_OBJECT_COLORS.box;
   const rawBodyType = typeof raw === 'object' && raw
@@ -285,6 +288,15 @@ function compileBox(raw, entityId, forceKinematic = false) {
   }
   if (angularDamping > 0) {
     props.angularDamping = angularDamping;
+  }
+  if (fixedRotation) {
+    props.fixedRotation = true;
+  }
+  if (gravityScale !== 1) {
+    props.gravityScale = gravityScale;
+  }
+  if (sensor) {
+    props.sensor = true;
   }
   if (life !== null) {
     props.life = life;
@@ -316,6 +328,9 @@ function compileCircle(raw, entityId, defaults) {
   const density = Math.max(0.01, toFiniteNumber(raw.density, defaults.density));
   const linearDamping = Math.max(0, toFiniteNumber(raw.linearDamping, 0));
   const angularDamping = Math.max(0, toFiniteNumber(raw.angularDamping, 0));
+  const fixedRotation = toBoolean(raw.fixedRotation, false);
+  const gravityScale = Math.max(0, toFiniteNumber(raw.gravityScale, 1));
+  const sensor = toBoolean(raw.sensor, false);
   const life = Number.isFinite(Number(raw.life)) ? Math.max(-1, Math.floor(Number(raw.life))) : defaults.life;
   const color = typeof raw.color === 'string' ? raw.color : defaults.color;
   const rawBodyType = typeof raw === 'object' && raw
@@ -339,6 +354,15 @@ function compileCircle(raw, entityId, defaults) {
   }
   if (angularDamping > 0) {
     props.angularDamping = angularDamping;
+  }
+  if (fixedRotation) {
+    props.fixedRotation = true;
+  }
+  if (gravityScale !== 1) {
+    props.gravityScale = gravityScale;
+  }
+  if (sensor) {
+    props.sensor = true;
   }
   return withEntityId(
     {
@@ -416,6 +440,8 @@ function compileObject(rawObject, entityId) {
             density: Math.max(0.01, toFiniteNumber(rawObject.density, 1.35)),
             life: -1,
             bodyType: 'dynamic',
+            fixedRotation: false,
+            gravityScale: Math.max(0, toFiniteNumber(rawObject.gravityScale, 1)),
             color: typeof rawObject.color === 'string' ? rawObject.color : DEFAULT_OBJECT_COLORS.domino,
           },
           entityId,
@@ -453,6 +479,8 @@ function compileObject(rawObject, entityId) {
           y: 40,
           color: DEFAULT_OBJECT_COLORS.physicsBall,
           bodyType: 'dynamic',
+          fixedRotation: false,
+          gravityScale: 1,
         }),
         behavior: null,
       };
@@ -590,6 +618,7 @@ function compileObject(rawObject, entityId) {
           y: 52,
           color: DEFAULT_OBJECT_COLORS.blackHole,
           bodyType: 'static',
+          sensor: true,
         }),
         behavior: {
           kind: 'black_hole',
@@ -621,6 +650,7 @@ function compileObject(rawObject, entityId) {
           y: 62,
           color: DEFAULT_OBJECT_COLORS.whiteHole,
           bodyType: 'static',
+          sensor: true,
         }),
         behavior: {
           kind: 'white_hole',

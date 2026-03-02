@@ -296,6 +296,9 @@ function patchPhysicsCreateEntities() {
       if (typeof fixtureDef.set_friction === 'function') {
         fixtureDef.set_friction(Math.max(0, toFiniteNumber(props.friction, 0.2)));
       }
+      if (typeof fixtureDef.set_isSensor === 'function') {
+        fixtureDef.set_isSensor(props.sensor === true);
+      }
 
       if (shape.type === 'box') {
         const polygon = new box2d.b2PolygonShape();
@@ -336,6 +339,12 @@ function patchPhysicsCreateEntities() {
 
       if (typeof body.SetAngularVelocity === 'function') {
         body.SetAngularVelocity(toFiniteNumber(props.angularVelocity, 0));
+      }
+      if (typeof body.SetFixedRotation === 'function') {
+        body.SetFixedRotation(props.fixedRotation === true);
+      }
+      if (typeof body.SetGravityScale === 'function' && Number.isFinite(Number(props.gravityScale))) {
+        body.SetGravityScale(Math.max(0, toFiniteNumber(props.gravityScale, 1)));
       }
       if (typeof body.SetLinearDamping === 'function' && Number.isFinite(Number(props.linearDamping))) {
         body.SetLinearDamping(Math.max(0, toFiniteNumber(props.linearDamping, 0)));
