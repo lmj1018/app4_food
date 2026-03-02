@@ -15,6 +15,8 @@ const DEFAULT_OBJECT_COLORS = {
   box: '#ff4fa8',
   circle: '#ff62bf',
   portal: '#b68cff',
+  blackHole: '#7b55b8',
+  whiteHole: '#c8abff',
   burst: '#5dff7a',
   hammer: '#ffa557',
   diamond: '#6affea',
@@ -553,6 +555,60 @@ function compileObject(rawObject, entityId) {
           exitDirDeg: toFiniteNumber(rawObject.exitDirDeg, 0),
         },
       };
+    case 'black_hole':
+      return {
+        entity: compileCircle(rawObject, entityId, {
+          radius: 0.72,
+          restitution: 0.08,
+          density: 1,
+          life: -1,
+          x: 11.75,
+          y: 52,
+          color: DEFAULT_OBJECT_COLORS.blackHole,
+          bodyType: 'static',
+        }),
+        behavior: {
+          kind: 'black_hole',
+          oid: toId(rawObject.oid, `black_hole_${entityId}`),
+          entityId,
+          x: toFiniteNumber(rawObject.x, 11.75),
+          y: toFiniteNumber(rawObject.y, 52),
+          radius: Math.max(0.18, toFiniteNumber(rawObject.radius, 0.72)),
+          triggerRadius: Math.max(
+            0.2,
+            toFiniteNumber(rawObject.triggerRadius, Math.max(0.18, toFiniteNumber(rawObject.radius, 0.72)) + 1.4),
+          ),
+          suctionForce: Math.max(
+            0.01,
+            toFiniteNumber(rawObject.suctionForce, toFiniteNumber(rawObject.force, 0.2)),
+          ),
+          cooldownMs: Math.max(80, toFiniteNumber(rawObject.cooldownMs, 900)),
+          launchImpulse: Math.max(0.1, toFiniteNumber(rawObject.launchImpulse, 2.9)),
+        },
+      };
+    case 'white_hole':
+      return {
+        entity: compileCircle(rawObject, entityId, {
+          radius: 0.62,
+          restitution: 0.12,
+          density: 1,
+          life: -1,
+          x: 11.75,
+          y: 62,
+          color: DEFAULT_OBJECT_COLORS.whiteHole,
+          bodyType: 'static',
+        }),
+        behavior: {
+          kind: 'white_hole',
+          oid: toId(rawObject.oid, `white_hole_${entityId}`),
+          entityId,
+          x: toFiniteNumber(rawObject.x, 11.75),
+          y: toFiniteNumber(rawObject.y, 62),
+          radius: Math.max(0.16, toFiniteNumber(rawObject.radius, 0.62)),
+          cooldownMs: Math.max(80, toFiniteNumber(rawObject.cooldownMs, 900)),
+          launchImpulse: Math.max(0.1, toFiniteNumber(rawObject.launchImpulse, 2.9)),
+        },
+      };
     case 'hammer':
       return {
         entity: compileBox(
@@ -952,6 +1008,208 @@ function createPortalBehavior(def, portalByOid, env) {
   };
 }
 
+function createBlackHoleNetworkBehavior(blackHoleDefs, whiteHoleDefs, env) {
+  const cooldownByMarble = {};
+  let lastTickAt = 0;
+
+  const blackDefs = Array.isArray(blackHoleDefs) ? blackHoleDefs : [];
+  const whiteDefs = Array.isArray(whiteHoleDefs) ? whiteHoleDefs : [];
+
+  function getCooldown(marbleId) {
+    return toFiniteNumber(cooldownByMarble[String(marbleId)], 0);
+  }
+
+  function setCooldown(marbleId, expiresAt) {
+    cooldownByMarble[String(marbleId)] = Math.max(0, toFiniteNumber(expiresAt, 0));
+  }
+
+  function pickWhiteHole() {
+    if (whiteDefs.length <= 0) {
+      return null;
+    }
+    const rng = typeof env.getRng === 'function' ? env.getRng() : null;
+    const randomValue = rng && typeof rng.next === 'function' ? rng.next() : Math.random();
+    const safeRandom = clamp(toFiniteNumber(randomValue, 0), 0, 0.999999);
+    const index = Math.floor(safeRandom * whiteDefs.length);
+    return whiteDefs[Math.max(0, Math.min(index, whiteDefs.length - 1))] || whiteDefs[0];
+  }
+
+  function teleportToWhiteHole(marble, body, sourceDef, targetDef, now) {
+    const box2d = env.getBox2D();
+    if (!box2d || typeof box2d.b2Vec2 !== 'function') {
+      return false;
+    }
+    const targetX = toFiniteNumber(targetDef && targetDef.x, toFiniteNumber(sourceDef && sourceDef.x, 0));
+    const targetY = toFiniteNumber(targetDef && targetDef.y, toFiniteNumber(sourceDef && sourceDef.y, 0));
+    const launchImpulse = Math.max(
+      0.1,
+      Math.max(
+        toFiniteNumber(targetDef && targetDef.launchImpulse, 2.9),
+        toFiniteNumber(sourceDef && sourceDef.launchImpulse, 2.9),
+      ),
+    );
+    const rng = typeof env.getRng === 'function' ? env.getRng() : null;
+    const angleRad = (rng && typeof rng.next === 'function' ? rng.next() : Math.random()) * Math.PI * 2;
+    const ix = Math.cos(angleRad) * launchImpulse;
+    const iy = Math.sin(angleRad) * launchImpulse;
+    try {
+      if (typeof body.SetEnabled === 'function') {
+        body.SetEnabled(true);
+      }
+      if (typeof body.SetAwake === 'function') {
+        body.SetAwake(true);
+      }
+      if (typeof body.SetTransform === 'function') {
+        const angle = typeof body.GetAngle === 'function' ? body.GetAngle() : 0;
+        body.SetTransform(new box2d.b2Vec2(targetX, targetY), angle);
+      }
+      if (typeof body.SetLinearVelocity === 'function') {
+        body.SetLinearVelocity(new box2d.b2Vec2(0, 0));
+      }
+      if (typeof body.SetAngularVelocity === 'function') {
+        body.SetAngularVelocity(0);
+      }
+      if (typeof body.ApplyLinearImpulseToCenter === 'function') {
+        body.ApplyLinearImpulseToCenter(new box2d.b2Vec2(ix, iy), true);
+      }
+      marble.x = targetX;
+      marble.y = targetY;
+      marble.isActive = true;
+      if (marble.lastPosition && typeof marble.lastPosition === 'object') {
+        marble.lastPosition.x = targetX;
+        marble.lastPosition.y = targetY;
+      }
+    } catch (_) {
+      return false;
+    }
+    const cooldownMs = Math.max(
+      80,
+      Math.max(
+        toFiniteNumber(sourceDef && sourceDef.cooldownMs, 900),
+        toFiniteNumber(targetDef && targetDef.cooldownMs, 900),
+      ),
+    );
+    setCooldown(marble.id, now + cooldownMs);
+    return true;
+  }
+
+  return {
+    kind: 'black_hole_network',
+    oid: '__black_hole_network__',
+    tick(now) {
+      if (env.isPaused() || blackDefs.length <= 0) {
+        return;
+      }
+      const roulette = env.getRoulette();
+      const physics = roulette && roulette.physics ? roulette.physics : null;
+      const box2d = env.getBox2D();
+      if (!roulette || !physics || !physics.marbleMap || !box2d || typeof box2d.b2Vec2 !== 'function') {
+        return;
+      }
+      const marbles = Array.isArray(roulette._marbles) ? roulette._marbles : [];
+      if (marbles.length <= 0) {
+        return;
+      }
+      const dtMs = Math.max(8, Math.min(80, toFiniteNumber(now - lastTickAt, 16)));
+      lastTickAt = now;
+      const deltaScale = dtMs / 16.666;
+
+      for (let marbleIndex = 0; marbleIndex < marbles.length; marbleIndex += 1) {
+        const marble = marbles[marbleIndex];
+        if (!marble || typeof marble.id !== 'number') {
+          continue;
+        }
+        if (getCooldown(marble.id) > now) {
+          continue;
+        }
+        const body = physics.marbleMap[marble.id];
+        if (!body || typeof body.GetPosition !== 'function') {
+          continue;
+        }
+        const bodyPos = body.GetPosition();
+        const px = toFiniteNumber(bodyPos && bodyPos.x, NaN);
+        const py = toFiniteNumber(bodyPos && bodyPos.y, NaN);
+        if (!Number.isFinite(px) || !Number.isFinite(py)) {
+          continue;
+        }
+
+        let teleported = false;
+        for (let blackIndex = 0; blackIndex < blackDefs.length; blackIndex += 1) {
+          const black = blackDefs[blackIndex];
+          if (!black) {
+            continue;
+          }
+          const centerX = toFiniteNumber(black.x, 0);
+          const centerY = toFiniteNumber(black.y, 0);
+          const dx = centerX - px;
+          const dy = centerY - py;
+          const distSq = dx * dx + dy * dy;
+          if (!Number.isFinite(distSq) || distSq <= 0.0000001) {
+            continue;
+          }
+
+          const coreRadius = Math.max(0.06, toFiniteNumber(black.radius, 0.72));
+          const suctionRadius = Math.max(coreRadius + 0.2, toFiniteNumber(black.triggerRadius, coreRadius + 1.4));
+          if (distSq > suctionRadius * suctionRadius) {
+            continue;
+          }
+          const dist = Math.sqrt(distSq);
+          const nx = dx / dist;
+          const ny = dy / dist;
+          const falloff = Math.max(0, 1 - dist / suctionRadius);
+          const suctionForce = Math.max(0.01, toFiniteNumber(black.suctionForce, toFiniteNumber(black.force, 0.2)));
+          const pullImpulse = suctionForce * deltaScale * (0.18 + falloff * 0.82);
+          try {
+            if (typeof body.SetEnabled === 'function') {
+              body.SetEnabled(true);
+            }
+            if (typeof body.SetAwake === 'function') {
+              body.SetAwake(true);
+            }
+            body.ApplyLinearImpulseToCenter(new box2d.b2Vec2(nx * pullImpulse, ny * pullImpulse), true);
+          } catch (_) {
+          }
+
+          const captureRadius = Math.max(0.06, coreRadius * 0.58);
+          if (dist > captureRadius) {
+            continue;
+          }
+          const target = pickWhiteHole();
+          if (!target) {
+            continue;
+          }
+          teleported = teleportToWhiteHole(marble, body, black, target, now);
+          if (teleported) {
+            break;
+          }
+        }
+        if (teleported) {
+          continue;
+        }
+      }
+    },
+    serializeState() {
+      return {
+        cooldownByMarble: { ...cooldownByMarble },
+        lastTickAt: toFiniteNumber(lastTickAt, 0),
+      };
+    },
+    restoreState(rawState) {
+      const nextState = rawState && typeof rawState === 'object' ? rawState : {};
+      const cooldownState = nextState.cooldownByMarble && typeof nextState.cooldownByMarble === 'object'
+        ? nextState.cooldownByMarble
+        : {};
+      for (const key of Object.keys(cooldownByMarble)) {
+        delete cooldownByMarble[key];
+      }
+      for (const key of Object.keys(cooldownState)) {
+        cooldownByMarble[key] = toFiniteNumber(cooldownState[key], 0);
+      }
+      lastTickAt = toFiniteNumber(nextState.lastTickAt, 0);
+    },
+  };
+}
+
 function createBurstBumperBehavior(def, env) {
   const cooldownByMarble = {};
   const layerEntityIds = Array.isArray(def.entityIds) && def.entityIds.length > 0
@@ -978,7 +1236,27 @@ function createBurstBumperBehavior(def, env) {
     }
     return Math.max(0.06, baseRadius * ((totalLayers - index) / totalLayers));
   });
-  const layerHp = Array.from({ length: totalLayers }, () => hpPerLayer);
+  function durabilityScaleByMarbleCount() {
+    const roulette = env.getRoulette();
+    const marbles = roulette && Array.isArray(roulette._marbles) ? roulette._marbles : [];
+    const count = Math.max(0, marbles.length);
+    if (count <= 10) {
+      return 1;
+    }
+    if (count <= 20) {
+      return 1.6;
+    }
+    if (count <= 32) {
+      return 2.3;
+    }
+    if (count <= 64) {
+      return 3.1;
+    }
+    return 4.0;
+  }
+  const durabilityScale = durabilityScaleByMarbleCount();
+  const effectiveHpPerLayer = Math.max(1, hpPerLayer * durabilityScale);
+  const layerHp = Array.from({ length: totalLayers }, () => effectiveHpPerLayer);
   const offscreenX = -9999;
   const offscreenY = -9999;
   let destroyed = false;
@@ -1284,7 +1562,7 @@ function createBurstBumperBehavior(def, env) {
         ? safeState.layerHp
         : [];
       for (let index = 0; index < totalLayers; index += 1) {
-        const nextHp = Math.floor(toFiniteNumber(restoredLayerHp[index], hpPerLayer));
+        const nextHp = toFiniteNumber(restoredLayerHp[index], effectiveHpPerLayer);
         layerHp[index] = Math.max(0, nextHp);
       }
       const nextCooldown = safeState.cooldownByMarble && typeof safeState.cooldownByMarble === 'object'
@@ -1982,6 +2260,12 @@ export function createBehaviorRuntime(env, behaviorDefs) {
   const portalDefs = defs
     .filter((item) => item && item.kind === 'portal')
     .map((item) => ({ ...item }));
+  const blackHoleDefs = defs
+    .filter((item) => item && item.kind === 'black_hole')
+    .map((item) => ({ ...item }));
+  const whiteHoleDefs = defs
+    .filter((item) => item && item.kind === 'white_hole')
+    .map((item) => ({ ...item }));
   const burstDefs = defs
     .filter((item) => item && item.kind === 'burst_bumper')
     .map((item) => ({ ...item }));
@@ -2006,6 +2290,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
   const behaviors = [];
   for (const portalDef of portalDefs) {
     behaviors.push(createPortalBehavior(portalDef, portalByOid, env));
+  }
+  if (blackHoleDefs.length > 0) {
+    behaviors.push(createBlackHoleNetworkBehavior(blackHoleDefs, whiteHoleDefs, env));
   }
   for (const burstDef of burstDefs) {
     behaviors.push(createBurstBumperBehavior(burstDef, env));
@@ -2040,6 +2327,7 @@ export function createBehaviorRuntime(env, behaviorDefs) {
       const fan = {};
       const sticky = {};
       const goalMarker = {};
+      const wormhole = {};
       for (let index = 0; index < behaviors.length; index += 1) {
         const behavior = behaviors[index];
         const state = behavior && typeof behavior.serializeState === 'function'
@@ -2060,9 +2348,11 @@ export function createBehaviorRuntime(env, behaviorDefs) {
           sticky[behavior.oid] = state;
         } else if (behavior.kind === 'goal_marker_image') {
           goalMarker[behavior.oid] = state;
+        } else if (behavior.kind === 'black_hole_network') {
+          wormhole[behavior.oid] = state;
         }
       }
-      return { portal, burst, hammer, fan, sticky, goalMarker };
+      return { portal, burst, hammer, fan, sticky, goalMarker, wormhole };
     },
     restoreState(rawState) {
       const safeState = rawState && typeof rawState === 'object' ? rawState : {};
@@ -2072,6 +2362,7 @@ export function createBehaviorRuntime(env, behaviorDefs) {
       const fanState = safeState.fan && typeof safeState.fan === 'object' ? safeState.fan : {};
       const stickyState = safeState.sticky && typeof safeState.sticky === 'object' ? safeState.sticky : {};
       const goalMarkerState = safeState.goalMarker && typeof safeState.goalMarker === 'object' ? safeState.goalMarker : {};
+      const wormholeState = safeState.wormhole && typeof safeState.wormhole === 'object' ? safeState.wormhole : {};
       for (let index = 0; index < behaviors.length; index += 1) {
         const behavior = behaviors[index];
         if (!behavior || typeof behavior.restoreState !== 'function') {
@@ -2089,6 +2380,8 @@ export function createBehaviorRuntime(env, behaviorDefs) {
           behavior.restoreState(stickyState[behavior.oid]);
         } else if (behavior.kind === 'goal_marker_image') {
           behavior.restoreState(goalMarkerState[behavior.oid]);
+        } else if (behavior.kind === 'black_hole_network') {
+          behavior.restoreState(wormholeState[behavior.oid]);
         }
       }
     },

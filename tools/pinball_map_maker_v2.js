@@ -6,6 +6,7 @@ const WORLD_WIDTH = 81;
 const MIN_MARBLE_COUNT = 1;
 const MAX_MARBLE_COUNT = 256;
 const LIVE_APPLY_DEBOUNCE_MS = 120;
+const AUTO_SAVE_DEBOUNCE_MS = 900;
 const CANVAS_MIN_ZOOM = 0.18;
 const CANVAS_MAX_ZOOM = 14;
 const MAX_UNDO_HISTORY = 50;
@@ -19,6 +20,8 @@ const OBJECT_COLOR_PRESET = {
   peg: '#ff62bf',
   rotor: '#ff66c8',
   portal: '#b68cff',
+  blackHole: '#7b55b8',
+  whiteHole: '#c8abff',
   hammer: '#ffa557',
   fan: '#7fd9ff',
   burst: '#5dff7a',
@@ -35,6 +38,9 @@ let liveApplyTimer = 0;
 let liveApplyInFlight = false;
 let liveApplyPending = false;
 let liveApplyResetRequested = false;
+let autoSaveTimer = 0;
+let autoSaveInFlight = false;
+let autoSavePending = false;
 let autoObjectApplyTimer = 0;
 let autoStageApplyTimer = 0;
 let previewLiveApplyInFlight = false;
@@ -134,6 +140,7 @@ const elements = {
   floatingObjectFields: document.getElementById('floatingObjectFields'),
   floatingReverseButton: document.getElementById('floatingReverseButton'),
   floatingDuplicateButton: document.getElementById('floatingDuplicateButton'),
+  floatingDeleteButton: document.getElementById('floatingDeleteButton'),
 };
 
 function deepClone(value) {
@@ -333,6 +340,16 @@ function readEngineRunning(api) {
   return !!(state && state.running === true);
 }
 
+function applyViewZoomRespectRunning() {
+  const api = getEngineApi();
+  const running = readEngineRunning(api);
+  const applied = applyViewZoomToEngine(!running);
+  if (running) {
+    setCameraLock(false);
+  }
+  return applied;
+}
+
 function bindEvent(element, eventName, handler) {
   if (!element || typeof element.addEventListener !== 'function') {
     return;
@@ -388,6 +405,7 @@ function setBusy(isBusy) {
     elements.deleteObjectButton,
     elements.floatingReverseButton,
     elements.floatingDuplicateButton,
+    elements.floatingDeleteButton,
   ];
   if (Array.isArray(elements.makerToolButtons)) {
     controls.push(...elements.makerToolButtons);
@@ -581,6 +599,22 @@ function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
         obj.triggerRadius = Math.max(0.2, toFinite(obj.triggerRadius, Math.max(0.08, toFinite(obj.radius, 0.72)) + 0.45));
         if (typeof obj.color !== 'string' || !obj.color.trim()) {
           obj.color = OBJECT_COLOR_PRESET.burst;
+        }
+      } else if (type === 'black_hole') {
+        obj.radius = Math.max(0.18, toFinite(obj.radius, 0.72));
+        obj.triggerRadius = Math.max(obj.radius + 0.2, toFinite(obj.triggerRadius, 2.1));
+        obj.suctionForce = Math.max(0.01, toFinite(obj.suctionForce, toFinite(obj.force, 0.2)));
+        obj.launchImpulse = Math.max(0.1, toFinite(obj.launchImpulse, 2.9));
+        obj.cooldownMs = Math.max(80, Math.floor(toFinite(obj.cooldownMs, 900)));
+        if (typeof obj.color !== 'string' || !obj.color.trim()) {
+          obj.color = OBJECT_COLOR_PRESET.blackHole;
+        }
+      } else if (type === 'white_hole') {
+        obj.radius = Math.max(0.16, toFinite(obj.radius, 0.62));
+        obj.launchImpulse = Math.max(0.1, toFinite(obj.launchImpulse, 2.9));
+        obj.cooldownMs = Math.max(80, Math.floor(toFinite(obj.cooldownMs, 900)));
+        if (typeof obj.color !== 'string' || !obj.color.trim()) {
+          obj.color = OBJECT_COLOR_PRESET.whiteHole;
         }
       } else if (type === 'goal_marker_image') {
         const src = String(obj.imageSrc || '').trim();
@@ -1190,8 +1224,10 @@ function toolDisplayName(tool) {
       return '박스';
     case 'rotor':
       return '회전 바';
-    case 'portal':
-      return '포털 A/B';
+    case 'black_hole':
+      return '블랙홀';
+    case 'white_hole':
+      return '화이트홀';
     case 'hammer':
       return '해머';
     case 'fan':
@@ -1230,6 +1266,10 @@ function defaultColorForObjectType(type) {
       return OBJECT_COLOR_PRESET.rotor;
     case 'portal':
       return OBJECT_COLOR_PRESET.portal;
+    case 'black_hole':
+      return OBJECT_COLOR_PRESET.blackHole;
+    case 'white_hole':
+      return OBJECT_COLOR_PRESET.whiteHole;
     case 'hammer':
       return OBJECT_COLOR_PRESET.hammer;
     case 'fan':
@@ -1315,6 +1355,8 @@ function setSelectedTool(tool) {
     'box_block',
     'rotor',
     'portal',
+    'black_hole',
+    'white_hole',
     'hammer',
     'fan',
     'sticky_pad',
@@ -1455,6 +1497,32 @@ function createObjectByTool(tool, x, y) {
       exitImpulse: 0,
       exitDirDeg: 0,
       color: OBJECT_COLOR_PRESET.portal,
+    };
+  }
+  if (tool === 'black_hole') {
+    return {
+      oid: nextOid('black_hole'),
+      type: 'black_hole',
+      x: px,
+      y: py,
+      radius: 0.72,
+      triggerRadius: 2.1,
+      suctionForce: 0.2,
+      cooldownMs: 900,
+      launchImpulse: 2.9,
+      color: OBJECT_COLOR_PRESET.blackHole,
+    };
+  }
+  if (tool === 'white_hole') {
+    return {
+      oid: nextOid('white_hole'),
+      type: 'white_hole',
+      x: px,
+      y: py,
+      radius: 0.62,
+      cooldownMs: 900,
+      launchImpulse: 2.9,
+      color: OBJECT_COLOR_PRESET.whiteHole,
     };
   }
   if (tool === 'hammer') {
@@ -1640,6 +1708,8 @@ function populateObjectEditor() {
       elements.objDirInput.value = '';
     } else if (obj.type === 'goal_marker_image') {
       elements.objDirInput.value = '';
+    } else if (obj.type === 'black_hole' || obj.type === 'white_hole') {
+      elements.objDirInput.value = '';
     } else if (obj.type === 'portal') {
       elements.objDirInput.value = String(Math.round(toFinite(obj.exitDirDeg, 0)));
     } else if (obj.type === 'burst_bumper') {
@@ -1655,6 +1725,10 @@ function populateObjectEditor() {
       elements.objForceInput.value = String(round2(toFinite(obj.angularVelocity, 2.2)));
     } else if (obj.type === 'goal_marker_image') {
       elements.objForceInput.value = '';
+    } else if (obj.type === 'black_hole') {
+      elements.objForceInput.value = String(round2(toFinite(obj.suctionForce, toFinite(obj.force, 0.2))));
+    } else if (obj.type === 'white_hole') {
+      elements.objForceInput.value = String(round1(toFinite(obj.launchImpulse, 2.9)));
     } else if (obj.type === 'portal') {
       elements.objForceInput.value = String(round1(toFinite(obj.exitImpulse, 0)));
     } else if (obj.type === 'sticky_pad') {
@@ -1668,6 +1742,8 @@ function populateObjectEditor() {
       elements.objIntervalInput.value = '';
     } else if (obj.type === 'goal_marker_image') {
       elements.objIntervalInput.value = '';
+    } else if (obj.type === 'black_hole' || obj.type === 'white_hole') {
+      elements.objIntervalInput.value = String(Math.round(toFinite(obj.cooldownMs, 900)));
     } else if (obj.type === 'portal') {
       elements.objIntervalInput.value = String(Math.round(toFinite(obj.cooldownMs, 900)));
     } else if (obj.type === 'burst_bumper') {
@@ -1724,29 +1800,37 @@ function populateObjectEditor() {
       ? '방향 각도(미사용)'
       : (obj.type === 'goal_marker_image'
         ? '방향(미사용)'
+      : (obj.type === 'black_hole' || obj.type === 'white_hole'
+        ? '방향(미사용)'
       : (obj.type === 'portal'
         ? '출구 각도(도)'
         : (obj.type === 'burst_bumper'
           ? '레이어 수'
-          : (obj.type === 'fan' ? '바람 방향(도)' : (obj.type === 'sticky_pad' ? '이동속도' : '방향 각도(도)')))));
+          : (obj.type === 'fan' ? '바람 방향(도)' : (obj.type === 'sticky_pad' ? '이동속도' : '방향 각도(도)'))))));
   }
   if (elements.objForceLabel) {
     elements.objForceLabel.textContent = obj.type === 'rotor'
       ? '회전 속도'
       : (obj.type === 'goal_marker_image'
         ? '힘(미사용)'
+      : (obj.type === 'black_hole'
+        ? '흡입력'
+      : (obj.type === 'white_hole'
+        ? '발사힘'
       : (obj.type === 'portal'
         ? '출구 가속(impulse)'
-        : (obj.type === 'fan' ? '풍압' : (obj.type === 'sticky_pad' ? '대기(ms)' : '힘'))));
+        : (obj.type === 'fan' ? '풍압' : (obj.type === 'sticky_pad' ? '대기(ms)' : '힘')))));
   }
   if (elements.objIntervalLabel) {
     elements.objIntervalLabel.textContent = obj.type === 'rotor'
       ? '간격(미사용)'
       : (obj.type === 'goal_marker_image'
         ? '간격(미사용)'
+      : (obj.type === 'black_hole' || obj.type === 'white_hole'
+        ? '재진입 쿨다운(ms)'
       : (obj.type === 'portal' || obj.type === 'burst_bumper'
         ? '쿨다운(ms)'
-        : (obj.type === 'fan' || obj.type === 'sticky_pad' ? '간격(미사용)' : '간격(ms)')));
+        : (obj.type === 'fan' || obj.type === 'sticky_pad' ? '간격(미사용)' : '간격(ms)'))));
   }
 
   if (isPolylineObject(obj)) {
@@ -1810,6 +1894,20 @@ function populateObjectEditor() {
     if (elements.objExtra2Input) elements.objExtra2Input.value = String(Math.round(toFinite(obj.cooldownMs, 900)));
     if (elements.objExtra1Label) elements.objExtra1Label.textContent = '트리거 반경';
     if (elements.objExtra2Label) elements.objExtra2Label.textContent = '쿨다운(ms)';
+  } else if (obj.type === 'black_hole') {
+    if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
+    if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
+    if (elements.objExtra1Input) elements.objExtra1Input.value = String(round1(toFinite(obj.triggerRadius, 2.1)));
+    if (elements.objExtra2Input) elements.objExtra2Input.value = String(round1(toFinite(obj.launchImpulse, 2.9)));
+    if (elements.objExtra1Label) elements.objExtra1Label.textContent = '흡입 반경';
+    if (elements.objExtra2Label) elements.objExtra2Label.textContent = '출구 발사힘';
+  } else if (obj.type === 'white_hole') {
+    if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
+    if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
+    if (elements.objExtra1Input) elements.objExtra1Input.value = String(round1(toFinite(obj.launchImpulse, 2.9)));
+    if (elements.objExtra2Input) elements.objExtra2Input.value = String('0');
+    if (elements.objExtra1Label) elements.objExtra1Label.textContent = '발사힘';
+    if (elements.objExtra2Label) elements.objExtra2Label.textContent = '보조(미사용)';
   } else if (obj.type === 'rotor') {
     if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
     if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
@@ -1912,6 +2010,8 @@ function buildFloatingInspectorFieldDefs(obj) {
   if (obj.type === 'goal_marker_image'
     || obj.type === 'peg_circle'
     || obj.type === 'portal'
+    || obj.type === 'black_hole'
+    || obj.type === 'white_hole'
     || obj.type === 'burst_bumper'
     || obj.type === 'physics_ball') {
     pushField('objRadiusInput', readMakerLabelText(elements.objRadiusLabel, '반지름'));
@@ -1964,6 +2064,9 @@ function renderFloatingObjectInspector() {
   }
   if (elements.floatingReverseButton) {
     elements.floatingReverseButton.disabled = !(supportsRotationHandle(obj) || obj.type === 'hammer' || obj.type === 'fan');
+  }
+  if (elements.floatingDeleteButton) {
+    elements.floatingDeleteButton.disabled = false;
   }
   const defs = buildFloatingInspectorFieldDefs(obj);
   elements.floatingObjectFields.innerHTML = '';
@@ -2174,6 +2277,53 @@ function applyObjectEditorValues() {
       if (target && target !== obj) {
         linkPortalPairBidirectional(obj, target);
       }
+    }
+    refreshCurrentJsonViewer();
+    return;
+  }
+  if (obj.type === 'black_hole') {
+    obj.x = round1(toFinite(elements.objXInput ? elements.objXInput.value : obj.x, toFinite(obj.x, 0)));
+    obj.y = round1(toFinite(elements.objYInput ? elements.objYInput.value : obj.y, toFinite(obj.y, 0)));
+    obj.radius = round1(Math.max(0.18, toFinite(
+      elements.objRadiusInput ? elements.objRadiusInput.value : obj.radius,
+      toFinite(obj.radius, 0.72),
+    )));
+    obj.triggerRadius = round1(Math.max(
+      toFinite(obj.radius, 0.72) + 0.2,
+      toFinite(elements.objExtra1Input ? elements.objExtra1Input.value : obj.triggerRadius, toFinite(obj.triggerRadius, 2.1)),
+    ));
+    obj.launchImpulse = round1(Math.max(0.1, toFinite(
+      elements.objExtra2Input ? elements.objExtra2Input.value : obj.launchImpulse,
+      toFinite(obj.launchImpulse, 2.9),
+    )));
+    obj.suctionForce = round2(Math.max(0.01, toFinite(
+      elements.objForceInput ? elements.objForceInput.value : obj.suctionForce,
+      toFinite(obj.suctionForce, toFinite(obj.force, 0.2)),
+    )));
+    obj.cooldownMs = Math.round(Math.max(80, toFinite(
+      elements.objIntervalInput ? elements.objIntervalInput.value : obj.cooldownMs,
+      toFinite(obj.cooldownMs, 900),
+    )));
+    refreshCurrentJsonViewer();
+    return;
+  }
+  if (obj.type === 'white_hole') {
+    obj.x = round1(toFinite(elements.objXInput ? elements.objXInput.value : obj.x, toFinite(obj.x, 0)));
+    obj.y = round1(toFinite(elements.objYInput ? elements.objYInput.value : obj.y, toFinite(obj.y, 0)));
+    obj.radius = round1(Math.max(0.16, toFinite(
+      elements.objRadiusInput ? elements.objRadiusInput.value : obj.radius,
+      toFinite(obj.radius, 0.62),
+    )));
+    obj.launchImpulse = round1(Math.max(0.1, toFinite(
+      elements.objExtra1Input ? elements.objExtra1Input.value : obj.launchImpulse,
+      toFinite(obj.launchImpulse, 2.9),
+    )));
+    obj.cooldownMs = Math.round(Math.max(80, toFinite(
+      elements.objIntervalInput ? elements.objIntervalInput.value : obj.cooldownMs,
+      toFinite(obj.cooldownMs, 900),
+    )));
+    if (elements.objForceInput && String(elements.objForceInput.value || '').trim()) {
+      obj.launchImpulse = round1(Math.max(0.1, toFinite(elements.objForceInput.value, obj.launchImpulse)));
     }
     refreshCurrentJsonViewer();
     return;
@@ -2471,7 +2621,7 @@ function runApplyStageValuesAction(options = {}) {
     rememberUndoState(options.undoReason || '스테이지 값 변경');
   }
   applyStageInputsToDraft();
-  applyViewZoomToEngine(true);
+  applyViewZoomRespectRunning();
   applyMarbleSizeToEngines(getCurrentMarbleSizeScale(), { silent: true });
   queueLiveDraftApply(options.liveReason || '스테이지 값 변경');
   drawMakerCanvas();
@@ -2805,7 +2955,12 @@ function drawMiniMap(mainLayout = null) {
       }
       continue;
     }
-    if (obj.type === 'peg_circle' || obj.type === 'portal' || obj.type === 'burst_bumper' || obj.type === 'physics_ball') {
+    if (obj.type === 'peg_circle'
+      || obj.type === 'portal'
+      || obj.type === 'black_hole'
+      || obj.type === 'white_hole'
+      || obj.type === 'burst_bumper'
+      || obj.type === 'physics_ball') {
       const center = worldToMiniMap(layout, obj.x, obj.y);
       const radius = Math.max(1.8, toFinite(obj.radius, 0.6) * layout.scale);
       ctx.beginPath();
@@ -3152,7 +3307,12 @@ function getCircleHandlesWorld(obj) {
     return [];
   }
   const type = String(obj.type || '');
-  if (type !== 'peg_circle' && type !== 'portal' && type !== 'burst_bumper' && type !== 'physics_ball') {
+  if (type !== 'peg_circle'
+    && type !== 'portal'
+    && type !== 'black_hole'
+    && type !== 'white_hole'
+    && type !== 'burst_bumper'
+    && type !== 'physics_ball') {
     return [];
   }
   const cx = toFinite(obj.x, 0);
@@ -3161,7 +3321,7 @@ function getCircleHandlesWorld(obj) {
   const handles = [
     { kind: 'radius', x: round1(cx + radius), y: round1(cy) },
   ];
-  if (type === 'portal' || type === 'burst_bumper') {
+  if (type === 'portal' || type === 'black_hole' || type === 'burst_bumper') {
     const trigger = Math.max(radius + 0.05, toFinite(obj.triggerRadius, radius + 0.45));
     handles.push({ kind: 'trigger_radius', x: round1(cx), y: round1(cy - trigger) });
   }
@@ -3437,7 +3597,12 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
   }
 
   const center = worldToCanvas(layout, obj.x, obj.y);
-  if (obj.type === 'peg_circle' || obj.type === 'portal' || obj.type === 'burst_bumper' || obj.type === 'physics_ball') {
+  if (obj.type === 'peg_circle'
+    || obj.type === 'portal'
+    || obj.type === 'black_hole'
+    || obj.type === 'white_hole'
+    || obj.type === 'burst_bumper'
+    || obj.type === 'physics_ball') {
     const radius = Math.max(0.08, toFinite(obj.radius, 0.6)) * layout.scale;
     if (obj.type === 'burst_bumper') {
       const layers = Math.max(1, Math.floor(toFinite(obj.layers, 3)));
@@ -3462,11 +3627,13 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
       ctx.strokeStyle = selected ? '#ffd44d' : 'rgba(255, 169, 120, 0.9)';
       ctx.lineWidth = selected ? 2.2 : 1.5;
       ctx.stroke();
-    } else if (obj.type === 'portal') {
+    } else if (obj.type === 'portal' || obj.type === 'black_hole') {
       const triggerRadius = Math.max(0.18, toFinite(obj.triggerRadius, toFinite(obj.radius, 0.6) + 0.45)) * layout.scale;
       ctx.beginPath();
       ctx.arc(center.x, center.y, triggerRadius, 0, Math.PI * 2);
-      ctx.strokeStyle = selected ? '#ffd44d' : 'rgba(197, 158, 255, 0.92)';
+      ctx.strokeStyle = selected
+        ? '#ffd44d'
+        : (obj.type === 'black_hole' ? 'rgba(187, 150, 240, 0.95)' : 'rgba(197, 158, 255, 0.92)');
       ctx.lineWidth = selected ? 2 : 1.4;
       ctx.stroke();
     }
@@ -3754,7 +3921,12 @@ function drawCreateDragPreview(ctx, layout, drag) {
     return;
   }
   ctx.save();
-  if (tool === 'peg_circle' || tool === 'portal' || tool === 'burst_bumper' || tool === 'physics_ball') {
+  if (tool === 'peg_circle'
+    || tool === 'portal'
+    || tool === 'black_hole'
+    || tool === 'white_hole'
+    || tool === 'burst_bumper'
+    || tool === 'physics_ball') {
     const center = worldToCanvas(layout, start.x, start.y);
     const radiusWorld = Math.max(0.08, Math.hypot(current.x - start.x, current.y - start.y));
     const radius = radiusWorld * layout.scale;
@@ -3765,7 +3937,7 @@ function drawCreateDragPreview(ctx, layout, drag) {
     ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
-    if (tool === 'portal' || tool === 'burst_bumper') {
+    if (tool === 'portal' || tool === 'black_hole' || tool === 'burst_bumper') {
       const trigger = (radiusWorld + 0.45) * layout.scale;
       ctx.setLineDash([6, 4]);
       ctx.beginPath();
@@ -4566,6 +4738,8 @@ function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
   if (distance < clickThreshold) {
     const useDefaultSizeOnClick = tool === 'peg_circle'
       || tool === 'portal'
+      || tool === 'black_hole'
+      || tool === 'white_hole'
       || tool === 'burst_bumper'
       || tool === 'physics_ball'
       || tool === 'box_block'
@@ -4694,7 +4868,12 @@ function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
     created.height = round1(Math.max(0.08, Math.abs(dy) / 2));
     return created;
   }
-  if (tool === 'peg_circle' || tool === 'portal' || tool === 'burst_bumper' || tool === 'physics_ball') {
+  if (tool === 'peg_circle'
+    || tool === 'portal'
+    || tool === 'black_hole'
+    || tool === 'white_hole'
+    || tool === 'burst_bumper'
+    || tool === 'physics_ball') {
     const created = createObjectByTool(tool, start.x, start.y);
     if (!created) {
       return null;
@@ -4703,7 +4882,7 @@ function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
     created.y = round1(start.y);
     const nextRadius = round1(Math.max(0.08, distance));
     created.radius = nextRadius;
-    if (tool === 'portal' || tool === 'burst_bumper') {
+    if (tool === 'portal' || tool === 'black_hole' || tool === 'burst_bumper') {
       created.triggerRadius = round1(Math.max(nextRadius + 0.45, toFinite(created.triggerRadius, nextRadius + 0.45)));
     }
     return created;
@@ -4802,12 +4981,17 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
     return false;
   }
   if (drag.type === 'radius') {
-    if (obj.type === 'peg_circle' || obj.type === 'portal' || obj.type === 'burst_bumper' || obj.type === 'physics_ball') {
+    if (obj.type === 'peg_circle'
+      || obj.type === 'portal'
+      || obj.type === 'black_hole'
+      || obj.type === 'white_hole'
+      || obj.type === 'burst_bumper'
+      || obj.type === 'physics_ball') {
       const cx = toFinite(obj.x, 0);
       const cy = toFinite(obj.y, 0);
       const nextRadius = Math.max(0.08, Math.hypot(point.x - cx, point.y - cy));
       obj.radius = round1(nextRadius);
-      if (obj.type === 'portal' || obj.type === 'burst_bumper') {
+      if (obj.type === 'portal' || obj.type === 'black_hole' || obj.type === 'burst_bumper') {
         obj.triggerRadius = round1(Math.max(nextRadius + 0.05, toFinite(obj.triggerRadius, nextRadius + 0.45)));
       }
       drag.moved = true;
@@ -4816,7 +5000,7 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
     return false;
   }
   if (drag.type === 'trigger_radius') {
-    if (obj.type === 'portal' || obj.type === 'burst_bumper') {
+    if (obj.type === 'portal' || obj.type === 'black_hole' || obj.type === 'burst_bumper') {
       const cx = toFinite(obj.x, 0);
       const cy = toFinite(obj.y, 0);
       const minRadius = Math.max(toFinite(obj.radius, 0.6) + 0.05, 0.2);
@@ -5520,6 +5704,7 @@ async function applyDraftLiveNow(reason = '') {
     const running = readEngineRunning(api);
     setPlayPauseUi(running);
     applyViewZoomToEngine(!running);
+    setCameraLock(!running);
     await syncPreviewFromDraft({
       preserveMarbles: !shouldReset,
       preserveRunning: !shouldReset,
@@ -5543,6 +5728,60 @@ function shouldResetOnObjectMutation() {
   return !!(elements.stageResetOnObjectChangeInput && elements.stageResetOnObjectChangeInput.checked);
 }
 
+function canAutoSaveSelectedMap() {
+  const selected = selectedMapCatalogEntry();
+  if (!selected || !selected.id) {
+    return false;
+  }
+  const currentMapId = resolveCurrentMapId();
+  return String(selected.id) === String(currentMapId);
+}
+
+async function flushAutoSaveSelectedMap(reason = '') {
+  if (!canAutoSaveSelectedMap()) {
+    return;
+  }
+  if (autoSaveInFlight) {
+    autoSavePending = true;
+    return;
+  }
+  autoSaveInFlight = true;
+  try {
+    const mapId = resolveCurrentMapId();
+    const mapJson = await getCurrentMapJsonForSave();
+    mapJson.id = mapId;
+    mapJson.title = mapId;
+    await saveMapViaServer({
+      mode: 'selected',
+      selectedMapId: mapId,
+      mapJson,
+    });
+  } catch (error) {
+    const message = String(error && error.message ? error.message : error);
+    setStatus(`자동 저장 실패: ${message}`, 'warn');
+  } finally {
+    autoSaveInFlight = false;
+    if (autoSavePending) {
+      autoSavePending = false;
+      void flushAutoSaveSelectedMap('pending');
+    }
+  }
+}
+
+function scheduleAutoSaveSelectedMap(reason = '') {
+  if (FILE_PROTOCOL || !canAutoSaveSelectedMap()) {
+    return;
+  }
+  if (autoSaveTimer) {
+    window.clearTimeout(autoSaveTimer);
+    autoSaveTimer = 0;
+  }
+  autoSaveTimer = window.setTimeout(() => {
+    autoSaveTimer = 0;
+    void flushAutoSaveSelectedMap(reason);
+  }, AUTO_SAVE_DEBOUNCE_MS);
+}
+
 function queueLiveDraftApply(reason = '', options = {}) {
   if (FILE_PROTOCOL) {
     return;
@@ -5558,6 +5797,7 @@ function queueLiveDraftApply(reason = '', options = {}) {
     liveApplyTimer = 0;
     void applyDraftLiveNow(reason || '자동 적용');
   }, LIVE_APPLY_DEBOUNCE_MS);
+  scheduleAutoSaveSelectedMap(reason || '자동 저장');
 }
 
 async function applyMapAndCandidates() {
@@ -5945,8 +6185,10 @@ function setupEvents() {
       updateMakerHint('다점 벽선 모드: 1,2,3... 클릭한 점을 이어 벽 생성, 우클릭 종료');
     } else if (tool === 'wall_corridor_polyline') {
       updateMakerHint(`통로형 다절벽선 모드: 1,2,3... 점 연결, 간격=${getCorridorGapInput()}, 우클릭 종료`);
-    } else if (tool === 'portal') {
-      updateMakerHint('포털 모드: 드래그로 반경 지정, 두 번 배치하면 A/B 자동 연결');
+    } else if (tool === 'black_hole') {
+      updateMakerHint('블랙홀 모드: 드래그로 반경 생성, 주변을 빨아들여 화이트홀로 전송');
+    } else if (tool === 'white_hole') {
+      updateMakerHint('화이트홀 모드: 드래그로 반경 생성, 블랙홀에서 전송된 공이 랜덤 방향 발사');
     } else if (tool === 'hammer') {
       updateMakerHint(editorState.pendingHammerOid
         ? '해머 방향 설정 대기: 드래그/클릭으로 이동 방향·거리 지정'
@@ -6092,7 +6334,15 @@ function setupEvents() {
       if (!getSelectedObject()) {
         return;
       }
-      scheduleAutoObjectApply('오브젝트 자동 반영');
+      try {
+        runApplySelectedObjectValuesAction({
+          trackUndo: false,
+          liveReason: '오브젝트 실시간 반영',
+          silentStatus: true,
+        });
+      } catch (error) {
+        setStatus(String(error && error.message ? error.message : error), 'error');
+      }
     });
     bindEvent(field, 'change', () => {
       if (!getSelectedObject()) {
@@ -6103,7 +6353,15 @@ function setupEvents() {
   }
 
   bindEvent(elements.stageZoomInput, 'input', () => {
-    scheduleAutoStageApply('스테이지 자동 반영');
+    try {
+      runApplyStageValuesAction({
+        trackUndo: false,
+        liveReason: '스테이지 실시간 반영',
+        silentStatus: true,
+      });
+    } catch (error) {
+      setStatus(String(error && error.message ? error.message : error), 'error');
+    }
   });
   bindEvent(elements.stageZoomInput, 'change', () => {
     scheduleAutoStageApply('스테이지 자동 반영');
@@ -6112,10 +6370,10 @@ function setupEvents() {
     scheduleAutoStageApply('스테이지 자동 반영');
   });
   bindEvent(elements.viewZoomInput, 'input', () => {
-    applyViewZoomToEngine(true);
+    applyViewZoomRespectRunning();
   });
   bindEvent(elements.viewZoomInput, 'change', () => {
-    applyViewZoomToEngine(true);
+    applyViewZoomRespectRunning();
   });
   bindEvent(elements.marbleSizeInput, 'input', () => {
     applyMarbleSizeToEngines(getCurrentMarbleSizeScale(), { silent: true });
@@ -6172,6 +6430,14 @@ function setupEvents() {
     }
   });
 
+  bindEvent(elements.floatingDeleteButton, 'click', () => {
+    try {
+      runDeleteSelectedObjectAction();
+    } catch (error) {
+      setStatus(String(error && error.message ? error.message : error), 'error');
+    }
+  });
+
   bindEvent(elements.floatingObjectFields, 'change', (event) => {
     const target = event && event.target instanceof HTMLInputElement ? event.target : null;
     if (!target) {
@@ -6202,7 +6468,15 @@ function setupEvents() {
       return;
     }
     source.value = String(target.value ?? '');
-    scheduleAutoObjectApply('오브젝트 자동 반영');
+    try {
+      runApplySelectedObjectValuesAction({
+        trackUndo: false,
+        liveReason: '오브젝트 실시간 반영',
+        silentStatus: true,
+      });
+    } catch (error) {
+      setStatus(String(error && error.message ? error.message : error), 'error');
+    }
   });
 
   bindEvent(elements.floatingObjectFields, 'keydown', (event) => {
@@ -6234,17 +6508,16 @@ function setupEvents() {
   });
 
   bindEvent(elements.applyStageButton, 'click', () => {
-    rememberUndoState('스테이지 값 변경');
-    applyStageInputsToDraft();
-    applyViewZoomToEngine(true);
-    applyMarbleSizeToEngines();
-    queueLiveDraftApply('스테이지 값 변경');
-    drawMakerCanvas();
-    setStatus('스테이지 적용 완료 (뷰 줌/공 크기/스킬 옵션 포함)');
+    runApplyStageValuesAction({
+      trackUndo: true,
+      undoReason: '스테이지 값 변경',
+      liveReason: '스테이지 값 변경',
+      statusMessage: '스테이지 적용 완료 (뷰 줌/공 크기/스킬 옵션 포함)',
+    });
   });
 
   bindEvent(elements.applyViewZoomButton, 'click', () => {
-    if (applyViewZoomToEngine(true)) {
+    if (applyViewZoomRespectRunning()) {
       setStatus('뷰 줌 적용 완료');
     } else {
       setStatus('엔진 준비 후 뷰 줌 적용 가능', 'warn');
@@ -6325,6 +6598,10 @@ function setupEvents() {
       if (!startResult || startResult.ok !== true) {
         throw new Error(startResult && startResult.reason ? startResult.reason : '시작에 실패했습니다');
       }
+      setCameraLock(false);
+      window.setTimeout(() => {
+        setCameraLock(false);
+      }, 120);
       setPlayPauseUi(true);
       setStatus('시작되었습니다');
     });

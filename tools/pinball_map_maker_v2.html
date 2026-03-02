@@ -575,6 +575,26 @@
       top: 4px;
       box-sizing: border-box;
     }
+    .tool-shape.black-hole {
+      width: 15px;
+      height: 15px;
+      border-radius: 50%;
+      left: 8px;
+      top: 3px;
+      background: radial-gradient(circle, rgba(9, 9, 15, 1) 0%, rgba(35, 20, 58, 0.98) 45%, rgba(135, 104, 189, 0.9) 100%);
+      border: 1px solid rgba(181, 152, 236, 0.85);
+      box-shadow: 0 0 0 2px rgba(140, 108, 204, 0.35);
+    }
+    .tool-shape.white-hole {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      left: 9px;
+      top: 4px;
+      background: radial-gradient(circle, rgba(244, 237, 255, 1) 0%, rgba(203, 181, 255, 0.98) 56%, rgba(157, 119, 255, 0.9) 100%);
+      border: 1px solid rgba(239, 228, 255, 0.95);
+      box-shadow: 0 0 0 2px rgba(186, 154, 255, 0.32);
+    }
     .tool-shape.hammer {
       width: 18px;
       height: 10px;
@@ -961,6 +981,7 @@
                     <div class="floating-object-actions">
                       <button id="floatingReverseButton" type="button">반전</button>
                       <button id="floatingDuplicateButton" type="button">복제</button>
+                      <button id="floatingDeleteButton" type="button">삭제</button>
                     </div>
                   </div>
                   <div id="floatingObjectFields" class="floating-object-body"></div>
@@ -1014,7 +1035,8 @@
                 <button type="button" class="maker-tool-button" data-maker-tool="diamond_block"><span class="tool-icon"><span class="tool-shape diamond"></span></span><span class="tool-label">마름모</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="box_block"><span class="tool-icon"><span class="tool-shape box"></span></span><span class="tool-label">박스</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="rotor"><span class="tool-icon"><span class="tool-shape rotor"></span></span><span class="tool-label">회전 바</span></button>
-                <button type="button" class="maker-tool-button" data-maker-tool="portal"><span class="tool-icon"><span class="tool-shape portal"></span></span><span class="tool-label">포털 A/B</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="black_hole"><span class="tool-icon"><span class="tool-shape black-hole"></span></span><span class="tool-label">블랙홀</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="white_hole"><span class="tool-icon"><span class="tool-shape white-hole"></span></span><span class="tool-label">화이트홀</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="hammer"><span class="tool-icon"><span class="tool-shape hammer"></span></span><span class="tool-label">해머</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="fan"><span class="tool-icon"><span class="tool-shape fan"></span></span><span class="tool-label">선풍기</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="sticky_pad"><span class="tool-icon"><span class="tool-shape sticky"></span></span><span class="tool-label">이동 점착패드</span></button>
@@ -1038,7 +1060,8 @@
                 <option value="diamond_block">마름모</option>
                 <option value="box_block">박스</option>
                 <option value="rotor">회전 바</option>
-                <option value="portal">포털 A/B</option>
+                <option value="black_hole">블랙홀</option>
+                <option value="white_hole">화이트홀</option>
                 <option value="hammer">해머</option>
                 <option value="fan">선풍기</option>
                 <option value="sticky_pad">이동 점착패드</option>
@@ -1090,7 +1113,7 @@
                 </div>
                 <div class="maker-row">
                   <label for="objPairInput">연결 포털</label>
-                  <input id="objPairInput" type="text" placeholder="portal_x">
+                  <input id="objPairInput" type="text" placeholder="연결ID/경로">
                 </div>
                 <div class="maker-row">
                   <label id="objDirLabel" for="objDirInput">방향</label>
