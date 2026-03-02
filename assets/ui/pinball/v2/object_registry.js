@@ -304,6 +304,8 @@ function compileWallPolyline(raw, entityId) {
     return null;
   }
   const color = typeof raw.color === 'string' ? raw.color : DEFAULT_OBJECT_COLORS.wall;
+  const isFilled = toBoolean(raw && raw.filled, false) || toId(raw && raw.type, '') === 'wall_filled_polyline';
+  const fillOpacity = clamp(toFiniteNumber(raw && raw.fillOpacity, isFilled ? 1 : 0), 0, 1);
   const restitution = clamp(toFiniteNumber(raw && raw.restitution, 0), 0, 8);
   const friction = clamp(toFiniteNumber(raw && raw.friction, 0.35), 0, 8);
   const sensor = toBoolean(raw && raw.sensor, false) || toBoolean(raw && raw.noCollision, false);
@@ -326,6 +328,8 @@ function compileWallPolyline(raw, entityId) {
         rotation: 0,
         points,
         color,
+        filled: isFilled,
+        fillOpacity: isFilled ? fillOpacity : 0,
       },
     },
     entityId,
@@ -585,6 +589,8 @@ function compileObject(rawObject, entityId) {
             ...rawObject,
             points: closedPoints,
             color,
+            filled: true,
+            fillOpacity: 1,
           },
           entityId,
         ),
@@ -2474,6 +2480,7 @@ function createBottomBumperBehavior(def, env) {
     if (entry.shape && typeof entry.shape === 'object') {
       entry.shape.rotation = angleRad;
     }
+    entry.angle = angleRad;
   }
 
   function ensureVisualEffect() {
@@ -2509,7 +2516,7 @@ function createBottomBumperBehavior(def, env) {
         const halfLen = Math.max(0.08, toFiniteNumber(def.width, 0.98));
         const halfHeight = Math.max(0.05, toFiniteNumber(def.height, 0.34));
         const mirror = def.mirror === true;
-        const lineWidth = Math.max(0.52, 1.28 / Math.max(1, toFiniteNumber(zoomScale, 1)));
+        const lineWidth = Math.max(0.08, 0.42 / Math.max(1, toFiniteNumber(zoomScale, 1)));
         const bodyColor = typeof def.color === 'string' && !isTransparentColorString(def.color)
           ? def.color
           : DEFAULT_OBJECT_COLORS.bottomBumper;
@@ -2536,7 +2543,7 @@ function createBottomBumperBehavior(def, env) {
 
         ctx.fillStyle = 'rgba(12, 22, 44, 0.96)';
         ctx.strokeStyle = 'rgba(201, 235, 255, 0.96)';
-        ctx.lineWidth = Math.max(0.46, lineWidth * 0.82);
+        ctx.lineWidth = Math.max(0.07, lineWidth * 0.82);
         ctx.beginPath();
         ctx.arc(pivotX, 0, pivotRadius, 0, Math.PI * 2);
         ctx.fill();

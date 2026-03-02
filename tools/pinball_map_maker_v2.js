@@ -3910,6 +3910,9 @@ function drawMiniMap(mainLayout = null) {
     const color = selected ? '#ffd44d' : String(obj.color || defaultColorForObjectType(obj.type));
     ctx.strokeStyle = color;
     ctx.fillStyle = selected ? 'rgba(255,212,77,0.28)' : 'rgba(123,180,255,0.22)';
+    if (obj.type === 'box_block') {
+      ctx.fillStyle = selected ? '#ffd44d' : color;
+    }
     if (isPolylineObject(obj)) {
       const points = Array.isArray(obj.points) ? obj.points : [];
       if (points.length < 2) {
@@ -4675,6 +4678,9 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
   const color = String(obj && obj.color ? obj.color : defaultColorForObjectType(obj && obj.type));
   ctx.strokeStyle = selected ? '#ffd44d' : color;
   ctx.fillStyle = selected ? 'rgba(255, 212, 77, 0.25)' : 'rgba(110, 180, 255, 0.22)';
+  if (String(obj && obj.type ? obj.type : '') === 'box_block') {
+    ctx.fillStyle = selected ? '#ffd44d' : color;
+  }
   ctx.lineWidth = selected ? 3 : 2;
 
   if (isPolylineObject(obj)) {
