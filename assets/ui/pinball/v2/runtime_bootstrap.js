@@ -392,6 +392,49 @@ function patchPhysicsCreateEntities() {
   physics.__v2CreateEntitiesPatched = true;
 }
 
+function patchPhysicsGetEntities() {
+  const physics = getPhysics();
+  if (!physics || physics.__v2GetEntitiesPatched === true) {
+    return;
+  }
+  if (typeof physics.getEntities !== 'function') {
+    return;
+  }
+  const originalGetEntities = physics.getEntities.bind(physics);
+  physics.__v2OriginalGetEntities = originalGetEntities;
+  physics.getEntities = () => {
+    const entries = Array.isArray(physics.entities) ? physics.entities : [];
+    return entries.map((entry) => {
+      const safeEntry = entry && typeof entry === 'object' ? entry : {};
+      const body = safeEntry.body;
+      let x = toFiniteNumber(safeEntry.x, 0);
+      let y = toFiniteNumber(safeEntry.y, 0);
+      let angle = toFiniteNumber(safeEntry.angle, 0);
+      if (body && typeof body.GetPosition === 'function') {
+        try {
+          const position = body.GetPosition();
+          x = toFiniteNumber(position && position.x, x);
+          y = toFiniteNumber(position && position.y, y);
+        } catch (_) {
+        }
+      }
+      if (body && typeof body.GetAngle === 'function') {
+        try {
+          angle = toFiniteNumber(body.GetAngle(), angle);
+        } catch (_) {
+        }
+      }
+      return {
+        ...safeEntry,
+        x,
+        y,
+        angle,
+      };
+    });
+  };
+  physics.__v2GetEntitiesPatched = true;
+}
+
 function buildEntityTypeMapFromCompiled() {
   const compiled = control.compiledMap && typeof control.compiledMap === 'object'
     ? control.compiledMap
@@ -423,12 +466,18 @@ function setBodyFixturesSensor(body, enabled) {
     return;
   }
   try {
+    let guard = 0;
     let fixture = body.GetFixtureList();
-    while (fixture) {
+    while (fixture && guard < 64) {
       if (typeof fixture.SetSensor === 'function') {
         fixture.SetSensor(enabled === true);
       }
-      fixture = typeof fixture.GetNext === 'function' ? fixture.GetNext() : null;
+      const nextFixture = typeof fixture.GetNext === 'function' ? fixture.GetNext() : null;
+      if (nextFixture === fixture) {
+        break;
+      }
+      fixture = nextFixture;
+      guard += 1;
     }
   } catch (_) {
   }
@@ -690,6 +739,7 @@ async function applyMapJson(rawMapJson) {
   const roulette = await ensureRouletteReady();
   patchPhysicsStep();
   patchPhysicsCreateEntities();
+  patchPhysicsGetEntities();
   wireGoalEvent();
 
   const mapJson = rawMapJson && typeof rawMapJson === 'object'
@@ -715,6 +765,7 @@ async function applyMapJson(rawMapJson) {
   roulette.reset();
   patchPhysicsStep();
   patchPhysicsCreateEntities();
+  patchPhysicsGetEntities();
   enforceCompiledEntityPhysics();
   setWinningRank(control.winningRank);
 
@@ -734,6 +785,7 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
   const roulette = await ensureRouletteReady();
   patchPhysicsStep();
   patchPhysicsCreateEntities();
+  patchPhysicsGetEntities();
   wireGoalEvent();
 
   const mapJson = rawMapJson && typeof rawMapJson === 'object'
@@ -1098,6 +1150,7 @@ async function saveSnapshot(slotId = 'quick') {
     await ensureRouletteReady();
     patchPhysicsStep();
     patchPhysicsCreateEntities();
+    patchPhysicsGetEntities();
     const normalizedSlot = normalizeSlotId(slotId);
     if (!normalizedSlot) {
       return { ok: false, reason: `Unsupported slot: ${slotId}` };
@@ -1144,6 +1197,7 @@ async function restoreSnapshot(snapshot, opts = {}) {
   const roulette = await ensureRouletteReady();
   patchPhysicsStep();
   patchPhysicsCreateEntities();
+  patchPhysicsGetEntities();
   wireGoalEvent();
 
   control.paused = true;
@@ -1230,6 +1284,7 @@ async function start() {
   const roulette = await ensureRouletteReady();
   patchPhysicsStep();
   patchPhysicsCreateEntities();
+  patchPhysicsGetEntities();
   if (!Array.isArray(roulette._marbles) || roulette._marbles.length === 0) {
     return { ok: false, reason: 'No marbles to start' };
   }
@@ -1273,6 +1328,7 @@ async function reset() {
     roulette.reset();
     patchPhysicsStep();
     patchPhysicsCreateEntities();
+    patchPhysicsGetEntities();
   }
   if (control.candidates.length > 0) {
     roulette.setMarbles(control.candidates.slice());
@@ -1315,6 +1371,7 @@ async function init(payload = {}) {
   await ensureRouletteReady();
   patchPhysicsStep();
   patchPhysicsCreateEntities();
+  patchPhysicsGetEntities();
   wireGoalEvent();
   startTickLoop();
 
