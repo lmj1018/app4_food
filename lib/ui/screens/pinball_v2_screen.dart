@@ -774,6 +774,23 @@ SOFTWARE.
     return raw.map((key, value) => MapEntry(key.toString(), value));
   }
 
+  bool _isTransientStartFailure(Map<String, dynamic>? parsed, String reason) {
+    if (parsed == null || parsed.isEmpty) {
+      return true;
+    }
+    final lower = reason.trim().toLowerCase();
+    if (lower.isEmpty) {
+      return true;
+    }
+    if (lower == 'v2 init 실패' || lower == 'init failed') {
+      return true;
+    }
+    return lower.contains('start failed after init') ||
+        lower.contains('start guard failed') ||
+        lower.contains('start retry exhausted') ||
+        lower.contains('v2 api not ready');
+  }
+
   String _extractMapLabel(Map<String, dynamic>? state) {
     if (state != null) {
       final directLabel = state['mapLabel'];
@@ -985,7 +1002,19 @@ SOFTWARE.
                     parsed?['initResult']?['reason'] ??
                     'V2 init 실패')
                 .toString();
-        _pushRuntimeDebug('start_pinball_failed', parsed ?? reason);
+        final transient = _isTransientStartFailure(parsed, reason);
+        _pushRuntimeDebug(
+          transient ? 'start_pinball_pending' : 'start_pinball_failed',
+          <String, Object?>{
+            'reason': reason,
+            'parsed': parsed,
+            'raw': _decodeJsString(result),
+          },
+        );
+        if (transient) {
+          _setStatus('V2 초기화 중...', clearError: true);
+          return;
+        }
         _setStatus(reason, error: true);
         return;
       }
