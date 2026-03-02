@@ -578,7 +578,7 @@ function compileObject(rawObject, entityId) {
       };
     case 'wall_filled_polyline': {
       const closedPoints = ensureClosedPolylinePoints(extractPolylinePoints(rawObject), 0.2);
-      const color = typeof rawObject.color === 'string' ? rawObject.color : DEFAULT_OBJECT_COLORS.wall;
+      const color = DEFAULT_OBJECT_COLORS.box;
       return {
         entity: compileWallPolyline(
           {
@@ -594,7 +594,7 @@ function compileObject(rawObject, entityId) {
           entityId,
           points: closedPoints,
           color,
-          fillOpacity: clamp(toFiniteNumber(rawObject.fillOpacity, 0.88), 0.35, 1),
+          fillOpacity: 1,
         },
       };
     }
@@ -3214,8 +3214,8 @@ function createStickyPadBehavior(def, env) {
 
 function createFilledWallPolylineVisualBehavior(def, env) {
   const points = ensureClosedPolylinePoints(Array.isArray(def && def.points) ? def.points : [], 0.2);
-  const color = typeof def.color === 'string' ? def.color : DEFAULT_OBJECT_COLORS.wall;
-  const fillOpacity = clamp(toFiniteNumber(def.fillOpacity, 0.88), 0.35, 1);
+  const color = DEFAULT_OBJECT_COLORS.box;
+  const fillOpacity = 1;
   let visualEffect = null;
 
   function hasEntity() {
