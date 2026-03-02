@@ -10,8 +10,8 @@ const CANVAS_MIN_ZOOM = 0.18;
 const CANVAS_MAX_ZOOM = 14;
 const MAX_UNDO_HISTORY = 50;
 const ENABLE_COORDINATE_OVERLAY = false;
-const GOAL_MARKER_IMAGE_DEFAULT_SRC = './goal_line_tab1.svg';
-const GOAL_MARKER_IMAGE_PREVIEW_SRC = '../assets/ui/pinball/goal_line_tab1.svg';
+const GOAL_MARKER_IMAGE_DEFAULT_SRC = '../../background/finish.png';
+const GOAL_MARKER_IMAGE_PREVIEW_SRC = '../assets/background/finish.png';
 const OBJECT_COLOR_PRESET = {
   wall: '#ff7cc8',
   box: '#ff4fa8',
@@ -35,6 +35,8 @@ let liveApplyTimer = 0;
 let liveApplyInFlight = false;
 let liveApplyPending = false;
 let liveApplyResetRequested = false;
+let autoObjectApplyTimer = 0;
+let autoStageApplyTimer = 0;
 let previewLiveApplyInFlight = false;
 let previewCanvasFillTimer = 0;
 const undoHistory = [];
@@ -100,7 +102,6 @@ const elements = {
   corridorGapInput: document.getElementById('corridorGapInput'),
   miniMapCanvas: document.getElementById('miniMapCanvas'),
   makerCanvas: document.getElementById('makerCanvas'),
-  applyDraftButton: document.getElementById('applyDraftButton'),
   clearObjectsButton: document.getElementById('clearObjectsButton'),
   makerHintText: document.getElementById('makerHintText'),
   objectList: document.getElementById('objectList'),
@@ -366,7 +367,6 @@ function setBusy(isBusy) {
     elements.applyStageButton,
     elements.makerToolSelect,
     elements.corridorGapInput,
-    elements.applyDraftButton,
     elements.clearObjectsButton,
     elements.objectList,
     elements.objOidInput,
@@ -562,6 +562,35 @@ function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
   if (!Array.isArray(source.objects)) {
     source.objects = [];
   }
+  source.objects = source.objects
+    .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+    .map((item) => {
+      const obj = item;
+      const type = String(obj.type || '');
+      if (type === 'domino_block') {
+        obj.bodyType = 'dynamic';
+        obj.density = Math.max(0.01, toFinite(obj.density, 1.35));
+      } else if (type === 'physics_ball') {
+        obj.bodyType = 'dynamic';
+        obj.density = Math.max(0.01, toFinite(obj.density, 0.95));
+      } else if (type === 'burst_bumper') {
+        obj.layers = Math.max(1, Math.floor(toFinite(obj.layers, 3)));
+        obj.hpPerLayer = Math.max(1, Math.floor(toFinite(obj.hpPerLayer, 1)));
+        obj.damagePerHit = Math.max(1, Math.floor(toFinite(obj.damagePerHit, 1)));
+        obj.force = Math.max(0.1, toFinite(obj.force, 6.2));
+        obj.triggerRadius = Math.max(0.2, toFinite(obj.triggerRadius, Math.max(0.08, toFinite(obj.radius, 0.72)) + 0.45));
+        if (typeof obj.color !== 'string' || !obj.color.trim()) {
+          obj.color = OBJECT_COLOR_PRESET.burst;
+        }
+      } else if (type === 'goal_marker_image') {
+        const src = String(obj.imageSrc || '').trim();
+        obj.imageSrc = !src || src.includes('goal_line_tab1.svg')
+          ? GOAL_MARKER_IMAGE_DEFAULT_SRC
+          : src;
+        obj.opacity = round2(clamp(toFinite(obj.opacity, 0.86), 0.05, 1));
+      }
+      return obj;
+    });
   const bounds = inferStageWallBounds(source);
   const safeLeft = round1(clamp(toFinite(source.stage.leftWallX, bounds.leftX), 0.1, WORLD_WIDTH - 2.1));
   const safeRight = round1(clamp(toFinite(source.stage.rightWallX, bounds.rightX), safeLeft + 2, WORLD_WIDTH - 0.1));
@@ -1993,7 +2022,7 @@ function positionFloatingObjectInspector(layout = null) {
   const panelWidth = Math.max(210, elements.floatingObjectInspector.offsetWidth || 220);
   const panelHeight = Math.max(88, elements.floatingObjectInspector.offsetHeight || 120);
   let left = anchorX + 18;
-  let top = anchorY + 14;
+  let top = anchorY + 64;
   if (left + panelWidth > parentRect.width - margin) {
     left = anchorX - panelWidth - 18;
   }
@@ -2385,13 +2414,18 @@ function queueObjectLiveDraftApply(reason = '') {
   queueLiveDraftApply(reason, { objectMutation: true });
 }
 
-function runApplySelectedObjectValuesAction() {
-  rememberUndoState('오브젝트 값 수정');
+function runApplySelectedObjectValuesAction(options = {}) {
+  const trackUndo = options.trackUndo !== false;
+  if (trackUndo) {
+    rememberUndoState(options.undoReason || '오브젝트 값 수정');
+  }
   applyObjectEditorValues();
   syncObjectList();
-  queueObjectLiveDraftApply('오브젝트 수정');
+  queueObjectLiveDraftApply(options.liveReason || '오브젝트 수정');
   drawMakerCanvas();
-  setStatus('선택 오브젝트 값 반영 완료');
+  if (options.silentStatus !== true) {
+    setStatus(options.statusMessage || '선택 오브젝트 값 반영 완료');
+  }
 }
 
 function runReverseSelectedObjectAction() {
@@ -2428,7 +2462,65 @@ function applyFloatingInspectorField(sourceKey, value) {
     return;
   }
   source.value = String(value ?? '');
-  runApplySelectedObjectValuesAction();
+  runApplySelectedObjectValuesAction({ trackUndo: true, silentStatus: true });
+}
+
+function runApplyStageValuesAction(options = {}) {
+  const trackUndo = options.trackUndo !== false;
+  if (trackUndo) {
+    rememberUndoState(options.undoReason || '스테이지 값 변경');
+  }
+  applyStageInputsToDraft();
+  applyViewZoomToEngine(true);
+  applyMarbleSizeToEngines(getCurrentMarbleSizeScale(), { silent: true });
+  queueLiveDraftApply(options.liveReason || '스테이지 값 변경');
+  drawMakerCanvas();
+  if (options.silentStatus !== true) {
+    setStatus(options.statusMessage || '스테이지 적용 완료 (실시간)');
+  }
+}
+
+function scheduleAutoObjectApply(reason = '오브젝트 자동 반영') {
+  if (autoObjectApplyTimer) {
+    window.clearTimeout(autoObjectApplyTimer);
+    autoObjectApplyTimer = 0;
+  }
+  autoObjectApplyTimer = window.setTimeout(() => {
+    autoObjectApplyTimer = 0;
+    if (!getSelectedObject()) {
+      return;
+    }
+    try {
+      runApplySelectedObjectValuesAction({
+        trackUndo: true,
+        undoReason: reason,
+        liveReason: reason,
+        silentStatus: true,
+      });
+    } catch (error) {
+      setStatus(String(error && error.message ? error.message : error), 'error');
+    }
+  }, 120);
+}
+
+function scheduleAutoStageApply(reason = '스테이지 자동 반영') {
+  if (autoStageApplyTimer) {
+    window.clearTimeout(autoStageApplyTimer);
+    autoStageApplyTimer = 0;
+  }
+  autoStageApplyTimer = window.setTimeout(() => {
+    autoStageApplyTimer = 0;
+    try {
+      runApplyStageValuesAction({
+        trackUndo: true,
+        undoReason: reason,
+        liveReason: reason,
+        silentStatus: true,
+      });
+    } catch (error) {
+      setStatus(String(error && error.message ? error.message : error), 'error');
+    }
+  }, 120);
 }
 
 function clearAllObjects() {
@@ -4470,9 +4562,42 @@ function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
   const distance = Math.hypot(dx, dy);
+  const clickThreshold = 0.06;
+  if (distance < clickThreshold) {
+    const useDefaultSizeOnClick = tool === 'peg_circle'
+      || tool === 'portal'
+      || tool === 'burst_bumper'
+      || tool === 'physics_ball'
+      || tool === 'box_block'
+      || tool === 'diamond_block'
+      || tool === 'rotor'
+      || tool === 'hammer'
+      || tool === 'fan'
+      || tool === 'sticky_pad'
+      || tool === 'domino_block'
+      || tool === 'goal_marker_image';
+    if (useDefaultSizeOnClick) {
+      const createdByClick = createObjectByTool(tool, end.x, end.y);
+      if (createdByClick) {
+        return createdByClick;
+      }
+    }
+  }
   if (tool === 'wall_segment') {
-    if (distance < 0.06) {
-      return null;
+    if (distance < clickThreshold) {
+      const shortHalf = 0.8;
+      const y = round1(start.y);
+      const x1 = round1(clamp(start.x - shortHalf, 0.1, WORLD_WIDTH - 0.1));
+      const x2 = round1(clamp(start.x + shortHalf, 0.1, WORLD_WIDTH - 0.1));
+      if (Math.abs(x2 - x1) < clickThreshold) {
+        return null;
+      }
+      return {
+        oid: nextOid('wall'),
+        type: 'wall_polyline',
+        points: [[x1, y], [x2, y]],
+        color: OBJECT_COLOR_PRESET.wall,
+      };
     }
     let target = { x: end.x, y: end.y };
     if (options.shiftKey === true) {
@@ -4486,8 +4611,21 @@ function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
     };
   }
   if (tool === 'wall_corridor_segment') {
-    if (distance < 0.06) {
-      return null;
+    if (distance < clickThreshold) {
+      const shortHalf = 0.8;
+      const y = round1(start.y);
+      const x1 = round1(clamp(start.x - shortHalf, 0.1, WORLD_WIDTH - 0.1));
+      const x2 = round1(clamp(start.x + shortHalf, 0.1, WORLD_WIDTH - 0.1));
+      if (Math.abs(x2 - x1) < clickThreshold) {
+        return null;
+      }
+      return {
+        oid: nextOid('corridor'),
+        type: 'wall_corridor_polyline',
+        points: [[x1, y], [x2, y]],
+        gap: getCorridorGapInput(),
+        color: OBJECT_COLOR_PRESET.wall,
+      };
     }
     let target = { x: end.x, y: end.y };
     if (options.shiftKey === true) {
@@ -5656,10 +5794,53 @@ async function saveAsNewMap() {
   setStatus(`새 맵 저장 완료: ${newId}`);
 }
 
+function handleMakerCanvasRightClickAction() {
+  const tool = selectedTool();
+  if (isPolylineTool(tool) && editorState.pendingWallStart) {
+    resetPendingWall();
+    updateMakerHint(`${toolDisplayName(tool)} 입력 종료`);
+    drawMakerCanvas();
+    setStatus(`${toolDisplayName(tool)} 입력을 종료했습니다.`);
+    return;
+  }
+  if (tool === 'portal' && editorState.pendingPortalOid) {
+    resetPendingPortal();
+    updateMakerHint('포털 연결 입력 취소');
+    drawMakerCanvas();
+    setStatus('포털 연결 대기를 취소했습니다.');
+    return;
+  }
+  if ((tool === 'hammer' || tool === 'fan' || tool === 'sticky_pad') && editorState.pendingHammerOid) {
+    resetPendingHammer();
+    updateMakerHint(tool === 'fan'
+      ? '선풍기 방향 설정 입력 취소'
+      : (tool === 'sticky_pad' ? '점착패드 목표점 설정 입력 취소' : '해머 방향 설정 입력 취소'));
+    drawMakerCanvas();
+    setStatus(tool === 'fan'
+      ? '선풍기 방향 설정 대기를 취소했습니다.'
+      : (tool === 'sticky_pad' ? '점착패드 목표점 설정 대기를 취소했습니다.' : '해머 방향 설정 대기를 취소했습니다.'));
+    return;
+  }
+  setSelectedTool('select');
+  resetPendingWall();
+  resetPendingPortal();
+  resetPendingHammer();
+  cancelDrag();
+  if (elements.makerToolSelect) {
+    elements.makerToolSelect.dispatchEvent(new Event('change'));
+  }
+  setStatus('우클릭: 선택 모드로 전환');
+}
+
 function setupEvents() {
-  window.addEventListener('contextmenu', (event) => {
+  const blockContextMenu = (event) => {
     event.preventDefault();
-  });
+    if (typeof event.stopPropagation === 'function') {
+      event.stopPropagation();
+    }
+  };
+  window.addEventListener('contextmenu', blockContextMenu);
+  document.addEventListener('contextmenu', blockContextMenu, true);
 
   bindEvent(elements.marbleCountInput, 'change', () => {
     getCurrentMarbleCount();
@@ -5805,12 +5986,29 @@ function setupEvents() {
   if (Array.isArray(elements.makerToolButtons)) {
     for (let index = 0; index < elements.makerToolButtons.length; index += 1) {
       const button = elements.makerToolButtons[index];
-      bindEvent(button, 'click', () => {
+      const activateTool = () => {
         const tool = button && button.dataset ? button.dataset.makerTool : '';
         setSelectedTool(tool);
         if (elements.makerToolSelect) {
           elements.makerToolSelect.dispatchEvent(new Event('change'));
         }
+      };
+      bindEvent(button, 'pointerdown', (event) => {
+        if (event.pointerType === 'mouse' && event.button !== 0) {
+          return;
+        }
+        event.preventDefault();
+        activateTool();
+      });
+      bindEvent(button, 'mousedown', (event) => {
+        if (event.button !== 0) {
+          return;
+        }
+        event.preventDefault();
+        activateTool();
+      });
+      bindEvent(button, 'click', () => {
+        activateTool();
       });
     }
   }
@@ -5824,6 +6022,11 @@ function setupEvents() {
   });
 
   bindEvent(elements.makerCanvas, 'mousedown', (event) => {
+    if (event.button === 2) {
+      event.preventDefault();
+      handleMakerCanvasRightClickAction();
+      return;
+    }
     if (event.button === 1) {
       beginMakerCanvasPan(event);
       return;
@@ -5858,41 +6061,7 @@ function setupEvents() {
 
   bindEvent(elements.makerCanvas, 'contextmenu', (event) => {
     event.preventDefault();
-    const tool = selectedTool();
-    if (isPolylineTool(tool) && editorState.pendingWallStart) {
-      resetPendingWall();
-      updateMakerHint(`${toolDisplayName(tool)} 입력 종료`);
-      drawMakerCanvas();
-      setStatus(`${toolDisplayName(tool)} 입력을 종료했습니다.`);
-      return;
-    }
-    if (tool === 'portal' && editorState.pendingPortalOid) {
-      resetPendingPortal();
-      updateMakerHint('포털 연결 입력 취소');
-      drawMakerCanvas();
-      setStatus('포털 연결 대기를 취소했습니다.');
-      return;
-    }
-    if ((tool === 'hammer' || tool === 'fan' || tool === 'sticky_pad') && editorState.pendingHammerOid) {
-      resetPendingHammer();
-      updateMakerHint(tool === 'fan'
-        ? '선풍기 방향 설정 입력 취소'
-        : (tool === 'sticky_pad' ? '점착패드 목표점 설정 입력 취소' : '해머 방향 설정 입력 취소'));
-      drawMakerCanvas();
-      setStatus(tool === 'fan'
-        ? '선풍기 방향 설정 대기를 취소했습니다.'
-        : (tool === 'sticky_pad' ? '점착패드 목표점 설정 대기를 취소했습니다.' : '해머 방향 설정 대기를 취소했습니다.'));
-      return;
-    }
-    setSelectedTool('select');
-    resetPendingWall();
-    resetPendingPortal();
-    resetPendingHammer();
-    cancelDrag();
-    if (elements.makerToolSelect) {
-      elements.makerToolSelect.dispatchEvent(new Event('change'));
-    }
-    setStatus('우클릭: 선택 모드로 전환');
+    handleMakerCanvasRightClickAction();
   });
 
   bindEvent(elements.objectList, 'change', () => {
@@ -5900,6 +6069,59 @@ function setupEvents() {
     editorState.selectedIndex = Number.isFinite(index) ? index : -1;
     populateObjectEditor();
     drawMakerCanvas();
+  });
+
+  const autoObjectInputs = [
+    elements.objOidInput,
+    elements.objColorInput,
+    elements.objXInput,
+    elements.objYInput,
+    elements.objExtra1Input,
+    elements.objExtra2Input,
+    elements.objRadiusInput,
+    elements.objRotationInput,
+    elements.objPairInput,
+    elements.objDirInput,
+    elements.objForceInput,
+    elements.objIntervalInput,
+    elements.objHitDistanceInput,
+  ];
+  for (let index = 0; index < autoObjectInputs.length; index += 1) {
+    const field = autoObjectInputs[index];
+    bindEvent(field, 'input', () => {
+      if (!getSelectedObject()) {
+        return;
+      }
+      scheduleAutoObjectApply('오브젝트 자동 반영');
+    });
+    bindEvent(field, 'change', () => {
+      if (!getSelectedObject()) {
+        return;
+      }
+      scheduleAutoObjectApply('오브젝트 자동 반영');
+    });
+  }
+
+  bindEvent(elements.stageZoomInput, 'input', () => {
+    scheduleAutoStageApply('스테이지 자동 반영');
+  });
+  bindEvent(elements.stageZoomInput, 'change', () => {
+    scheduleAutoStageApply('스테이지 자동 반영');
+  });
+  bindEvent(elements.stageDisableSkillsInput, 'change', () => {
+    scheduleAutoStageApply('스테이지 자동 반영');
+  });
+  bindEvent(elements.viewZoomInput, 'input', () => {
+    applyViewZoomToEngine(true);
+  });
+  bindEvent(elements.viewZoomInput, 'change', () => {
+    applyViewZoomToEngine(true);
+  });
+  bindEvent(elements.marbleSizeInput, 'input', () => {
+    applyMarbleSizeToEngines(getCurrentMarbleSizeScale(), { silent: true });
+  });
+  bindEvent(elements.marbleSizeInput, 'change', () => {
+    applyMarbleSizeToEngines(getCurrentMarbleSizeScale(), { silent: true });
   });
 
   bindEvent(elements.applyObjectButton, 'click', () => {
@@ -5966,6 +6188,23 @@ function setupEvents() {
     }
   });
 
+  bindEvent(elements.floatingObjectFields, 'input', (event) => {
+    const target = event && event.target instanceof HTMLInputElement ? event.target : null;
+    if (!target) {
+      return;
+    }
+    const sourceKey = String(target.dataset && target.dataset.sourceKey ? target.dataset.sourceKey : '');
+    if (!sourceKey) {
+      return;
+    }
+    const source = elements[sourceKey];
+    if (!source || !getSelectedObject()) {
+      return;
+    }
+    source.value = String(target.value ?? '');
+    scheduleAutoObjectApply('오브젝트 자동 반영');
+  });
+
   bindEvent(elements.floatingObjectFields, 'keydown', (event) => {
     if (!(event && event.target instanceof HTMLInputElement)) {
       return;
@@ -6010,10 +6249,6 @@ function setupEvents() {
     } else {
       setStatus('엔진 준비 후 뷰 줌 적용 가능', 'warn');
     }
-  });
-
-  bindEvent(elements.applyDraftButton, 'click', async () => {
-    void applyDraftLiveNow('수동 적용');
   });
 
   bindEvent(elements.reloadButton, 'click', async () => {

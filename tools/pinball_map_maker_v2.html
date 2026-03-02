@@ -711,6 +711,9 @@
       grid-template-columns: 1fr 1fr;
       gap: 6px;
     }
+    .maker-toolbar-single {
+      grid-template-columns: 1fr;
+    }
     .object-props {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -964,8 +967,7 @@
                 </div>
               </div>
             </div>
-            <div class="maker-toolbar">
-              <button id="applyDraftButton" class="primary">드래프트 맵 적용</button>
+            <div class="maker-toolbar maker-toolbar-single">
               <button id="clearObjectsButton" class="warn">오브젝트 전체삭제</button>
             </div>
             <div class="maker-compact" id="makerHintText">툴을 선택하고 좌표 맵 캔버스를 클릭해 배치하세요.</div>
@@ -996,7 +998,6 @@
               </div>
               <div class="maker-toolbar">
                 <button id="fitStageButton">스테이지 자동맞춤</button>
-                <button id="applyStageButton" class="primary">스테이지 적용(뷰/공크기 포함)</button>
               </div>
             </div>
 
@@ -1109,7 +1110,6 @@
                 </div>
               </div>
               <div class="maker-toolbar">
-                <button id="applyObjectButton">선택 값 반영</button>
                 <button id="duplicateObjectButton">복제</button>
               </div>
               <button id="deleteObjectButton" class="warn">선택 오브젝트 삭제</button>

@@ -28,7 +28,7 @@ const DEFAULT_OBJECT_COLORS = {
 const runtimeImageCache = new Map();
 
 function getRuntimeImage(src) {
-  const key = toId(src, './goal_line_tab1.svg');
+  const key = normalizeGoalMarkerImageSrc(src);
   if (runtimeImageCache.has(key)) {
     return runtimeImageCache.get(key);
   }
@@ -61,6 +61,39 @@ function toId(value, fallback) {
     return value.trim();
   }
   return fallback;
+}
+
+function normalizeGoalMarkerImageSrc(value) {
+  const raw = toId(value, '../../background/finish.png');
+  if (raw.includes('goal_line_tab1.svg')) {
+    return '../../background/finish.png';
+  }
+  return raw;
+}
+
+function isTransparentColorString(value) {
+  if (typeof value !== 'string') {
+    return true;
+  }
+  const raw = value.trim();
+  if (!raw) {
+    return true;
+  }
+  const rgba = raw.match(/^rgba\(\s*[^,]+,\s*[^,]+,\s*[^,]+,\s*([0-9]*\.?[0-9]+)\s*\)$/i);
+  if (rgba) {
+    return toFiniteNumber(rgba[1], 1) <= 0.05;
+  }
+  const hex8 = raw.match(/^#([0-9a-fA-F]{8})$/);
+  if (hex8) {
+    const alpha = parseInt(hex8[1].slice(6, 8), 16) / 255;
+    return alpha <= 0.05;
+  }
+  const hex4 = raw.match(/^#([0-9a-fA-F]{4})$/);
+  if (hex4) {
+    const alpha = parseInt(hex4[1].slice(3, 4), 16) / 15;
+    return alpha <= 0.05;
+  }
+  return false;
 }
 
 function clamp(value, minValue, maxValue) {
@@ -218,6 +251,7 @@ function compileBox(raw, entityId, forceKinematic = false) {
     raw.angularVelocity,
     forceKinematic ? toFiniteNumber(raw.angularVelocity, 0) : 0,
   );
+  const life = Number.isFinite(Number(raw.life)) ? Math.max(-1, Math.floor(Number(raw.life))) : null;
   const color = typeof raw.color === 'string' ? raw.color : DEFAULT_OBJECT_COLORS.box;
   const rawBodyType = typeof raw === 'object' && raw
     ? (typeof raw.bodyType === 'string' ? raw.bodyType : (typeof raw.physicsType === 'string' ? raw.physicsType : ''))
@@ -232,6 +266,14 @@ function compileBox(raw, entityId, forceKinematic = false) {
   } else if (raw.type === 'dynamic') {
     bodyType = 'dynamic';
   }
+  const props = {
+    density,
+    angularVelocity,
+    restitution,
+  };
+  if (life !== null) {
+    props.life = life;
+  }
   return withEntityId(
     {
       position: {
@@ -239,11 +281,7 @@ function compileBox(raw, entityId, forceKinematic = false) {
         y: toFiniteNumber(raw.y, 40),
       },
       type: bodyType,
-      props: {
-        density,
-        angularVelocity,
-        restitution,
-      },
+      props,
       shape: {
         type: 'box',
         width,
@@ -350,6 +388,7 @@ function compileObject(rawObject, entityId) {
             height: Math.max(0.08, toFiniteNumber(rawObject.height, 0.7)),
             restitution: toFiniteNumber(rawObject.restitution, 0.08),
             density: Math.max(0.01, toFiniteNumber(rawObject.density, 1.35)),
+            life: -1,
             bodyType: 'dynamic',
             color: typeof rawObject.color === 'string' ? rawObject.color : DEFAULT_OBJECT_COLORS.domino,
           },
@@ -397,7 +436,8 @@ function compileObject(rawObject, entityId) {
       const damagePerHit = Math.max(1, Math.floor(toFiniteNumber(rawObject.damagePerHit, 1)));
       const baseRadius = Math.max(0.08, toFiniteNumber(rawObject.radius, 0.68));
       const baseTriggerRadius = Math.max(0.14, toFiniteNumber(rawObject.triggerRadius, baseRadius + 0.45));
-      const color = typeof rawObject.color === 'string' ? rawObject.color : DEFAULT_OBJECT_COLORS.burst;
+      const customColor = typeof rawObject.color === 'string' ? rawObject.color.trim() : '';
+      const useCustomColor = customColor && !isTransparentColorString(customColor);
       const entities = [];
       const layerEntityIds = [];
       const layerRadii = [];
@@ -405,9 +445,10 @@ function compileObject(rawObject, entityId) {
       for (let layerIndex = 0; layerIndex < totalLayers; layerIndex += 1) {
         const ratio = (totalLayers - layerIndex) / totalLayers;
         const layerRadius = Math.max(0.06, baseRadius * ratio);
-        const defaultLayerColor = `rgba(93,255,122,${Math.max(0.28, 0.18 + ratio * 0.82)})`;
-        const layerColor = typeof rawObject.color === 'string' && rawObject.color.trim()
-          ? rawObject.color
+        const layerPalette = ['#b9ffca', '#8dffad', '#5dff7a', '#43d95f', '#2eb34a', '#25863b'];
+        const defaultLayerColor = layerPalette[Math.min(layerIndex, layerPalette.length - 1)];
+        const layerColor = useCustomColor
+          ? customColor
           : defaultLayerColor;
         const compiledLayer = compileCircle(
           {
@@ -629,7 +670,7 @@ function compileObject(rawObject, entityId) {
           height: Math.max(0.2, toFiniteNumber(rawObject.height, 1.8)),
           rotation: toFiniteNumber(rawObject.rotation, 0),
           opacity: clamp(toFiniteNumber(rawObject.opacity, 0.86), 0.05, 1),
-          imageSrc: toId(rawObject.imageSrc, './goal_line_tab1.svg'),
+          imageSrc: normalizeGoalMarkerImageSrc(rawObject.imageSrc),
         },
       };
     default:
@@ -1498,7 +1539,7 @@ function createFanBehavior(def, env) {
     }
     const originX = toFiniteNumber(def.x, 0);
     const originY = toFiniteNumber(def.y, 0);
-    const duration = 360;
+    const duration = 200;
     roulette._effects.push({
       elapsed: 0,
       duration,
@@ -1514,8 +1555,8 @@ function createFanBehavior(def, env) {
           return;
         }
         const ratio = Math.max(0, Math.min(1, this.elapsed / this.duration));
-        const alpha = Math.max(0.08, 0.5 * (1 - ratio * 0.78));
-        const length = Math.max(0.25, zoneLength * (0.82 + ratio * 0.5));
+        const alpha = Math.max(0, 0.28 * (1 - ratio));
+        const length = Math.max(0.25, zoneLength * (0.78 + ratio * 0.42));
         const halfWidth = Math.max(0.2, zoneHalfWidth);
         const waveCount = Math.max(3, Math.floor(length * 2.4));
         const lineWidth = Math.max(0.8 / Math.max(1, toFiniteNumber(zoomScale, 1)), 0.55);
@@ -1523,8 +1564,8 @@ function createFanBehavior(def, env) {
         ctx.translate(originX, originY);
         ctx.rotate(dirRad);
         ctx.globalAlpha = alpha;
-        ctx.fillStyle = 'rgba(127,217,255,0.36)';
-        ctx.strokeStyle = 'rgba(143,230,255,1)';
+        ctx.fillStyle = 'rgba(127,217,255,0.2)';
+        ctx.strokeStyle = 'rgba(143,230,255,0.95)';
         ctx.lineWidth = lineWidth;
         ctx.beginPath();
         ctx.rect(0, -halfWidth, length, halfWidth * 2);
@@ -1534,15 +1575,15 @@ function createFanBehavior(def, env) {
         for (let lane = -1; lane <= 1; lane += 1) {
           const laneY = lane * (halfWidth * 0.52);
           const step = length / waveCount;
-          const amp = Math.max(0.08, halfWidth * 0.22);
+          const amp = Math.max(0.06, halfWidth * 0.18);
           ctx.moveTo(0, laneY);
           for (let i = 0; i <= waveCount; i += 1) {
             const x = i * step;
-            const waveY = laneY + Math.sin((i / waveCount) * Math.PI * 2.8 + ratio * Math.PI * 1.2) * amp;
+            const waveY = laneY + Math.sin((i / waveCount) * Math.PI * 2.4 + ratio * Math.PI) * amp;
             ctx.lineTo(x, waveY);
           }
         }
-        ctx.strokeStyle = 'rgba(209,249,255,1)';
+        ctx.strokeStyle = 'rgba(194,245,255,0.95)';
         ctx.lineWidth = lineWidth * 0.88;
         ctx.stroke();
         ctx.restore();
@@ -1586,7 +1627,7 @@ function createFanBehavior(def, env) {
 
       if (now >= nextVisualAt) {
         emitFanVisualEffect(now, dirRad, zoneLength, zoneHalfWidth);
-        nextVisualAt = now + 80;
+        nextVisualAt = now + 110;
       }
 
       for (let index = 0; index < marbles.length; index += 1) {
@@ -1868,7 +1909,7 @@ function createStickyPadBehavior(def, env) {
 
 function createGoalMarkerImageBehavior(def, env) {
   let nextEmitAt = 0;
-  const image = getRuntimeImage(def.imageSrc || './goal_line_tab1.svg');
+  const image = getRuntimeImage(def.imageSrc || '../../background/finish.png');
 
   function emitRenderEffect(now) {
     const roulette = env.getRoulette();
