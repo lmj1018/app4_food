@@ -175,7 +175,7 @@ function drawBottomBumperPath(ctx, halfLen, halfHeight) {
 function buildBottomBumperColliderPoints(halfLen, halfHeight) {
   const safeHalfLen = Math.max(0.08, toFiniteNumber(halfLen, 0.98));
   const safeHalfHeight = Math.max(0.05, toFiniteNumber(halfHeight, 0.34));
-  const edgePad = Math.max(0.015, Math.min(0.11, safeHalfHeight * 0.16));
+  const edgePad = Math.max(0.002, Math.min(0.02, safeHalfHeight * 0.04));
   const tailX = -safeHalfLen;
   const bulgeX = tailX - safeHalfLen * 0.3 - edgePad;
   const midX = safeHalfLen * 0.4;
@@ -2638,15 +2638,6 @@ function createBottomBumperBehavior(def, env) {
     };
   }
 
-  function localToWorldPoint(localX, localY, centerX, centerY, angleRad) {
-    const cosAngle = Math.cos(angleRad);
-    const sinAngle = Math.sin(angleRad);
-    return {
-      x: centerX + localX * cosAngle - localY * sinAngle,
-      y: centerY + localX * sinAngle + localY * cosAngle,
-    };
-  }
-
   function resolveMarblesInsideBody(now, transformState) {
     if (!transformState) {
       return;
@@ -2702,7 +2693,7 @@ function createBottomBumperBehavior(def, env) {
         continue;
       }
       const nearestDist = Math.sqrt(Math.max(0, toFiniteNumber(nearest.distSq, 0)));
-      const minPenetration = Math.max(0.08, Math.min(0.2, clearance * 1.05));
+      const minPenetration = Math.max(0.18, Math.min(0.34, clearance * 1.9));
       if (nearestDist < minPenetration) {
         continue;
       }
@@ -2724,30 +2715,15 @@ function createBottomBumperBehavior(def, env) {
       }
       const unitOutX = outwardX / outwardLen;
       const unitOutY = outwardY / outwardLen;
-      const releaseOffset = clearance + minPenetration * 0.78;
-      const targetLocalX = nearest.x + unitOutX * releaseOffset;
-      const targetLocalY = nearest.y + unitOutY * releaseOffset;
-      const targetWorld = localToWorldPoint(
-        targetLocalX,
-        targetLocalY,
-        toFiniteNumber(transformState.centerX, toFiniteNumber(def.x, 0)),
-        toFiniteNumber(transformState.centerY, toFiniteNumber(def.y, 0)),
-        toFiniteNumber(transformState.angleRad, 0),
-      );
-      const pushX = toFiniteNumber(targetWorld.x, worldX) - worldX;
-      const pushY = toFiniteNumber(targetWorld.y, worldY) - worldY;
-      const pushLen = Math.hypot(pushX, pushY);
-      if (pushLen < 0.0001) {
-        continue;
-      }
-      const pushUnitX = pushX / pushLen;
-      const pushUnitY = pushY / pushLen;
-      const speed = Math.max(2.6, toFiniteNumber(def.force, 3.8) * 0.9);
+      const speed = Math.max(3.6, toFiniteNumber(def.force, 3.8) * 1.08);
+      const impulseScale = Math.max(0.18, Math.min(0.52, minPenetration * 0.9));
       const velocity = typeof body.GetLinearVelocity === 'function' ? body.GetLinearVelocity() : null;
-      const baseVx = toFiniteNumber(velocity && velocity.x, 0) * 0.08;
-      const baseVy = toFiniteNumber(velocity && velocity.y, 0) * 0.08;
-      const nextVx = baseVx + pushUnitX * speed;
-      const nextVy = baseVy + pushUnitY * speed;
+      const baseVx = toFiniteNumber(velocity && velocity.x, 0);
+      const baseVy = toFiniteNumber(velocity && velocity.y, 0);
+      const outwardBoostX = unitOutX * speed;
+      const outwardBoostY = unitOutY * speed;
+      const nextVx = baseVx * 0.75 + outwardBoostX;
+      const nextVy = baseVy * 0.75 + outwardBoostY;
       try {
         if (typeof body.SetEnabled === 'function') {
           body.SetEnabled(true);
@@ -2755,14 +2731,16 @@ function createBottomBumperBehavior(def, env) {
         if (typeof body.SetAwake === 'function') {
           body.SetAwake(true);
         }
-        if (typeof body.SetTransform === 'function') {
-          const angle = typeof body.GetAngle === 'function' ? body.GetAngle() : 0;
-          body.SetTransform(new box2d.b2Vec2(targetWorld.x, targetWorld.y), angle);
+        if (typeof body.ApplyLinearImpulseToCenter === 'function') {
+          body.ApplyLinearImpulseToCenter(
+            new box2d.b2Vec2(outwardBoostX * impulseScale, outwardBoostY * impulseScale),
+            true,
+          );
         }
         if (typeof body.SetLinearVelocity === 'function') {
           body.SetLinearVelocity(new box2d.b2Vec2(nextVx, nextVy));
         }
-        ejectCooldownByMarble[marbleKey] = now + 180;
+        ejectCooldownByMarble[marbleKey] = now + 220;
       } catch (_) {
       }
     }
