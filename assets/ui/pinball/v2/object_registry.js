@@ -337,7 +337,7 @@ function compileBottomBumperCollider(raw, entityId) {
   const restitutionInput = toFiniteNumber(raw && raw.restitution, 0.62);
   const frictionInput = toFiniteNumber(raw && raw.friction, 0.03);
   const restitution = clamp(Math.max(0.62, restitutionInput), 0, 8);
-  const friction = clamp(Math.min(0.05, frictionInput), 0, 8);
+  const friction = clamp(Math.min(0.03, frictionInput), 0, 8);
   const density = Math.max(0.01, toFiniteNumber(raw && raw.density, 1));
   const sensor = toBoolean(raw && raw.sensor, false) || toBoolean(raw && raw.noCollision, false);
   const life = Number.isFinite(Number(raw && raw.life))
@@ -2551,6 +2551,7 @@ function createHammerBehavior(def, env) {
 
 function createBottomBumperBehavior(def, env) {
   const cooldownByMarble = {};
+  const ejectCooldownByMarble = {};
   let nextSwingAt = 0;
   let swingStartAt = 0;
   let swingUntil = 0;
@@ -2646,7 +2647,7 @@ function createBottomBumperBehavior(def, env) {
     };
   }
 
-  function resolveMarblesInsideBody(transformState) {
+  function resolveMarblesInsideBody(now, transformState) {
     if (!transformState) {
       return;
     }
@@ -2670,6 +2671,10 @@ function createBottomBumperBehavior(def, env) {
     for (let index = 0; index < marbles.length; index += 1) {
       const marble = marbles[index];
       if (!marble || typeof marble.id !== 'number') {
+        continue;
+      }
+      const marbleKey = String(marble.id);
+      if (now < toFiniteNumber(ejectCooldownByMarble[marbleKey], 0)) {
         continue;
       }
       const body = physics.marbleMap[marble.id];
@@ -2696,6 +2701,11 @@ function createBottomBumperBehavior(def, env) {
       if (!nearest) {
         continue;
       }
+      const nearestDist = Math.sqrt(Math.max(0, toFiniteNumber(nearest.distSq, 0)));
+      const minPenetration = Math.max(0.08, Math.min(0.2, clearance * 1.05));
+      if (nearestDist < minPenetration) {
+        continue;
+      }
       let outwardX = nearest.x - centroid.x;
       let outwardY = nearest.y - centroid.y;
       let outwardLen = Math.hypot(outwardX, outwardY);
@@ -2714,8 +2724,9 @@ function createBottomBumperBehavior(def, env) {
       }
       const unitOutX = outwardX / outwardLen;
       const unitOutY = outwardY / outwardLen;
-      const targetLocalX = nearest.x + unitOutX * clearance;
-      const targetLocalY = nearest.y + unitOutY * clearance;
+      const releaseOffset = clearance + minPenetration * 0.78;
+      const targetLocalX = nearest.x + unitOutX * releaseOffset;
+      const targetLocalY = nearest.y + unitOutY * releaseOffset;
       const targetWorld = localToWorldPoint(
         targetLocalX,
         targetLocalY,
@@ -2731,10 +2742,10 @@ function createBottomBumperBehavior(def, env) {
       }
       const pushUnitX = pushX / pushLen;
       const pushUnitY = pushY / pushLen;
-      const speed = Math.max(1.2, toFiniteNumber(def.force, 3.8) * 0.55);
+      const speed = Math.max(2.6, toFiniteNumber(def.force, 3.8) * 0.9);
       const velocity = typeof body.GetLinearVelocity === 'function' ? body.GetLinearVelocity() : null;
-      const baseVx = toFiniteNumber(velocity && velocity.x, 0) * 0.22;
-      const baseVy = toFiniteNumber(velocity && velocity.y, 0) * 0.22;
+      const baseVx = toFiniteNumber(velocity && velocity.x, 0) * 0.08;
+      const baseVy = toFiniteNumber(velocity && velocity.y, 0) * 0.08;
       const nextVx = baseVx + pushUnitX * speed;
       const nextVy = baseVy + pushUnitY * speed;
       try {
@@ -2751,6 +2762,7 @@ function createBottomBumperBehavior(def, env) {
         if (typeof body.SetLinearVelocity === 'function') {
           body.SetLinearVelocity(new box2d.b2Vec2(nextVx, nextVy));
         }
+        ejectCooldownByMarble[marbleKey] = now + 180;
       } catch (_) {
       }
     }
@@ -3027,7 +3039,7 @@ function createBottomBumperBehavior(def, env) {
         scheduleNextSwing(now);
       }
       const transformState = updateTransform(now);
-      resolveMarblesInsideBody(transformState);
+      resolveMarblesInsideBody(now, transformState);
       applySwingImpulse(now, transformState);
     },
     serializeState() {
@@ -3053,6 +3065,9 @@ function createBottomBumperBehavior(def, env) {
       nextVisualAt = Math.max(0, toFiniteNumber(safeState.nextVisualAt, 0));
       for (const key of Object.keys(cooldownByMarble)) {
         delete cooldownByMarble[key];
+      }
+      for (const key of Object.keys(ejectCooldownByMarble)) {
+        delete ejectCooldownByMarble[key];
       }
       const nextCooldown = safeState.cooldownByMarble && typeof safeState.cooldownByMarble === 'object'
         ? safeState.cooldownByMarble
