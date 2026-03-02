@@ -94,6 +94,18 @@ const marbleImageState = {
   revision: 0,
 };
 
+function isSupportedRuntimeImageSrc(src) {
+  const safeSrc = typeof src === 'string' ? src.trim() : '';
+  if (!safeSrc) {
+    return false;
+  }
+  return safeSrc.startsWith('data:image/')
+    || safeSrc.startsWith('http://')
+    || safeSrc.startsWith('https://')
+    || safeSrc.startsWith('/__app_asset/')
+    || safeSrc.startsWith('__app_asset/');
+}
+
 function detectFromAppContext(payload = null) {
   const query = new URLSearchParams(window.location.search);
   const byQuery = query.get('fromApp') === '1' || query.get('isPinballApp') === '1';
@@ -235,7 +247,7 @@ function normalizeImageDataUrlMap(raw) {
     const rawSrc = entry && entry.length > 1 ? entry[1] : '';
     const name = typeof rawName === 'string' ? rawName.trim() : '';
     const src = typeof rawSrc === 'string' ? rawSrc.trim() : '';
-    if (!name || !src || !src.startsWith('data:image/')) {
+    if (!name || !isSupportedRuntimeImageSrc(src)) {
       continue;
     }
     out[name] = src;
@@ -258,6 +270,13 @@ function setPayloadMarbleImages(raw) {
     try {
       image = new Image();
       image.decoding = 'async';
+      image.__v2Failed = false;
+      image.onload = () => {
+        image.__v2Failed = false;
+      };
+      image.onerror = () => {
+        image.__v2Failed = true;
+      };
       image.src = src;
     } catch (_) {
       image = null;
@@ -271,10 +290,7 @@ function setPayloadMarbleImages(raw) {
 
 function setPayloadGoalMarkerImage(raw) {
   const src = typeof raw === 'string' ? raw.trim() : '';
-  const isDataImage = src.startsWith('data:image/');
-  const isHttpUrl = src.startsWith('http://') || src.startsWith('https://');
-  const isAppAssetPath = src.startsWith('/__app_asset/') || src.startsWith('__app_asset/');
-  if (isDataImage || isHttpUrl || isAppAssetPath) {
+  if (isSupportedRuntimeImageSrc(src)) {
     window.__v2GoalMarkerImageDataUrl = src;
     return;
   }
@@ -303,10 +319,16 @@ function patchRendererMarbleImages() {
     const marbleName = typeof name === 'string' ? name.trim() : '';
     if (marbleName) {
       const image = marbleImageState.images.get(marbleName);
-      if (image && image.complete && image.naturalWidth > 0) {
-        return image;
-      }
       if (image) {
+        if (image.__v2Failed === true) {
+          return renderer.__v2OriginalGetMarbleImage(name);
+        }
+        if (image.complete === true) {
+          if (image.naturalWidth > 0) {
+            return image;
+          }
+          return renderer.__v2OriginalGetMarbleImage(name);
+        }
         return image;
       }
     }

@@ -614,25 +614,26 @@ SOFTWARE.
       candidateToAsset[candidate] = asset;
     }
 
+    final baseUri = await _ensureLocalServer();
     final uniqueAssets = candidateToAsset.values.toSet();
-    final assetDataUrl = <String, String>{};
+    final assetImageUrl = <String, String>{};
     for (final assetPath in uniqueAssets) {
-      var dataUrl = await _loadAssetAsDataUrl(assetPath);
-      if (dataUrl.isEmpty && assetPath.startsWith('assets/ballimages/')) {
+      var imageUrl = await _resolveAppAssetUrl(baseUri, assetPath);
+      if (imageUrl.isEmpty && assetPath.startsWith('assets/ballimages/')) {
         final fallbackAsset = assetPath.replaceFirst(
           'assets/ballimages/',
           'assets/foodimages/',
         );
-        dataUrl = await _loadAssetAsDataUrl(fallbackAsset);
+        imageUrl = await _resolveAppAssetUrl(baseUri, fallbackAsset);
       }
-      assetDataUrl[assetPath] = dataUrl;
+      assetImageUrl[assetPath] = imageUrl;
     }
 
     final result = <String, String>{};
     for (final entry in candidateToAsset.entries) {
-      final dataUrl = assetDataUrl[entry.value];
-      if (dataUrl != null && dataUrl.isNotEmpty) {
-        result[entry.key] = dataUrl;
+      final imageUrl = assetImageUrl[entry.value];
+      if (imageUrl != null && imageUrl.isNotEmpty) {
+        result[entry.key] = imageUrl;
       }
     }
 
@@ -646,57 +647,37 @@ SOFTWARE.
       return _goalLineImageDataUrl!;
     }
     final baseUri = await _ensureLocalServer();
-    Future<String> resolveAssetUrl(String assetPath) async {
-      try {
-        await rootBundle.load(assetPath);
-      } catch (_) {
-        return '';
-      }
-      final encodedAssetPath = assetPath
-          .split('/')
-          .map(Uri.encodeComponent)
-          .join('/');
-      return baseUri.replace(path: '/__app_asset/$encodedAssetPath').toString();
-    }
-
-    var imageUrl = await resolveAssetUrl('assets/background/finish.png');
+    var imageUrl = await _resolveAppAssetUrl(
+      baseUri,
+      'assets/background/finish.png',
+    );
     if (imageUrl.isEmpty) {
-      imageUrl = await resolveAssetUrl('assets/ui/pinball/goal_line_tab1.png');
+      imageUrl = await _resolveAppAssetUrl(
+        baseUri,
+        'assets/ui/pinball/goal_line_tab1.png',
+      );
     }
     if (imageUrl.isEmpty) {
-      imageUrl = await resolveAssetUrl('assets/ui/pinball/goal_line_tab1.svg');
+      imageUrl = await _resolveAppAssetUrl(
+        baseUri,
+        'assets/ui/pinball/goal_line_tab1.svg',
+      );
     }
     _goalLineImageDataUrl = imageUrl;
     return imageUrl;
   }
 
-  Future<String> _loadAssetAsDataUrl(String assetPath) async {
+  Future<String> _resolveAppAssetUrl(Uri baseUri, String assetPath) async {
     try {
-      final byteData = await rootBundle.load(assetPath);
-      final bytes = byteData.buffer.asUint8List();
-      final base64Data = base64Encode(bytes);
-      final mimeType = _mimeTypeForAsset(assetPath);
-      return 'data:$mimeType;base64,$base64Data';
+      await rootBundle.load(assetPath);
     } catch (_) {
       return '';
     }
-  }
-
-  String _mimeTypeForAsset(String assetPath) {
-    final lower = assetPath.toLowerCase();
-    if (lower.endsWith('.svg')) {
-      return 'image/svg+xml';
-    }
-    if (lower.endsWith('.png')) {
-      return 'image/png';
-    }
-    if (lower.endsWith('.webp')) {
-      return 'image/webp';
-    }
-    if (lower.endsWith('.gif')) {
-      return 'image/gif';
-    }
-    return 'image/jpeg';
+    final encodedAssetPath = assetPath
+        .split('/')
+        .map(Uri.encodeComponent)
+        .join('/');
+    return baseUri.replace(path: '/__app_asset/$encodedAssetPath').toString();
   }
 
   String _decodeJsString(Object? raw) {
