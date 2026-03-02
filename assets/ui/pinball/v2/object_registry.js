@@ -163,6 +163,8 @@ function compileWallPolyline(raw, entityId) {
     return null;
   }
   const color = typeof raw.color === 'string' ? raw.color : DEFAULT_OBJECT_COLORS.wall;
+  const restitution = clamp(toFiniteNumber(raw && raw.restitution, 0), 0, 8);
+  const friction = clamp(toFiniteNumber(raw && raw.friction, 0.35), 0, 8);
   return withEntityId(
     {
       position: { x: 0, y: 0 },
@@ -170,7 +172,8 @@ function compileWallPolyline(raw, entityId) {
       props: {
         density: 1,
         angularVelocity: 0,
-        restitution: 0,
+        restitution,
+        friction,
       },
       shape: {
         type: 'polyline',
@@ -247,12 +250,15 @@ function compileBox(raw, entityId, forceKinematic = false) {
     ? toFiniteNumber(raw.rotationRad, 0)
     : toFiniteNumber(raw.rotation, 0);
   const rotation = normalizeRotationRad(rotationInput, 0);
-  const restitution = clamp(toFiniteNumber(raw.restitution, 0), 0, 5);
+  const restitution = clamp(toFiniteNumber(raw.restitution, 0), 0, 8);
+  const friction = clamp(toFiniteNumber(raw.friction, 0.2), 0, 8);
   const density = Math.max(0.01, toFiniteNumber(raw.density, 1));
   const angularVelocity = toFiniteNumber(
     raw.angularVelocity,
     forceKinematic ? toFiniteNumber(raw.angularVelocity, 0) : 0,
   );
+  const linearDamping = Math.max(0, toFiniteNumber(raw.linearDamping, 0));
+  const angularDamping = Math.max(0, toFiniteNumber(raw.angularDamping, 0));
   const life = Number.isFinite(Number(raw.life)) ? Math.max(-1, Math.floor(Number(raw.life))) : null;
   const color = typeof raw.color === 'string' ? raw.color : DEFAULT_OBJECT_COLORS.box;
   const rawBodyType = typeof raw === 'object' && raw
@@ -272,7 +278,14 @@ function compileBox(raw, entityId, forceKinematic = false) {
     density,
     angularVelocity,
     restitution,
+    friction,
   };
+  if (linearDamping > 0) {
+    props.linearDamping = linearDamping;
+  }
+  if (angularDamping > 0) {
+    props.angularDamping = angularDamping;
+  }
   if (life !== null) {
     props.life = life;
   }
@@ -299,7 +312,10 @@ function compileBox(raw, entityId, forceKinematic = false) {
 function compileCircle(raw, entityId, defaults) {
   const radius = Math.max(0.05, toFiniteNumber(raw.radius, defaults.radius));
   const restitution = clamp(toFiniteNumber(raw.restitution, defaults.restitution), 0, 8);
+  const friction = clamp(toFiniteNumber(raw.friction, 0.2), 0, 8);
   const density = Math.max(0.01, toFiniteNumber(raw.density, defaults.density));
+  const linearDamping = Math.max(0, toFiniteNumber(raw.linearDamping, 0));
+  const angularDamping = Math.max(0, toFiniteNumber(raw.angularDamping, 0));
   const life = Number.isFinite(Number(raw.life)) ? Math.max(-1, Math.floor(Number(raw.life))) : defaults.life;
   const color = typeof raw.color === 'string' ? raw.color : defaults.color;
   const rawBodyType = typeof raw === 'object' && raw
@@ -311,6 +327,19 @@ function compileCircle(raw, entityId, defaults) {
     : (rawBodyType === 'kinematic' || raw.type === 'kinematic'
       ? 'kinematic'
       : defaultBodyType);
+  const props = {
+    density,
+    angularVelocity: 0,
+    restitution,
+    friction,
+    life,
+  };
+  if (linearDamping > 0) {
+    props.linearDamping = linearDamping;
+  }
+  if (angularDamping > 0) {
+    props.angularDamping = angularDamping;
+  }
   return withEntityId(
     {
       position: {
@@ -318,12 +347,7 @@ function compileCircle(raw, entityId, defaults) {
         y: toFiniteNumber(raw.y, defaults.y),
       },
       type: bodyType,
-      props: {
-        density,
-        angularVelocity: 0,
-        restitution,
-        life,
-      },
+      props,
       shape: {
         type: 'circle',
         radius,

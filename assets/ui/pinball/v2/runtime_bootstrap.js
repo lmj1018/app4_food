@@ -86,6 +86,29 @@ const control = {
   mapDisableSkills: false,
 };
 
+function installContextMenuGuard() {
+  if (window.__v2RuntimeContextMenuGuard === true) {
+    return;
+  }
+  const block = (event) => {
+    if (!event) {
+      return;
+    }
+    if (typeof event.preventDefault === 'function') {
+      event.preventDefault();
+    }
+    if (typeof event.stopPropagation === 'function') {
+      event.stopPropagation();
+    }
+  };
+  try {
+    window.addEventListener('contextmenu', block, true);
+    document.addEventListener('contextmenu', block, true);
+    window.__v2RuntimeContextMenuGuard = true;
+  } catch (_) {
+  }
+}
+
 function setStatus(text) {
   const message = String(text ?? '');
   control.statusText = message;
@@ -220,6 +243,137 @@ function patchPhysicsStep() {
     return originalStep(deltaSeconds);
   };
   physics.__v2StepPatched = true;
+}
+
+function patchPhysicsCreateEntities() {
+  const physics = getPhysics();
+  if (!physics || physics.__v2CreateEntitiesPatched === true) {
+    return;
+  }
+  const box2d = physics.Box2D;
+  if (!box2d || typeof physics.createEntities !== 'function') {
+    return;
+  }
+  const resolveBodyType = (type) => {
+    if (type === 'dynamic') {
+      return box2d.b2_dynamicBody;
+    }
+    if (type === 'kinematic') {
+      return box2d.b2_kinematicBody;
+    }
+    return box2d.b2_staticBody;
+  };
+  const originalCreateEntities = physics.createEntities.bind(physics);
+  physics.__v2OriginalCreateEntities = originalCreateEntities;
+  physics.createEntities = (entitiesInput) => {
+    const entities = Array.isArray(entitiesInput) ? entitiesInput : [];
+    if (entities.length === 0) {
+      return;
+    }
+    if (!physics.world || typeof physics.world.CreateBody !== 'function') {
+      return originalCreateEntities(entitiesInput);
+    }
+    for (let index = 0; index < entities.length; index += 1) {
+      const rawEntity = entities[index];
+      if (!rawEntity || typeof rawEntity !== 'object') {
+        continue;
+      }
+      const shape = rawEntity.shape && typeof rawEntity.shape === 'object'
+        ? rawEntity.shape
+        : null;
+      if (!shape || typeof shape.type !== 'string') {
+        continue;
+      }
+      const props = rawEntity.props && typeof rawEntity.props === 'object'
+        ? rawEntity.props
+        : {};
+      const bodyDef = new box2d.b2BodyDef();
+      bodyDef.set_type(resolveBodyType(rawEntity.type));
+      const body = physics.world.CreateBody(bodyDef);
+      const fixtureDef = new box2d.b2FixtureDef();
+      fixtureDef.set_density(Math.max(0.001, toFiniteNumber(props.density, 1)));
+      fixtureDef.set_restitution(Math.max(0, toFiniteNumber(props.restitution, 0)));
+      if (typeof fixtureDef.set_friction === 'function') {
+        fixtureDef.set_friction(Math.max(0, toFiniteNumber(props.friction, 0.2)));
+      }
+
+      if (shape.type === 'box') {
+        const polygon = new box2d.b2PolygonShape();
+        polygon.SetAsBox(
+          Math.max(0.001, toFiniteNumber(shape.width, 0.2)),
+          Math.max(0.001, toFiniteNumber(shape.height, 0.2)),
+          0,
+          toFiniteNumber(shape.rotation, 0),
+        );
+        fixtureDef.set_shape(polygon);
+        body.CreateFixture(fixtureDef);
+      } else if (shape.type === 'circle') {
+        const circle = new box2d.b2CircleShape();
+        circle.set_m_radius(Math.max(0.001, toFiniteNumber(shape.radius, 0.2)));
+        fixtureDef.set_shape(circle);
+        body.CreateFixture(fixtureDef);
+      } else if (shape.type === 'polyline') {
+        const points = Array.isArray(shape.points) ? shape.points : [];
+        for (let pointIndex = 0; pointIndex < points.length - 1; pointIndex += 1) {
+          const pointA = points[pointIndex];
+          const pointB = points[pointIndex + 1];
+          if (!Array.isArray(pointA) || !Array.isArray(pointB)) {
+            continue;
+          }
+          const edge = new box2d.b2EdgeShape();
+          edge.SetTwoSided(
+            new box2d.b2Vec2(toFiniteNumber(pointA[0], 0), toFiniteNumber(pointA[1], 0)),
+            new box2d.b2Vec2(toFiniteNumber(pointB[0], 0), toFiniteNumber(pointB[1], 0)),
+          );
+          if (typeof fixtureDef.set_shape === 'function') {
+            fixtureDef.set_shape(edge);
+            body.CreateFixture(fixtureDef);
+          } else {
+            body.CreateFixture(edge, Math.max(0.001, toFiniteNumber(props.density, 1)));
+          }
+        }
+      }
+
+      if (typeof body.SetAngularVelocity === 'function') {
+        body.SetAngularVelocity(toFiniteNumber(props.angularVelocity, 0));
+      }
+      if (typeof body.SetLinearDamping === 'function' && Number.isFinite(Number(props.linearDamping))) {
+        body.SetLinearDamping(Math.max(0, toFiniteNumber(props.linearDamping, 0)));
+      }
+      if (typeof body.SetAngularDamping === 'function' && Number.isFinite(Number(props.angularDamping))) {
+        body.SetAngularDamping(Math.max(0, toFiniteNumber(props.angularDamping, 0)));
+      }
+      if (typeof body.SetTransform === 'function' && typeof box2d.b2Vec2 === 'function') {
+        body.SetTransform(
+          new box2d.b2Vec2(
+            toFiniteNumber(rawEntity.position && rawEntity.position.x, 0),
+            toFiniteNumber(rawEntity.position && rawEntity.position.y, 0),
+          ),
+          0,
+        );
+      }
+      if (rawEntity.type === 'dynamic') {
+        if (typeof body.SetAwake === 'function') {
+          body.SetAwake(true);
+        }
+        if (typeof body.SetEnabled === 'function') {
+          body.SetEnabled(true);
+        }
+      }
+      const life = Number.isFinite(Number(props.life))
+        ? Math.max(-1, Math.floor(Number(props.life)))
+        : -1;
+      physics.entities.push({
+        body,
+        x: toFiniteNumber(rawEntity.position && rawEntity.position.x, 0),
+        y: toFiniteNumber(rawEntity.position && rawEntity.position.y, 0),
+        angle: 0,
+        shape,
+        life,
+      });
+    }
+  };
+  physics.__v2CreateEntitiesPatched = true;
 }
 
 function wireGoalEvent() {
@@ -425,6 +579,7 @@ function buildDefaultMapIfNeeded(mapId) {
 async function applyMapJson(rawMapJson) {
   const roulette = await ensureRouletteReady();
   patchPhysicsStep();
+  patchPhysicsCreateEntities();
   wireGoalEvent();
 
   const mapJson = rawMapJson && typeof rawMapJson === 'object'
@@ -449,6 +604,7 @@ async function applyMapJson(rawMapJson) {
   roulette._stage = stage;
   roulette.reset();
   patchPhysicsStep();
+  patchPhysicsCreateEntities();
   setWinningRank(control.winningRank);
 
   control.behaviorRuntime = createBehaviorRuntime(createBehaviorEnvironment(), compiled.behaviorDefs);
@@ -466,6 +622,7 @@ async function applyMapJson(rawMapJson) {
 async function applyMapJsonLive(rawMapJson, options = {}) {
   const roulette = await ensureRouletteReady();
   patchPhysicsStep();
+  patchPhysicsCreateEntities();
   wireGoalEvent();
 
   const mapJson = rawMapJson && typeof rawMapJson === 'object'
@@ -828,6 +985,7 @@ async function saveSnapshot(slotId = 'quick') {
   try {
     await ensureRouletteReady();
     patchPhysicsStep();
+    patchPhysicsCreateEntities();
     const normalizedSlot = normalizeSlotId(slotId);
     if (!normalizedSlot) {
       return { ok: false, reason: `Unsupported slot: ${slotId}` };
@@ -873,6 +1031,7 @@ async function saveSnapshot(slotId = 'quick') {
 async function restoreSnapshot(snapshot, opts = {}) {
   const roulette = await ensureRouletteReady();
   patchPhysicsStep();
+  patchPhysicsCreateEntities();
   wireGoalEvent();
 
   control.paused = true;
@@ -958,6 +1117,7 @@ function deleteSnapshot(slotId) {
 async function start() {
   const roulette = await ensureRouletteReady();
   patchPhysicsStep();
+  patchPhysicsCreateEntities();
   if (!Array.isArray(roulette._marbles) || roulette._marbles.length === 0) {
     return { ok: false, reason: 'No marbles to start' };
   }
@@ -1000,6 +1160,7 @@ async function reset() {
   } else {
     roulette.reset();
     patchPhysicsStep();
+    patchPhysicsCreateEntities();
   }
   if (control.candidates.length > 0) {
     roulette.setMarbles(control.candidates.slice());
@@ -1041,6 +1202,7 @@ function getCurrentMapJson() {
 async function init(payload = {}) {
   await ensureRouletteReady();
   patchPhysicsStep();
+  patchPhysicsCreateEntities();
   wireGoalEvent();
   startTickLoop();
 
@@ -1109,6 +1271,7 @@ const api = {
 };
 
 window.__appPinballV2 = api;
+installContextMenuGuard();
 setStatus('v2 runtime booting...');
 void init().catch((error) => {
   const message = String(error && error.message ? error.message : error);

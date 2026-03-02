@@ -132,6 +132,8 @@ const elements = {
   objIntervalInput: document.getElementById('objIntervalInput'),
   objHitDistanceLabel: document.getElementById('objHitDistanceLabel'),
   objHitDistanceInput: document.getElementById('objHitDistanceInput'),
+  objRestitutionInput: document.getElementById('objRestitutionInput'),
+  objFrictionInput: document.getElementById('objFrictionInput'),
   applyObjectButton: document.getElementById('applyObjectButton'),
   duplicateObjectButton: document.getElementById('duplicateObjectButton'),
   deleteObjectButton: document.getElementById('deleteObjectButton'),
@@ -357,6 +359,28 @@ function bindEvent(element, eventName, handler) {
   element.addEventListener(eventName, handler);
 }
 
+function installContextMenuGuard(targetWindow) {
+  if (!targetWindow || targetWindow.__v2MakerContextMenuGuard === true) {
+    return;
+  }
+  const block = (event) => {
+    if (!event) {
+      return;
+    }
+    if (typeof event.preventDefault === 'function') {
+      event.preventDefault();
+    }
+  };
+  try {
+    targetWindow.addEventListener('contextmenu', block, true);
+    if (targetWindow.document && typeof targetWindow.document.addEventListener === 'function') {
+      targetWindow.document.addEventListener('contextmenu', block, true);
+    }
+    targetWindow.__v2MakerContextMenuGuard = true;
+  } catch (_) {
+  }
+}
+
 function setBusy(isBusy) {
   const controls = [
     elements.mapSelect,
@@ -400,6 +424,8 @@ function setBusy(isBusy) {
     elements.objForceInput,
     elements.objIntervalInput,
     elements.objHitDistanceInput,
+    elements.objRestitutionInput,
+    elements.objFrictionInput,
     elements.applyObjectButton,
     elements.duplicateObjectButton,
     elements.deleteObjectButton,
@@ -622,6 +648,18 @@ function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
           ? GOAL_MARKER_IMAGE_DEFAULT_SRC
           : src;
         obj.opacity = round2(clamp(toFinite(obj.opacity, 0.86), 0.05, 1));
+      }
+      if (supportsImpactTuning(obj)) {
+        obj.restitution = round2(clamp(
+          toFinite(obj.restitution, defaultRestitutionForType(type)),
+          0,
+          8,
+        ));
+        obj.friction = round2(clamp(
+          toFinite(obj.friction, defaultFrictionForType(type)),
+          0,
+          8,
+        ));
       }
       return obj;
     });
@@ -1251,6 +1289,55 @@ function objectTypeDisplayName(type) {
   return toolDisplayName(type);
 }
 
+function supportsImpactTuning(obj) {
+  if (!obj || typeof obj !== 'object') {
+    return false;
+  }
+  return String(obj.type || '') !== 'goal_marker_image';
+}
+
+function defaultRestitutionForType(type) {
+  switch (String(type || '')) {
+    case 'peg_circle':
+      return 2;
+    case 'diamond_block':
+      return 1.4;
+    case 'burst_bumper':
+      return 3.2;
+    case 'domino_block':
+      return 0.08;
+    case 'physics_ball':
+      return 0.26;
+    case 'hammer':
+    case 'fan':
+    case 'sticky_pad':
+    case 'black_hole':
+    case 'white_hole':
+    case 'portal':
+      return 0.12;
+    case 'wall_polyline':
+    case 'wall_corridor_polyline':
+    case 'wall_corridor_segment':
+    case 'rotor':
+      return 0;
+    default:
+      return 0.08;
+  }
+}
+
+function defaultFrictionForType(type) {
+  switch (String(type || '')) {
+    case 'sticky_pad':
+      return 1.2;
+    case 'wall_polyline':
+    case 'wall_corridor_polyline':
+    case 'wall_corridor_segment':
+      return 0.35;
+    default:
+      return 0.2;
+  }
+}
+
 function defaultColorForObjectType(type) {
   switch (String(type || '')) {
     case 'wall_polyline':
@@ -1667,6 +1754,14 @@ function clearObjectEditor() {
   if (elements.objIntervalInput) elements.objIntervalInput.value = '';
   if (elements.objHitDistanceInput) elements.objHitDistanceInput.value = '';
   if (elements.objHitDistanceInput) elements.objHitDistanceInput.disabled = true;
+  if (elements.objRestitutionInput) {
+    elements.objRestitutionInput.value = '';
+    elements.objRestitutionInput.disabled = true;
+  }
+  if (elements.objFrictionInput) {
+    elements.objFrictionInput.value = '';
+    elements.objFrictionInput.disabled = true;
+  }
   if (elements.objHitDistanceLabel) elements.objHitDistanceLabel.textContent = '이동거리';
   if (elements.objRadiusLabel) elements.objRadiusLabel.textContent = '반지름';
   if (elements.reverseRotationButton) elements.reverseRotationButton.disabled = true;
@@ -1701,6 +1796,28 @@ function populateObjectEditor() {
     elements.objRotationInput.value = canRotate
       ? String(round1(toFinite(obj.rotation, 0)))
       : ((obj.type === 'hammer' || obj.type === 'fan') ? '0' : '');
+  }
+  if (elements.objRestitutionInput) {
+    const canTuneImpact = supportsImpactTuning(obj);
+    elements.objRestitutionInput.disabled = !canTuneImpact;
+    elements.objRestitutionInput.value = canTuneImpact
+      ? String(round2(clamp(
+        toFinite(obj.restitution, defaultRestitutionForType(obj.type)),
+        0,
+        8,
+      )))
+      : '';
+  }
+  if (elements.objFrictionInput) {
+    const canTuneImpact = supportsImpactTuning(obj);
+    elements.objFrictionInput.disabled = !canTuneImpact;
+    elements.objFrictionInput.value = canTuneImpact
+      ? String(round2(clamp(
+        toFinite(obj.friction, defaultFrictionForType(obj.type)),
+        0,
+        8,
+      )))
+      : '';
   }
   if (elements.objPairInput) elements.objPairInput.value = String(obj.pair || '');
   if (elements.objDirInput) {
@@ -1796,41 +1913,51 @@ function populateObjectEditor() {
     elements.reverseRotationButton.disabled = !(supportsRotationHandle(obj) || obj.type === 'hammer' || obj.type === 'fan');
   }
   if (elements.objDirLabel) {
-    elements.objDirLabel.textContent = obj.type === 'rotor'
-      ? '방향 각도(미사용)'
-      : (obj.type === 'goal_marker_image'
-        ? '방향(미사용)'
-      : (obj.type === 'black_hole' || obj.type === 'white_hole'
-        ? '방향(미사용)'
-      : (obj.type === 'portal'
-        ? '출구 각도(도)'
-        : (obj.type === 'burst_bumper'
-          ? '레이어 수'
-          : (obj.type === 'fan' ? '바람 방향(도)' : (obj.type === 'sticky_pad' ? '이동속도' : '방향 각도(도)'))))));
+    let dirLabel = '방향 각도(도)';
+    if (obj.type === 'rotor') {
+      dirLabel = '방향 각도(미사용)';
+    } else if (obj.type === 'goal_marker_image' || obj.type === 'black_hole' || obj.type === 'white_hole') {
+      dirLabel = '방향(미사용)';
+    } else if (obj.type === 'portal') {
+      dirLabel = '출구 각도(도)';
+    } else if (obj.type === 'burst_bumper') {
+      dirLabel = '레이어 수';
+    } else if (obj.type === 'fan') {
+      dirLabel = '바람 방향(도)';
+    } else if (obj.type === 'sticky_pad') {
+      dirLabel = '이동속도';
+    }
+    elements.objDirLabel.textContent = dirLabel;
   }
   if (elements.objForceLabel) {
-    elements.objForceLabel.textContent = obj.type === 'rotor'
-      ? '회전 속도'
-      : (obj.type === 'goal_marker_image'
-        ? '힘(미사용)'
-      : (obj.type === 'black_hole'
-        ? '흡입력'
-      : (obj.type === 'white_hole'
-        ? '발사힘'
-      : (obj.type === 'portal'
-        ? '출구 가속(impulse)'
-        : (obj.type === 'fan' ? '풍압' : (obj.type === 'sticky_pad' ? '대기(ms)' : '힘')))));
+    let forceLabel = '힘';
+    if (obj.type === 'rotor') {
+      forceLabel = '회전 속도';
+    } else if (obj.type === 'goal_marker_image') {
+      forceLabel = '힘(미사용)';
+    } else if (obj.type === 'black_hole') {
+      forceLabel = '흡입력';
+    } else if (obj.type === 'white_hole') {
+      forceLabel = '발사힘';
+    } else if (obj.type === 'portal') {
+      forceLabel = '출구 가속(impulse)';
+    } else if (obj.type === 'fan') {
+      forceLabel = '풍압';
+    } else if (obj.type === 'sticky_pad') {
+      forceLabel = '대기(ms)';
+    }
+    elements.objForceLabel.textContent = forceLabel;
   }
   if (elements.objIntervalLabel) {
-    elements.objIntervalLabel.textContent = obj.type === 'rotor'
-      ? '간격(미사용)'
-      : (obj.type === 'goal_marker_image'
-        ? '간격(미사용)'
-      : (obj.type === 'black_hole' || obj.type === 'white_hole'
-        ? '재진입 쿨다운(ms)'
-      : (obj.type === 'portal' || obj.type === 'burst_bumper'
-        ? '쿨다운(ms)'
-        : (obj.type === 'fan' || obj.type === 'sticky_pad' ? '간격(미사용)' : '간격(ms)'))));
+    let intervalLabel = '간격(ms)';
+    if (obj.type === 'rotor' || obj.type === 'goal_marker_image' || obj.type === 'fan' || obj.type === 'sticky_pad') {
+      intervalLabel = '간격(미사용)';
+    } else if (obj.type === 'black_hole' || obj.type === 'white_hole') {
+      intervalLabel = '재진입 쿨다운(ms)';
+    } else if (obj.type === 'portal' || obj.type === 'burst_bumper') {
+      intervalLabel = '쿨다운(ms)';
+    }
+    elements.objIntervalLabel.textContent = intervalLabel;
   }
 
   if (isPolylineObject(obj)) {
@@ -1999,6 +2126,10 @@ function buildFloatingInspectorFieldDefs(obj) {
     if (obj.type === 'wall_corridor_polyline' || obj.type === 'wall_corridor_segment') {
       pushField('objRadiusInput', readMakerLabelText(elements.objRadiusLabel, '통로 간격'), { force: true });
     }
+    if (supportsImpactTuning(obj)) {
+      pushField('objRestitutionInput', '반발력');
+      pushField('objFrictionInput', '충격흡수(마찰)');
+    }
     return defs;
   }
 
@@ -2033,6 +2164,10 @@ function buildFloatingInspectorFieldDefs(obj) {
   pushField('objIntervalInput', readMakerLabelText(elements.objIntervalLabel, '간격(ms)'));
   if (elements.objHitDistanceInput && !elements.objHitDistanceInput.disabled) {
     pushField('objHitDistanceInput', readMakerLabelText(elements.objHitDistanceLabel, '이동거리'));
+  }
+  if (supportsImpactTuning(obj)) {
+    pushField('objRestitutionInput', '반발력');
+    pushField('objFrictionInput', '충격흡수(마찰)');
   }
 
   return defs;
@@ -2187,6 +2322,37 @@ function syncObjectList() {
   populateObjectEditor();
 }
 
+function applyImpactTuningFromInputs(obj) {
+  if (!obj || !supportsImpactTuning(obj)) {
+    return;
+  }
+  const fallbackRestitution = clamp(toFinite(obj.restitution, defaultRestitutionForType(obj.type)), 0, 8);
+  const fallbackFriction = clamp(toFinite(obj.friction, defaultFrictionForType(obj.type)), 0, 8);
+  if (elements.objRestitutionInput && !elements.objRestitutionInput.disabled) {
+    obj.restitution = round2(clamp(
+      toFinite(elements.objRestitutionInput.value, fallbackRestitution),
+      0,
+      8,
+    ));
+  } else {
+    obj.restitution = round2(fallbackRestitution);
+  }
+  if (elements.objFrictionInput && !elements.objFrictionInput.disabled) {
+    obj.friction = round2(clamp(
+      toFinite(elements.objFrictionInput.value, fallbackFriction),
+      0,
+      8,
+    ));
+  } else {
+    obj.friction = round2(fallbackFriction);
+  }
+}
+
+function finalizeObjectEditorValues(obj) {
+  applyImpactTuningFromInputs(obj);
+  refreshCurrentJsonViewer();
+}
+
 function applyObjectEditorValues() {
   const obj = getSelectedObject();
   if (!obj) {
@@ -2225,7 +2391,7 @@ function applyObjectEditorValues() {
         getCorridorGapInput(),
       );
     }
-    refreshCurrentJsonViewer();
+    finalizeObjectEditorValues(obj);
     return;
   }
   if (obj.type === 'burst_bumper') {
@@ -2244,7 +2410,7 @@ function applyObjectEditorValues() {
       elements.objHitDistanceInput ? elements.objHitDistanceInput.value : obj.hpPerLayer,
       toFinite(obj.hpPerLayer, 1),
     )));
-    refreshCurrentJsonViewer();
+    finalizeObjectEditorValues(obj);
     return;
   }
   if (obj.type === 'portal') {
@@ -2278,7 +2444,7 @@ function applyObjectEditorValues() {
         linkPortalPairBidirectional(obj, target);
       }
     }
-    refreshCurrentJsonViewer();
+    finalizeObjectEditorValues(obj);
     return;
   }
   if (obj.type === 'black_hole') {
@@ -2304,7 +2470,7 @@ function applyObjectEditorValues() {
       elements.objIntervalInput ? elements.objIntervalInput.value : obj.cooldownMs,
       toFinite(obj.cooldownMs, 900),
     )));
-    refreshCurrentJsonViewer();
+    finalizeObjectEditorValues(obj);
     return;
   }
   if (obj.type === 'white_hole') {
@@ -2325,7 +2491,7 @@ function applyObjectEditorValues() {
     if (elements.objForceInput && String(elements.objForceInput.value || '').trim()) {
       obj.launchImpulse = round1(Math.max(0.1, toFinite(elements.objForceInput.value, obj.launchImpulse)));
     }
-    refreshCurrentJsonViewer();
+    finalizeObjectEditorValues(obj);
     return;
   }
   if (obj.type === 'rotor') {
@@ -2338,7 +2504,7 @@ function applyObjectEditorValues() {
       elements.objForceInput ? elements.objForceInput.value : obj.angularVelocity,
       toFinite(obj.angularVelocity, 2.2),
     ));
-    refreshCurrentJsonViewer();
+    finalizeObjectEditorValues(obj);
     return;
   }
   if (obj.type === 'goal_marker_image') {
@@ -2366,7 +2532,7 @@ function applyObjectEditorValues() {
         : (obj.imageSrc || GOAL_MARKER_IMAGE_DEFAULT_SRC),
     ).trim();
     obj.imageSrc = imageSrc || GOAL_MARKER_IMAGE_DEFAULT_SRC;
-    refreshCurrentJsonViewer();
+    finalizeObjectEditorValues(obj);
     return;
   }
   if (obj.type === 'hammer') {
@@ -2382,7 +2548,7 @@ function applyObjectEditorValues() {
       elements.objHitDistanceInput ? elements.objHitDistanceInput.value : obj.hitDistance,
       toFinite(obj.hitDistance, 0.95),
     ));
-    refreshCurrentJsonViewer();
+    finalizeObjectEditorValues(obj);
     return;
   }
   if (obj.type === 'fan') {
@@ -2399,7 +2565,7 @@ function applyObjectEditorValues() {
       elements.objHitDistanceInput ? elements.objHitDistanceInput.value : obj.hitDistance,
       toFinite(obj.hitDistance, 2.8),
     ));
-    refreshCurrentJsonViewer();
+    finalizeObjectEditorValues(obj);
     return;
   }
   if (obj.type === 'sticky_pad') {
@@ -2444,7 +2610,7 @@ function applyObjectEditorValues() {
     }
     obj.pathA = [obj.x, obj.y];
     obj.pathB = [target.x, target.y];
-    refreshCurrentJsonViewer();
+    finalizeObjectEditorValues(obj);
     return;
   }
   if (obj.type === 'physics_ball') {
@@ -2463,7 +2629,7 @@ function applyObjectEditorValues() {
       toFinite(obj.density, 0.95),
     )));
     obj.bodyType = 'dynamic';
-    refreshCurrentJsonViewer();
+    finalizeObjectEditorValues(obj);
     return;
   }
   obj.x = round1(toFinite(elements.objXInput ? elements.objXInput.value : obj.x, toFinite(obj.x, 0)));
@@ -2481,7 +2647,7 @@ function applyObjectEditorValues() {
   obj.dirDeg = Math.round(toFinite(elements.objDirInput ? elements.objDirInput.value : obj.dirDeg, toFinite(obj.dirDeg, 90)));
   obj.force = round1(toFinite(elements.objForceInput ? elements.objForceInput.value : obj.force, toFinite(obj.force, 4.2)));
   obj.intervalMs = Math.round(toFinite(elements.objIntervalInput ? elements.objIntervalInput.value : obj.intervalMs, toFinite(obj.intervalMs, 1200)));
-  refreshCurrentJsonViewer();
+  finalizeObjectEditorValues(obj);
 }
 
 function reverseSelectedObjectRotation() {
@@ -5693,12 +5859,29 @@ async function applyDraftLiveNow(reason = '') {
     const shouldReset = liveApplyResetRequested === true;
     liveApplyResetRequested = false;
     const api = await waitForEngineApi(8000);
+    let restoredSlotId = '';
+    let preserveMarblesForApply = !shouldReset;
+    let preserveRunningForApply = !shouldReset;
+    if (shouldReset) {
+      const restored = await restoreSelectedSnapshotForReset(api);
+      if (restored && restored.ok) {
+        restoredSlotId = restored.slotId;
+        preserveMarblesForApply = true;
+        preserveRunningForApply = false;
+      }
+    }
     await applyDraftMapToApi(api, {
       live: true,
-      preserveMarbles: !shouldReset,
-      preserveRunning: !shouldReset,
+      preserveMarbles: preserveMarblesForApply,
+      preserveRunning: preserveRunningForApply,
       updateCandidates: false,
     });
+    if (shouldReset) {
+      if (typeof api.pause === 'function') {
+        await api.pause();
+      }
+      setPlayPauseUi(false);
+    }
     ensureEngineCanvasFill();
     syncViewZoomInputFromEngine();
     const running = readEngineRunning(api);
@@ -5706,12 +5889,16 @@ async function applyDraftLiveNow(reason = '') {
     applyViewZoomToEngine(!running);
     setCameraLock(!running);
     await syncPreviewFromDraft({
-      preserveMarbles: !shouldReset,
-      preserveRunning: !shouldReset,
+      preserveMarbles: preserveMarblesForApply,
+      preserveRunning: preserveRunningForApply,
       updateCandidates: false,
     });
     if (reason) {
-      setStatus(`실시간 적용${shouldReset ? ' (리셋)' : ''}: ${reason}`);
+      if (shouldReset && restoredSlotId) {
+        setStatus(`실시간 적용 (슬롯 ${restoredSlotId} 복귀): ${reason}`);
+      } else {
+        setStatus(`실시간 적용${shouldReset ? ' (리셋)' : ''}: ${reason}`);
+      }
     }
   } catch (error) {
     setStatus(String(error && error.message ? error.message : error), 'error');
@@ -5863,6 +6050,43 @@ function selectedSnapshotSlot() {
   return SLOT_IDS.includes(slotId) ? slotId : 'slot1';
 }
 
+function findSnapshotMetaBySlot(api, slotId) {
+  if (!api || typeof api.listSnapshots !== 'function') {
+    return null;
+  }
+  const list = api.listSnapshots();
+  if (!Array.isArray(list)) {
+    return null;
+  }
+  for (let index = 0; index < list.length; index += 1) {
+    const item = list[index];
+    if (item && String(item.slotId || '') === slotId) {
+      return item;
+    }
+  }
+  return null;
+}
+
+async function restoreSelectedSnapshotForReset(api) {
+  if (!api || typeof api.loadSnapshot !== 'function') {
+    return { ok: false, slotId: '', reason: 'snapshot api unavailable' };
+  }
+  const slotId = selectedSnapshotSlot();
+  const snapshotMeta = findSnapshotMetaBySlot(api, slotId);
+  if (!snapshotMeta) {
+    return { ok: false, slotId, reason: 'no snapshot in selected slot' };
+  }
+  const loadResult = await api.loadSnapshot(slotId, { autoResume: false });
+  if (!loadResult || loadResult.ok !== true) {
+    return {
+      ok: false,
+      slotId,
+      reason: loadResult && loadResult.reason ? loadResult.reason : 'snapshot load failed',
+    };
+  }
+  return { ok: true, slotId, meta: snapshotMeta };
+}
+
 async function loadEngineFrame() {
   if (!elements.engineFrame || !elements.engineUrlText) {
     throw new Error('엔진 프레임 요소를 찾지 못했습니다. 페이지를 새로고침하세요');
@@ -5890,6 +6114,10 @@ async function loadEngineFrame() {
       reject(new Error('엔진 iframe 로딩 실패'));
     };
   });
+  const frameWindow = getEngineFrameWindow();
+  if (frameWindow) {
+    installContextMenuGuard(frameWindow);
+  }
   startEngineCanvasFillRetry();
   setStatus('엔진 iframe 로드 완료. API 연결 대기 중...');
   const api = await waitForEngineApi(30000);
@@ -5941,6 +6169,10 @@ async function loadPreviewFrame() {
       reject(new Error('좌표창 iframe 로딩 실패'));
     };
   });
+  const previewWindow = getPreviewFrameWindow();
+  if (previewWindow) {
+    installContextMenuGuard(previewWindow);
+  }
   startPreviewCanvasFillRetry();
   const api = await waitForPreviewApi(30000);
   const initResult = await api.init(readPayload());
@@ -6073,14 +6305,7 @@ function handleMakerCanvasRightClickAction() {
 }
 
 function setupEvents() {
-  const blockContextMenu = (event) => {
-    event.preventDefault();
-    if (typeof event.stopPropagation === 'function') {
-      event.stopPropagation();
-    }
-  };
-  window.addEventListener('contextmenu', blockContextMenu);
-  document.addEventListener('contextmenu', blockContextMenu, true);
+  installContextMenuGuard(window);
 
   bindEvent(elements.marbleCountInput, 'change', () => {
     getCurrentMarbleCount();
@@ -6327,6 +6552,8 @@ function setupEvents() {
     elements.objForceInput,
     elements.objIntervalInput,
     elements.objHitDistanceInput,
+    elements.objRestitutionInput,
+    elements.objFrictionInput,
   ];
   for (let index = 0; index < autoObjectInputs.length; index += 1) {
     const field = autoObjectInputs[index];
@@ -6609,14 +6836,20 @@ function setupEvents() {
 
   bindEvent(elements.resetButton, 'click', async () => {
     await withEngineAction(async (api) => {
-      const result = await api.reset();
-      if (!result || result.ok !== true) {
-        throw new Error(result && result.reason ? result.reason : '리셋에 실패했습니다');
+      let resetMessage = '리셋이 완료되었습니다';
+      const restored = await restoreSelectedSnapshotForReset(api);
+      if (restored && restored.ok) {
+        resetMessage = `${restored.slotId} 슬롯으로 복귀했습니다`;
+      } else {
+        const result = await api.reset();
+        if (!result || result.ok !== true) {
+          throw new Error(result && result.reason ? result.reason : '리셋에 실패했습니다');
+        }
       }
       applyMarbleSizeToEngines(getCurrentMarbleSizeScale(), { silent: true });
       setPlayPauseUi(false);
       applyViewZoomToEngine(true);
-      setStatus('리셋이 완료되었습니다');
+      setStatus(resetMessage);
     });
   });
 
