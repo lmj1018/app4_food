@@ -631,6 +631,37 @@
       border: 1px solid rgba(248, 252, 255, 0.95);
       box-shadow: 0 0 0 2px rgba(182, 220, 255, 0.32);
     }
+    .tool-shape.stopwatch {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      left: 9px;
+      top: 4px;
+      background: radial-gradient(circle, rgba(255, 120, 136, 0.98) 0%, rgba(255, 73, 97, 0.96) 62%, rgba(196, 20, 48, 0.95) 100%);
+      border: 1px solid rgba(255, 206, 214, 0.94);
+      box-shadow: 0 0 0 2px rgba(255, 92, 111, 0.28);
+    }
+    .tool-shape.stopwatch::before,
+    .tool-shape.stopwatch::after {
+      content: "";
+      position: absolute;
+      background: rgba(255, 233, 238, 0.96);
+      border-radius: 2px;
+      transform-origin: bottom center;
+    }
+    .tool-shape.stopwatch::before {
+      width: 2px;
+      height: 5px;
+      left: 6px;
+      top: 2px;
+    }
+    .tool-shape.stopwatch::after {
+      width: 2px;
+      height: 4px;
+      left: 9px;
+      top: 5px;
+      transform: rotate(90deg);
+    }
     .tool-shape.hammer {
       width: 18px;
       height: 10px;
@@ -1082,6 +1113,7 @@
                 <button type="button" class="maker-tool-button" data-maker-tool="rotor"><span class="tool-icon"><span class="tool-shape rotor"></span></span><span class="tool-label">회전 바</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="black_hole"><span class="tool-icon"><span class="tool-shape black-hole"></span></span><span class="tool-label">블랙홀</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="white_hole"><span class="tool-icon"><span class="tool-shape white-hole"></span></span><span class="tool-label">화이트홀</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="stopwatch_bomb"><span class="tool-icon"><span class="tool-shape stopwatch"></span></span><span class="tool-label">스탑워치 폭탄</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="hammer"><span class="tool-icon"><span class="tool-shape hammer"></span></span><span class="tool-label">해머</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="fan"><span class="tool-icon"><span class="tool-shape fan"></span></span><span class="tool-label">선풍기</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="sticky_pad"><span class="tool-icon"><span class="tool-shape sticky"></span></span><span class="tool-label">이동 점착패드</span></button>
@@ -1107,6 +1139,7 @@
                 <option value="rotor">회전 바</option>
                 <option value="black_hole">블랙홀</option>
                 <option value="white_hole">화이트홀</option>
+                <option value="stopwatch_bomb">스탑워치 폭탄</option>
                 <option value="hammer">해머</option>
                 <option value="fan">선풍기</option>
                 <option value="sticky_pad">이동 점착패드</option>

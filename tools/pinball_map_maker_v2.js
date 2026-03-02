@@ -24,6 +24,7 @@ const OBJECT_COLOR_PRESET = {
   portal: '#b68cff',
   blackHole: '#7b55b8',
   whiteHole: '#f4fbff',
+  stopwatch: '#ff5c6f',
   hammer: '#ffa557',
   fan: '#7fd9ff',
   burst: '#5dff7a',
@@ -58,6 +59,7 @@ let mapCatalog = [];
 let workingMapJson = null;
 const editorState = {
   selectedIndex: -1,
+  selectedIndexes: [],
   pendingWallStart: null,
   pendingWallOid: '',
   pendingWallType: '',
@@ -73,6 +75,7 @@ const editorState = {
   dragState: null,
   suppressClickOnce: false,
   isMiniMapDragging: false,
+  floatingInspectorHiddenByUser: false,
 };
 
 const elements = {
@@ -180,6 +183,14 @@ function normalizeDeg(value) {
   let deg = raw % 360;
   if (deg < 0) {
     deg += 360;
+  }
+  return deg;
+}
+
+function normalizeSignedDeg(value) {
+  let deg = normalizeDeg(value);
+  if (deg > 180) {
+    deg -= 360;
   }
   return deg;
 }
@@ -733,12 +744,83 @@ function getObjects() {
   return mapJson.objects;
 }
 
+function normalizeSelectionIndexes(indexes, objectCount) {
+  const safeCount = Math.max(0, Math.floor(toFinite(objectCount, 0)));
+  const normalized = [];
+  const seen = new Set();
+  if (!Array.isArray(indexes)) {
+    return normalized;
+  }
+  for (let index = 0; index < indexes.length; index += 1) {
+    const raw = Math.floor(toFinite(indexes[index], -1));
+    if (raw < 0 || raw >= safeCount || seen.has(raw)) {
+      continue;
+    }
+    seen.add(raw);
+    normalized.push(raw);
+  }
+  return normalized;
+}
+
+function setSelectedIndexes(indexes, options = {}) {
+  const objects = getObjects();
+  const objectCount = objects.length;
+  const normalized = normalizeSelectionIndexes(indexes, objectCount);
+  let primaryIndex = Math.floor(toFinite(options.primaryIndex, editorState.selectedIndex));
+  if (primaryIndex < 0 || primaryIndex >= objectCount || !normalized.includes(primaryIndex)) {
+    primaryIndex = normalized.length > 0 ? normalized[normalized.length - 1] : -1;
+  }
+  editorState.selectedIndexes = normalized;
+  editorState.selectedIndex = primaryIndex;
+  const keepHidden = options.keepFloatingHidden === true;
+  if (!keepHidden) {
+    editorState.floatingInspectorHiddenByUser = false;
+  }
+}
+
+function setSingleSelectedIndex(index, options = {}) {
+  const safeIndex = Math.floor(toFinite(index, -1));
+  if (safeIndex < 0) {
+    setSelectedIndexes([], options);
+    return;
+  }
+  setSelectedIndexes([safeIndex], { ...options, primaryIndex: safeIndex });
+}
+
+function getSelectedIndexes() {
+  const objects = getObjects();
+  const objectCount = objects.length;
+  const normalized = normalizeSelectionIndexes(editorState.selectedIndexes, objectCount);
+  const primary = Math.floor(toFinite(editorState.selectedIndex, -1));
+  if (primary >= 0 && primary < objectCount && !normalized.includes(primary)) {
+    normalized.push(primary);
+  }
+  let nextPrimary = primary;
+  if (nextPrimary < 0 || nextPrimary >= objectCount || !normalized.includes(nextPrimary)) {
+    nextPrimary = normalized.length > 0 ? normalized[normalized.length - 1] : -1;
+  }
+  editorState.selectedIndexes = normalized;
+  editorState.selectedIndex = nextPrimary;
+  return normalized.slice();
+}
+
+function isIndexSelected(index) {
+  const safeIndex = Math.floor(toFinite(index, -1));
+  if (safeIndex < 0) {
+    return false;
+  }
+  const selected = getSelectedIndexes();
+  return selected.includes(safeIndex);
+}
+
 function buildUndoSnapshot() {
   const mapJson = getWorkingMapJson(resolveCurrentMapId());
+  const selectedIndexes = getSelectedIndexes();
   const selectedIndex = Math.floor(toFinite(editorState.selectedIndex, -1));
   const payload = {
     mapJson,
     selectedIndex,
+    selectedIndexes,
   };
   return {
     ...payload,
@@ -775,10 +857,19 @@ function undoLastChange() {
   syncStageInputsFromMap();
   const objectCount = Array.isArray(restored.objects) ? restored.objects.length : 0;
   if (objectCount <= 0) {
-    editorState.selectedIndex = -1;
+    setSelectedIndexes([]);
   } else {
+    const snapshotIndexes = normalizeSelectionIndexes(
+      Array.isArray(snapshot.selectedIndexes) ? snapshot.selectedIndexes : [],
+      objectCount,
+    );
     const rawIndex = Math.floor(toFinite(snapshot.selectedIndex, objectCount - 1));
-    editorState.selectedIndex = clamp(rawIndex, 0, objectCount - 1);
+    const primary = clamp(rawIndex, 0, objectCount - 1);
+    if (snapshotIndexes.length > 0) {
+      setSelectedIndexes(snapshotIndexes, { primaryIndex: primary });
+    } else {
+      setSingleSelectedIndex(primary);
+    }
   }
   syncObjectList();
   drawMakerCanvas();
@@ -1385,6 +1476,8 @@ function toolDisplayName(tool) {
       return '블랙홀';
     case 'white_hole':
       return '화이트홀';
+    case 'stopwatch_bomb':
+      return '스탑워치 폭탄';
     case 'hammer':
       return '해머';
     case 'fan':
@@ -1476,6 +1569,8 @@ function defaultColorForObjectType(type) {
       return OBJECT_COLOR_PRESET.blackHole;
     case 'white_hole':
       return OBJECT_COLOR_PRESET.whiteHole;
+    case 'stopwatch_bomb':
+      return OBJECT_COLOR_PRESET.stopwatch;
     case 'hammer':
       return OBJECT_COLOR_PRESET.hammer;
     case 'fan':
@@ -1563,6 +1658,7 @@ function setSelectedTool(tool) {
     'portal',
     'black_hole',
     'white_hole',
+    'stopwatch_bomb',
     'hammer',
     'fan',
     'sticky_pad',
@@ -1731,6 +1827,20 @@ function createObjectByTool(tool, x, y) {
       color: OBJECT_COLOR_PRESET.whiteHole,
     };
   }
+  if (tool === 'stopwatch_bomb') {
+    return {
+      oid: nextOid('stopwatch'),
+      type: 'stopwatch_bomb',
+      x: px,
+      y: py,
+      radius: 0.62,
+      triggerRadius: 2.2,
+      force: 4.8,
+      intervalMs: 4000,
+      restitution: 0.08,
+      color: OBJECT_COLOR_PRESET.stopwatch,
+    };
+  }
   if (tool === 'hammer') {
     return {
       oid: nextOid('hammer'),
@@ -1849,6 +1959,7 @@ function createObjectByTool(tool, x, y) {
 
 function getSelectedObject() {
   const objects = getObjects();
+  getSelectedIndexes();
   if (editorState.selectedIndex < 0 || editorState.selectedIndex >= objects.length) {
     return null;
   }
@@ -1944,7 +2055,7 @@ function populateObjectEditor() {
       elements.objDirInput.value = '';
     } else if (obj.type === 'goal_marker_image') {
       elements.objDirInput.value = '';
-    } else if (obj.type === 'black_hole' || obj.type === 'white_hole') {
+    } else if (obj.type === 'black_hole' || obj.type === 'white_hole' || obj.type === 'stopwatch_bomb') {
       elements.objDirInput.value = '';
     } else if (obj.type === 'portal') {
       elements.objDirInput.value = String(Math.round(toFinite(obj.exitDirDeg, 0)));
@@ -1961,6 +2072,8 @@ function populateObjectEditor() {
       elements.objForceInput.value = String(round2(toFinite(obj.angularVelocity, 2.2)));
     } else if (obj.type === 'goal_marker_image') {
       elements.objForceInput.value = '';
+    } else if (obj.type === 'stopwatch_bomb') {
+      elements.objForceInput.value = String(round1(toFinite(obj.force, 4.8)));
     } else if (obj.type === 'black_hole') {
       elements.objForceInput.value = String(round2(toFinite(obj.suctionForce, toFinite(obj.force, 0.55))));
     } else if (obj.type === 'white_hole') {
@@ -1978,6 +2091,8 @@ function populateObjectEditor() {
       elements.objIntervalInput.value = '';
     } else if (obj.type === 'goal_marker_image') {
       elements.objIntervalInput.value = '';
+    } else if (obj.type === 'stopwatch_bomb') {
+      elements.objIntervalInput.value = String(Math.round(toFinite(obj.intervalMs, 4000)));
     } else if (obj.type === 'black_hole' || obj.type === 'white_hole') {
       elements.objIntervalInput.value = String(Math.round(toFinite(obj.cooldownMs, 900)));
     } else if (obj.type === 'portal') {
@@ -2035,7 +2150,7 @@ function populateObjectEditor() {
     let dirLabel = '방향 각도(도)';
     if (obj.type === 'rotor') {
       dirLabel = '방향 각도(미사용)';
-    } else if (obj.type === 'goal_marker_image' || obj.type === 'black_hole' || obj.type === 'white_hole') {
+    } else if (obj.type === 'goal_marker_image' || obj.type === 'black_hole' || obj.type === 'white_hole' || obj.type === 'stopwatch_bomb') {
       dirLabel = '방향(미사용)';
     } else if (obj.type === 'portal') {
       dirLabel = '출구 각도(도)';
@@ -2054,6 +2169,8 @@ function populateObjectEditor() {
       forceLabel = '회전 속도';
     } else if (obj.type === 'goal_marker_image') {
       forceLabel = '힘(미사용)';
+    } else if (obj.type === 'stopwatch_bomb') {
+      forceLabel = '폭발 힘';
     } else if (obj.type === 'black_hole') {
       forceLabel = '흡입력';
     } else if (obj.type === 'white_hole') {
@@ -2071,6 +2188,8 @@ function populateObjectEditor() {
     let intervalLabel = '간격(ms)';
     if (obj.type === 'rotor' || obj.type === 'goal_marker_image' || obj.type === 'fan' || obj.type === 'sticky_pad') {
       intervalLabel = '간격(미사용)';
+    } else if (obj.type === 'stopwatch_bomb') {
+      intervalLabel = '폭발 간격(ms)';
     } else if (obj.type === 'black_hole' || obj.type === 'white_hole') {
       intervalLabel = '재진입 쿨다운(ms)';
     } else if (obj.type === 'portal' || obj.type === 'burst_bumper') {
@@ -2147,6 +2266,13 @@ function populateObjectEditor() {
     if (elements.objExtra2Input) elements.objExtra2Input.value = String(round1(toFinite(obj.launchImpulse, 2.9)));
     if (elements.objExtra1Label) elements.objExtra1Label.textContent = '흡입 반경';
     if (elements.objExtra2Label) elements.objExtra2Label.textContent = '출구 발사힘';
+  } else if (obj.type === 'stopwatch_bomb') {
+    if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
+    if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
+    if (elements.objExtra1Input) elements.objExtra1Input.value = String(round1(toFinite(obj.triggerRadius, toFinite(obj.radius, 0.62) + 1.2)));
+    if (elements.objExtra2Input) elements.objExtra2Input.value = String(round2(toFinite(obj.restitution, 0.08)));
+    if (elements.objExtra1Label) elements.objExtra1Label.textContent = '폭발 반경';
+    if (elements.objExtra2Label) elements.objExtra2Label.textContent = '탄성';
   } else if (obj.type === 'white_hole') {
     if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
     if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
@@ -2184,7 +2310,12 @@ function populateObjectEditor() {
     if (elements.objExtra1Label) elements.objExtra1Label.textContent = '가로 반길이';
     if (elements.objExtra2Label) elements.objExtra2Label.textContent = '세로 반길이';
   }
-  updateMakerHint(`선택됨: ${obj.oid} (${objectTypeDisplayName(obj.type)})`);
+  const selectionCount = getSelectedIndexes().length;
+  if (selectionCount > 1) {
+    updateMakerHint(`다중 선택 ${selectionCount}개 · 기준: ${obj.oid} (${objectTypeDisplayName(obj.type)})`);
+  } else {
+    updateMakerHint(`선택됨: ${obj.oid} (${objectTypeDisplayName(obj.type)})`);
+  }
   renderFloatingObjectInspector();
 }
 
@@ -2262,6 +2393,7 @@ function buildFloatingInspectorFieldDefs(obj) {
     || obj.type === 'portal'
     || obj.type === 'black_hole'
     || obj.type === 'white_hole'
+    || obj.type === 'stopwatch_bomb'
     || obj.type === 'burst_bumper'
     || obj.type === 'physics_ball') {
     pushField('objRadiusInput', readMakerLabelText(elements.objRadiusLabel, '반지름'));
@@ -2306,7 +2438,7 @@ function renderFloatingObjectInspector() {
     return;
   }
   const obj = getSelectedObject();
-  const visible = !!obj && selectedTool() === 'select';
+  const visible = !!obj && selectedTool() === 'select' && editorState.floatingInspectorHiddenByUser !== true;
   if (!visible) {
     setFloatingInspectorVisible(false);
     return;
@@ -2314,7 +2446,9 @@ function renderFloatingObjectInspector() {
   setFloatingInspectorVisible(true);
   if (elements.floatingObjectTitle) {
     const oid = String(obj.oid || 'obj');
-    elements.floatingObjectTitle.textContent = `${oid} · ${objectTypeDisplayName(obj.type)}`;
+    const selectedCount = getSelectedIndexes().length;
+    const suffix = selectedCount > 1 ? ` · ${selectedCount}개 선택` : '';
+    elements.floatingObjectTitle.textContent = `${oid} · ${objectTypeDisplayName(obj.type)}${suffix}`;
   }
   if (elements.floatingReverseButton) {
     elements.floatingReverseButton.disabled = !(supportsRotationHandle(obj) || obj.type === 'hammer' || obj.type === 'fan');
@@ -2401,16 +2535,18 @@ function syncObjectList(options = {}) {
   const objects = getObjects();
   if (!elements.objectList) {
     if (objects.length === 0) {
-      editorState.selectedIndex = -1;
+      setSelectedIndexes([]);
       populateObjectEditor();
       return;
     }
+    getSelectedIndexes();
     if (editorState.selectedIndex < 0 || editorState.selectedIndex >= objects.length) {
       if (preserveNoSelection && editorState.selectedIndex < 0) {
+        setSelectedIndexes([]);
         populateObjectEditor();
         return;
       }
-      editorState.selectedIndex = objects.length - 1;
+      setSingleSelectedIndex(objects.length - 1);
     }
     populateObjectEditor();
     return;
@@ -2435,15 +2571,16 @@ function syncObjectList(options = {}) {
     .join('');
   elements.objectList.innerHTML = `<option value="">선택 없음</option>${optionItems}`;
   if (objects.length === 0) {
-    editorState.selectedIndex = -1;
+    setSelectedIndexes([]);
     populateObjectEditor();
     return;
   }
+  getSelectedIndexes();
   if (editorState.selectedIndex < 0 || editorState.selectedIndex >= objects.length) {
     if (preserveNoSelection && editorState.selectedIndex < 0) {
-      editorState.selectedIndex = -1;
+      setSelectedIndexes([]);
     } else {
-      editorState.selectedIndex = objects.length - 1;
+      setSingleSelectedIndex(objects.length - 1);
     }
   }
   elements.objectList.value = editorState.selectedIndex >= 0 ? String(editorState.selectedIndex) : '';
@@ -2479,6 +2616,89 @@ function applyImpactTuningFromInputs(obj) {
 function finalizeObjectEditorValues(obj) {
   applyImpactTuningFromInputs(obj);
   refreshCurrentJsonViewer();
+}
+
+function sharedSyncKeysForType(type) {
+  switch (String(type || '')) {
+    case 'wall_polyline':
+      return ['color', 'restitution', 'friction'];
+    case 'wall_corridor_polyline':
+    case 'wall_corridor_segment':
+      return ['color', 'restitution', 'friction', 'gap'];
+    case 'box_block':
+      return ['color', 'width', 'height', 'rotation', 'restitution', 'friction'];
+    case 'diamond_block':
+      return ['color', 'width', 'height', 'rotation', 'restitution', 'friction'];
+    case 'rotor':
+      return ['color', 'width', 'height', 'rotation', 'angularVelocity', 'restitution', 'friction'];
+    case 'peg_circle':
+      return ['color', 'radius', 'restitution', 'friction'];
+    case 'portal':
+      return ['color', 'radius', 'triggerRadius', 'cooldownMs', 'exitDirDeg', 'exitImpulse', 'preserveVelocity', 'restitution', 'friction'];
+    case 'black_hole':
+      return ['color', 'radius', 'triggerRadius', 'suctionForce', 'cooldownMs', 'launchImpulse', 'restitution', 'friction'];
+    case 'white_hole':
+      return ['color', 'radius', 'cooldownMs', 'launchImpulse', 'restitution', 'friction'];
+    case 'stopwatch_bomb':
+      return ['color', 'radius', 'triggerRadius', 'force', 'intervalMs', 'restitution', 'friction'];
+    case 'hammer':
+      return ['color', 'width', 'height', 'dirDeg', 'force', 'intervalMs', 'triggerRadius', 'cooldownMs', 'swingDeg', 'swingDurationMs', 'hitDistance', 'doubleHit', 'restitution', 'friction'];
+    case 'fan':
+      return ['color', 'width', 'height', 'dirDeg', 'force', 'triggerRadius', 'hitDistance', 'restitution', 'friction'];
+    case 'sticky_pad':
+      return ['color', 'width', 'height', 'rotation', 'speed', 'pauseMs', 'stickyTopOnly', 'restitution', 'friction'];
+    case 'burst_bumper':
+      return ['color', 'radius', 'triggerRadius', 'restitution', 'force', 'intervalMs', 'layers', 'hpPerLayer', 'upwardBoost', 'damagePerHit', 'cooldownMs'];
+    case 'domino_block':
+      return ['color', 'width', 'height', 'rotation', 'restitution', 'density', 'friction', 'gravityScale', 'bodyType'];
+    case 'physics_ball':
+      return ['color', 'radius', 'restitution', 'density', 'friction', 'gravityScale', 'bodyType'];
+    case 'goal_marker_image':
+      return ['color', 'width', 'height', 'rotation', 'opacity', 'imageSrc'];
+    default:
+      return [];
+  }
+}
+
+function syncPrimaryValuesToSelectedPeers(primaryIndex) {
+  const selected = getSelectedIndexes();
+  if (!Array.isArray(selected) || selected.length <= 1) {
+    return;
+  }
+  const objects = getObjects();
+  if (primaryIndex < 0 || primaryIndex >= objects.length) {
+    return;
+  }
+  const primary = objects[primaryIndex];
+  if (!primary || typeof primary !== 'object') {
+    return;
+  }
+  const type = String(primary.type || '');
+  const sharedKeys = sharedSyncKeysForType(type);
+  if (sharedKeys.length <= 0) {
+    return;
+  }
+  for (let index = 0; index < selected.length; index += 1) {
+    const targetIndex = selected[index];
+    if (targetIndex === primaryIndex || targetIndex < 0 || targetIndex >= objects.length) {
+      continue;
+    }
+    const target = objects[targetIndex];
+    if (!target || typeof target !== 'object' || String(target.type || '') !== type) {
+      continue;
+    }
+    for (let keyIndex = 0; keyIndex < sharedKeys.length; keyIndex += 1) {
+      const key = sharedKeys[keyIndex];
+      if (Object.prototype.hasOwnProperty.call(primary, key)) {
+        target[key] = deepClone(primary[key]);
+      } else {
+        delete target[key];
+      }
+    }
+    if (type === 'domino_block' || type === 'physics_ball') {
+      target.bodyType = 'dynamic';
+    }
+  }
 }
 
 function applyObjectEditorValues() {
@@ -2619,6 +2839,35 @@ function applyObjectEditorValues() {
     if (elements.objForceInput && String(elements.objForceInput.value || '').trim()) {
       obj.launchImpulse = round1(Math.max(0.1, toFinite(elements.objForceInput.value, obj.launchImpulse)));
     }
+    finalizeObjectEditorValues(obj);
+    return;
+  }
+  if (obj.type === 'stopwatch_bomb') {
+    obj.x = round1(toFinite(elements.objXInput ? elements.objXInput.value : obj.x, toFinite(obj.x, 0)));
+    obj.y = round1(toFinite(elements.objYInput ? elements.objYInput.value : obj.y, toFinite(obj.y, 0)));
+    obj.radius = round1(Math.max(0.12, toFinite(
+      elements.objRadiusInput ? elements.objRadiusInput.value : obj.radius,
+      toFinite(obj.radius, 0.62),
+    )));
+    obj.triggerRadius = round1(Math.max(
+      toFinite(obj.radius, 0.62) + 0.2,
+      toFinite(
+        elements.objExtra1Input ? elements.objExtra1Input.value : obj.triggerRadius,
+        toFinite(obj.triggerRadius, toFinite(obj.radius, 0.62) + 1.2),
+      ),
+    ));
+    obj.restitution = round2(clamp(toFinite(
+      elements.objExtra2Input ? elements.objExtra2Input.value : obj.restitution,
+      toFinite(obj.restitution, 0.08),
+    ), 0, 8));
+    obj.force = round1(Math.max(0.1, toFinite(
+      elements.objForceInput ? elements.objForceInput.value : obj.force,
+      toFinite(obj.force, 4.8),
+    )));
+    obj.intervalMs = Math.round(Math.max(120, toFinite(
+      elements.objIntervalInput ? elements.objIntervalInput.value : obj.intervalMs,
+      toFinite(obj.intervalMs, 4000),
+    )));
     finalizeObjectEditorValues(obj);
     return;
   }
@@ -2779,78 +3028,142 @@ function applyObjectEditorValues() {
 }
 
 function reverseSelectedObjectRotation() {
-  const obj = getSelectedObject();
-  if (!obj) {
+  const objects = getObjects();
+  const selected = getSelectedIndexes();
+  if (selected.length <= 0) {
     throw new Error('회전을 반전할 오브젝트를 먼저 선택하세요');
   }
-  if (obj.type === 'rotor') {
-    const angularVelocity = toFinite(obj.angularVelocity, 2.2);
-    const normalized = Math.abs(angularVelocity) < 0.01 ? 2.2 : angularVelocity;
-    obj.angularVelocity = round2(-normalized);
-    refreshCurrentJsonViewer();
-    return `회전 바 반전 완료 (angularVelocity=${obj.angularVelocity})`;
+  let lastMessage = '회전 반전 완료';
+  let changedCount = 0;
+  for (let index = 0; index < selected.length; index += 1) {
+    const selectedIndex = selected[index];
+    const obj = objects[selectedIndex];
+    if (!obj || typeof obj !== 'object') {
+      continue;
+    }
+    if (obj.type === 'rotor') {
+      const angularVelocity = toFinite(obj.angularVelocity, 2.2);
+      const normalized = Math.abs(angularVelocity) < 0.01 ? 2.2 : angularVelocity;
+      obj.angularVelocity = round2(-normalized);
+      lastMessage = `회전 바 반전 완료 (angularVelocity=${obj.angularVelocity})`;
+      changedCount += 1;
+      continue;
+    }
+    if (obj.type === 'hammer') {
+      obj.dirDeg = round1(normalizeDeg(toFinite(obj.dirDeg, 90) + 180));
+      lastMessage = `해머 타격 방향 반전 완료 (dirDeg=${obj.dirDeg})`;
+      changedCount += 1;
+      continue;
+    }
+    if (obj.type === 'fan') {
+      obj.dirDeg = round1(normalizeDeg(toFinite(obj.dirDeg, 0) + 180));
+      lastMessage = `선풍기 방향 반전 완료 (dirDeg=${obj.dirDeg})`;
+      changedCount += 1;
+      continue;
+    }
+    obj.rotation = round1(normalizeDeg(-toFinite(obj.rotation, 0)));
+    changedCount += 1;
   }
-  if (obj.type === 'hammer') {
-    obj.dirDeg = round1(normalizeDeg(toFinite(obj.dirDeg, 90) + 180));
-    refreshCurrentJsonViewer();
-    return `해머 타격 방향 반전 완료 (dirDeg=${obj.dirDeg})`;
-  }
-  if (obj.type === 'fan') {
-    obj.dirDeg = round1(normalizeDeg(toFinite(obj.dirDeg, 0) + 180));
-    refreshCurrentJsonViewer();
-    return `선풍기 방향 반전 완료 (dirDeg=${obj.dirDeg})`;
-  }
-  obj.rotation = round1(normalizeDeg(-toFinite(obj.rotation, 0)));
   refreshCurrentJsonViewer();
-  return '회전 반전 완료';
+  if (changedCount > 1) {
+    return `선택 오브젝트 ${changedCount}개 반전 완료`;
+  }
+  return lastMessage;
 }
 
 function duplicateSelectedObject() {
-  const obj = getSelectedObject();
-  if (!obj) {
+  const objects = getObjects();
+  const selected = getSelectedIndexes();
+  if (selected.length <= 0) {
     throw new Error('복제할 오브젝트를 먼저 선택하세요');
   }
-  const copy = deepClone(obj);
-  copy.oid = nextOid(copy.type || 'obj');
-  if (copy.type === 'wall_corridor_polyline' || copy.type === 'wall_corridor_segment') {
-    copy.gap = corridorGapForObject(copy, getCorridorGapInput());
+  const ordered = selected.slice().sort((a, b) => a - b);
+  const newIndexes = [];
+  for (let index = 0; index < ordered.length; index += 1) {
+    const selectedIndex = ordered[index];
+    if (selectedIndex < 0 || selectedIndex >= objects.length) {
+      continue;
+    }
+    const obj = objects[selectedIndex];
+    if (!obj || typeof obj !== 'object') {
+      continue;
+    }
+    const copy = deepClone(obj);
+    copy.oid = nextOid(copy.type || 'obj');
+    if (copy.type === 'wall_corridor_polyline' || copy.type === 'wall_corridor_segment') {
+      copy.gap = corridorGapForObject(copy, getCorridorGapInput());
+    }
+    objects.push(copy);
+    newIndexes.push(objects.length - 1);
   }
-  const objects = getObjects();
-  objects.push(copy);
-  editorState.selectedIndex = objects.length - 1;
+  if (newIndexes.length > 0) {
+    setSelectedIndexes(newIndexes, { primaryIndex: newIndexes[newIndexes.length - 1] });
+  }
   refreshCurrentJsonViewer();
+  return newIndexes.length;
 }
 
 function deleteSelectedObject() {
   const objects = getObjects();
-  if (editorState.selectedIndex < 0 || editorState.selectedIndex >= objects.length) {
+  const selected = getSelectedIndexes();
+  if (selected.length <= 0) {
     throw new Error('삭제할 오브젝트를 먼저 선택하세요');
   }
-  const removed = objects.splice(editorState.selectedIndex, 1)[0];
-  if (removed && isPolylineObject(removed) && String(removed.oid || '') === editorState.pendingWallOid) {
+  const sorted = selected.slice().sort((a, b) => b - a);
+  const removedPortalIds = new Set();
+  let removedWallPending = false;
+  let removedHammerPending = false;
+  let smallestIndex = Infinity;
+  for (let order = 0; order < sorted.length; order += 1) {
+    const removeIndex = sorted[order];
+    if (removeIndex < 0 || removeIndex >= objects.length) {
+      continue;
+    }
+    smallestIndex = Math.min(smallestIndex, removeIndex);
+    const removed = objects.splice(removeIndex, 1)[0];
+    if (!removed) {
+      continue;
+    }
+    if (isPolylineObject(removed) && String(removed.oid || '') === editorState.pendingWallOid) {
+      removedWallPending = true;
+    }
+    if (removed.type === 'portal') {
+      removedPortalIds.add(String(removed.oid || '').trim());
+    }
+    if (String(removed.oid || '') === editorState.pendingHammerOid) {
+      removedHammerPending = true;
+    }
+  }
+  if (removedWallPending) {
     resetPendingWall();
   }
-  if (removed && removed.type === 'portal') {
-    const removedOid = String(removed.oid || '').trim();
+  if (removedHammerPending) {
+    resetPendingHammer();
+  }
+  if (removedPortalIds.size > 0) {
     for (let index = 0; index < objects.length; index += 1) {
       const obj = objects[index];
-      if (obj && obj.type === 'portal' && String(obj.pair || '') === removedOid) {
+      if (!obj || obj.type !== 'portal') {
+        continue;
+      }
+      const pair = String(obj.pair || '').trim();
+      if (removedPortalIds.has(pair)) {
         obj.pair = '';
       }
     }
-    if (editorState.pendingPortalOid === removedOid) {
+    if (removedPortalIds.has(String(editorState.pendingPortalOid || '').trim())) {
       editorState.pendingPortalOid = '';
     }
   }
-  if (removed && String(removed.oid || '') === editorState.pendingHammerOid) {
-    resetPendingHammer();
-  }
   if (objects.length === 0) {
-    editorState.selectedIndex = -1;
+    setSelectedIndexes([]);
     refreshCurrentJsonViewer();
     return;
   }
-  editorState.selectedIndex = Math.min(editorState.selectedIndex, objects.length - 1);
+  const nextIndex = Number.isFinite(smallestIndex)
+    ? clamp(smallestIndex, 0, objects.length - 1)
+    : objects.length - 1;
+  setSingleSelectedIndex(nextIndex);
   refreshCurrentJsonViewer();
 }
 
@@ -2863,11 +3176,15 @@ function queueObjectLiveDraftApply(reason = '', options = {}) {
 
 function runApplySelectedObjectValuesAction(options = {}) {
   const trackUndo = options.trackUndo !== false;
+  const preserveEditorState = options.preserveEditorState === true;
   if (trackUndo) {
     rememberUndoState(options.undoReason || '오브젝트 값 수정');
   }
   applyObjectEditorValues();
-  syncObjectList();
+  syncPrimaryValuesToSelectedPeers(editorState.selectedIndex);
+  if (!preserveEditorState) {
+    syncObjectList();
+  }
   queueObjectLiveDraftApply(options.liveReason || '오브젝트 수정');
   drawMakerCanvas();
   if (options.silentStatus !== true) {
@@ -2887,11 +3204,11 @@ function runReverseSelectedObjectAction() {
 
 function runDuplicateSelectedObjectAction() {
   rememberUndoState('오브젝트 복제');
-  duplicateSelectedObject();
+  const count = duplicateSelectedObject();
   syncObjectList();
   queueObjectLiveDraftApply('오브젝트 복제');
   drawMakerCanvas();
-  setStatus('선택 오브젝트 복제 완료');
+  setStatus(count > 1 ? `선택 오브젝트 ${count}개 복제 완료` : '선택 오브젝트 복제 완료');
 }
 
 function runDeleteSelectedObjectAction(reason = '오브젝트 삭제', statusMessage = '선택 오브젝트 삭제 완료') {
@@ -2903,13 +3220,17 @@ function runDeleteSelectedObjectAction(reason = '오브젝트 삭제', statusMes
   setStatus(statusMessage);
 }
 
-function applyFloatingInspectorField(sourceKey, value) {
+function applyFloatingInspectorField(sourceKey, value, options = {}) {
   const source = elements[sourceKey];
   if (!source) {
     return;
   }
   source.value = String(value ?? '');
-  runApplySelectedObjectValuesAction({ trackUndo: true, silentStatus: true });
+  runApplySelectedObjectValuesAction({
+    trackUndo: options.trackUndo !== false,
+    silentStatus: true,
+    preserveEditorState: options.preserveEditorState === true,
+  });
 }
 
 function runApplyStageValuesAction(options = {}) {
@@ -2973,7 +3294,7 @@ function scheduleAutoStageApply(reason = '스테이지 자동 반영') {
 function clearAllObjects() {
   const mapJson = getMutableMap();
   mapJson.objects = [];
-  editorState.selectedIndex = -1;
+  setSelectedIndexes([]);
   resetPendingWall();
   resetPendingPortal();
   resetPendingHammer();
@@ -3221,7 +3542,7 @@ function drawMiniMap(mainLayout = null) {
     if (!obj || typeof obj !== 'object') {
       continue;
     }
-    const selected = index === editorState.selectedIndex;
+    const selected = isIndexSelected(index);
     if (!selected && isBoundaryWallObject(obj)) {
       continue;
     }
@@ -3261,6 +3582,7 @@ function drawMiniMap(mainLayout = null) {
       || obj.type === 'portal'
       || obj.type === 'black_hole'
       || obj.type === 'white_hole'
+      || obj.type === 'stopwatch_bomb'
       || obj.type === 'burst_bumper'
       || obj.type === 'physics_ball') {
       const center = worldToMiniMap(layout, obj.x, obj.y);
@@ -3613,6 +3935,7 @@ function getCircleHandlesWorld(obj) {
     && type !== 'portal'
     && type !== 'black_hole'
     && type !== 'white_hole'
+    && type !== 'stopwatch_bomb'
     && type !== 'burst_bumper'
     && type !== 'physics_ball') {
     return [];
@@ -3623,7 +3946,7 @@ function getCircleHandlesWorld(obj) {
   const handles = [
     { kind: 'radius', x: round1(cx + radius), y: round1(cy) },
   ];
-  if (type === 'portal' || type === 'black_hole' || type === 'burst_bumper') {
+  if (type === 'portal' || type === 'black_hole' || type === 'burst_bumper' || type === 'stopwatch_bomb') {
     const trigger = Math.max(radius + 0.05, toFinite(obj.triggerRadius, radius + 0.45));
     handles.push({ kind: 'trigger_radius', x: round1(cx), y: round1(cy - trigger) });
   }
@@ -3903,6 +4226,7 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
     || obj.type === 'portal'
     || obj.type === 'black_hole'
     || obj.type === 'white_hole'
+    || obj.type === 'stopwatch_bomb'
     || obj.type === 'burst_bumper'
     || obj.type === 'physics_ball') {
     const radius = Math.max(0.08, toFinite(obj.radius, 0.6)) * layout.scale;
@@ -3929,15 +4253,30 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
       ctx.strokeStyle = selected ? '#ffd44d' : 'rgba(255, 169, 120, 0.9)';
       ctx.lineWidth = selected ? 2.2 : 1.5;
       ctx.stroke();
-    } else if (obj.type === 'portal' || obj.type === 'black_hole') {
+    } else if (obj.type === 'portal' || obj.type === 'black_hole' || obj.type === 'stopwatch_bomb') {
       const triggerRadius = Math.max(0.18, toFinite(obj.triggerRadius, toFinite(obj.radius, 0.6) + 0.45)) * layout.scale;
       ctx.beginPath();
       ctx.arc(center.x, center.y, triggerRadius, 0, Math.PI * 2);
       ctx.strokeStyle = selected
         ? '#ffd44d'
-        : (obj.type === 'black_hole' ? 'rgba(187, 150, 240, 0.95)' : 'rgba(197, 158, 255, 0.92)');
+        : (obj.type === 'black_hole'
+          ? 'rgba(187, 150, 240, 0.95)'
+          : (obj.type === 'stopwatch_bomb' ? 'rgba(255, 122, 136, 0.92)' : 'rgba(197, 158, 255, 0.92)'));
       ctx.lineWidth = selected ? 2 : 1.4;
       ctx.stroke();
+    }
+    if (obj.type === 'stopwatch_bomb') {
+      const handLength = radius * 0.5;
+      ctx.save();
+      ctx.strokeStyle = selected ? '#ffd44d' : '#ffe7ea';
+      ctx.lineWidth = Math.max(1.2, radius * 0.12);
+      ctx.beginPath();
+      ctx.moveTo(center.x, center.y);
+      ctx.lineTo(center.x, center.y - handLength);
+      ctx.moveTo(center.x, center.y);
+      ctx.lineTo(center.x + handLength * 0.58, center.y);
+      ctx.stroke();
+      ctx.restore();
     }
     if (selected) {
       drawRingHandle(ctx, center.x, center.y, 5.1, {
@@ -4227,6 +4566,7 @@ function drawCreateDragPreview(ctx, layout, drag) {
     || tool === 'portal'
     || tool === 'black_hole'
     || tool === 'white_hole'
+    || tool === 'stopwatch_bomb'
     || tool === 'burst_bumper'
     || tool === 'physics_ball') {
     const center = worldToCanvas(layout, start.x, start.y);
@@ -4239,7 +4579,7 @@ function drawCreateDragPreview(ctx, layout, drag) {
     ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
-    if (tool === 'portal' || tool === 'black_hole' || tool === 'burst_bumper') {
+    if (tool === 'portal' || tool === 'black_hole' || tool === 'burst_bumper' || tool === 'stopwatch_bomb') {
       const trigger = (radiusWorld + 0.45) * layout.scale;
       ctx.setLineDash([6, 4]);
       ctx.beginPath();
@@ -4458,7 +4798,7 @@ function drawMakerCanvas() {
 
   const objects = getObjects();
   for (let index = 0; index < objects.length; index += 1) {
-    drawObjectOnCanvas(ctx, layout, objects[index], index === editorState.selectedIndex);
+    drawObjectOnCanvas(ctx, layout, objects[index], isIndexSelected(index));
   }
 
   if (editorState.pendingWallStart) {
@@ -4753,11 +5093,28 @@ function beginMoveDrag(index, point) {
   if (index < 0 || index >= objects.length) {
     return false;
   }
+  const selectedIndexes = getSelectedIndexes();
+  const moveIndices = selectedIndexes.includes(index) ? selectedIndexes : [index];
+  const moveEntries = [];
+  for (let moveIndex = 0; moveIndex < moveIndices.length; moveIndex += 1) {
+    const targetIndex = moveIndices[moveIndex];
+    const targetObj = objects[targetIndex];
+    if (!targetObj) {
+      continue;
+    }
+    const targetAnchor = getObjectAnchorWorld(targetObj);
+    moveEntries.push({
+      index: targetIndex,
+      anchorX: targetAnchor.x,
+      anchorY: targetAnchor.y,
+    });
+  }
   const obj = objects[index];
   const anchor = getObjectAnchorWorld(obj);
   editorState.dragState = {
     type: 'move',
     index,
+    moveEntries,
     offsetX: round2(point.x - anchor.x),
     offsetY: round2(point.y - anchor.y),
     anchorX: anchor.x,
@@ -5042,6 +5399,7 @@ function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
       || tool === 'portal'
       || tool === 'black_hole'
       || tool === 'white_hole'
+      || tool === 'stopwatch_bomb'
       || tool === 'burst_bumper'
       || tool === 'physics_ball'
       || tool === 'box_block'
@@ -5174,6 +5532,7 @@ function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
     || tool === 'portal'
     || tool === 'black_hole'
     || tool === 'white_hole'
+    || tool === 'stopwatch_bomb'
     || tool === 'burst_bumper'
     || tool === 'physics_ball') {
     const created = createObjectByTool(tool, start.x, start.y);
@@ -5184,12 +5543,126 @@ function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
     created.y = round1(start.y);
     const nextRadius = round1(Math.max(0.08, distance));
     created.radius = nextRadius;
-    if (tool === 'portal' || tool === 'black_hole' || tool === 'burst_bumper') {
+    if (tool === 'portal' || tool === 'black_hole' || tool === 'burst_bumper' || tool === 'stopwatch_bomb') {
       created.triggerRadius = round1(Math.max(nextRadius + 0.45, toFinite(created.triggerRadius, nextRadius + 0.45)));
     }
     return created;
   }
   return createObjectByTool(tool, end.x, end.y);
+}
+
+function canResizeByBoxHandle(obj) {
+  if (!obj || typeof obj !== 'object') {
+    return false;
+  }
+  const type = String(obj.type || '');
+  return type === 'box_block'
+    || type === 'diamond_block'
+    || type === 'hammer'
+    || type === 'fan'
+    || type === 'sticky_pad'
+    || type === 'domino_block'
+    || type === 'goal_marker_image';
+}
+
+function canResizeByCircleHandle(obj) {
+  if (!obj || typeof obj !== 'object') {
+    return false;
+  }
+  const type = String(obj.type || '');
+  return type === 'peg_circle'
+    || type === 'portal'
+    || type === 'black_hole'
+    || type === 'white_hole'
+    || type === 'stopwatch_bomb'
+    || type === 'burst_bumper'
+    || type === 'physics_ball';
+}
+
+function canResizeByTriggerHandle(obj) {
+  if (!obj || typeof obj !== 'object') {
+    return false;
+  }
+  const type = String(obj.type || '');
+  return type === 'portal'
+    || type === 'black_hole'
+    || type === 'burst_bumper'
+    || type === 'stopwatch_bomb';
+}
+
+function applyMultiResizeFromPrimary(primaryIndex, dragType, beforeValue, afterValue, options = {}) {
+  const selected = getSelectedIndexes();
+  if (selected.length <= 1) {
+    return;
+  }
+  const objects = getObjects();
+  const ratio = Math.max(0.0001, toFinite(beforeValue, 0.0001));
+  const scale = Math.max(0.0001, toFinite(afterValue, ratio)) / ratio;
+  for (let index = 0; index < selected.length; index += 1) {
+    const targetIndex = selected[index];
+    if (targetIndex === primaryIndex || targetIndex < 0 || targetIndex >= objects.length) {
+      continue;
+    }
+    const obj = objects[targetIndex];
+    if (!obj || typeof obj !== 'object') {
+      continue;
+    }
+    if (dragType === 'radius') {
+      if (!canResizeByCircleHandle(obj)) {
+        continue;
+      }
+      const prevRadius = Math.max(0.08, toFinite(obj.radius, 0.6));
+      const nextRadius = Math.max(0.08, prevRadius * scale);
+      obj.radius = round1(nextRadius);
+      if (canResizeByTriggerHandle(obj)) {
+        const trigger = Math.max(
+          nextRadius + 0.05,
+          Math.max(nextRadius + 0.45, toFinite(obj.triggerRadius, nextRadius + 0.45)) * scale,
+        );
+        obj.triggerRadius = round1(trigger);
+      }
+      continue;
+    }
+    if (dragType === 'trigger_radius') {
+      if (!canResizeByTriggerHandle(obj)) {
+        continue;
+      }
+      const minRadius = Math.max(toFinite(obj.radius, 0.6) + 0.05, 0.2);
+      const prevTrigger = Math.max(minRadius, toFinite(obj.triggerRadius, minRadius));
+      obj.triggerRadius = round1(Math.max(minRadius, prevTrigger * scale));
+      continue;
+    }
+    if (dragType === 'size_x' || dragType === 'size_y') {
+      if (!canResizeByBoxHandle(obj)) {
+        continue;
+      }
+      if (dragType === 'size_x') {
+        obj.width = round1(Math.max(0.08, toFinite(obj.width, 1.2) * scale));
+      } else {
+        obj.height = round1(Math.max(0.05, toFinite(obj.height, 0.2) * scale));
+      }
+      if (obj.type === 'diamond_block') {
+        const half = round1(Math.max(0.12, Math.max(toFinite(obj.width, 0.12), toFinite(obj.height, 0.12))));
+        obj.width = half;
+        obj.height = half;
+      } else if (obj.type === 'fan') {
+        const baseHalfSize = Math.max(toFinite(obj.width, 0.12), toFinite(obj.height, 0.08));
+        obj.triggerRadius = round1(Math.max(0.35, baseHalfSize + 0.35));
+        obj.hitDistance = round1(Math.max(0.5, baseHalfSize * 2.8));
+      }
+      continue;
+    }
+    if (dragType === 'hammer_dir') {
+      if (obj.type !== 'hammer' && obj.type !== 'fan') {
+        continue;
+      }
+      const dirDelta = toFinite(options.dirDelta, 0);
+      const distanceScale = Math.max(0.01, toFinite(options.distanceScale, 1));
+      obj.dirDeg = round1(normalizeDeg(toFinite(obj.dirDeg, obj.type === 'fan' ? 0 : 90) + dirDelta));
+      obj.rotation = obj.dirDeg;
+      obj.hitDistance = round1(clamp(toFinite(obj.hitDistance, obj.type === 'fan' ? 2.8 : 0.95) * distanceScale, 0.2, 24));
+    }
+  }
 }
 
 function updateObjectByDrag(point, event = null, rawPoint = null) {
@@ -5287,27 +5760,32 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
       || obj.type === 'portal'
       || obj.type === 'black_hole'
       || obj.type === 'white_hole'
+      || obj.type === 'stopwatch_bomb'
       || obj.type === 'burst_bumper'
       || obj.type === 'physics_ball') {
+      const beforeRadius = Math.max(0.08, toFinite(obj.radius, 0.6));
       const cx = toFinite(obj.x, 0);
       const cy = toFinite(obj.y, 0);
       const nextRadius = Math.max(0.08, Math.hypot(point.x - cx, point.y - cy));
       obj.radius = round1(nextRadius);
-      if (obj.type === 'portal' || obj.type === 'black_hole' || obj.type === 'burst_bumper') {
+      if (obj.type === 'portal' || obj.type === 'black_hole' || obj.type === 'burst_bumper' || obj.type === 'stopwatch_bomb') {
         obj.triggerRadius = round1(Math.max(nextRadius + 0.05, toFinite(obj.triggerRadius, nextRadius + 0.45)));
       }
+      applyMultiResizeFromPrimary(index, 'radius', beforeRadius, obj.radius);
       drag.moved = true;
       return true;
     }
     return false;
   }
   if (drag.type === 'trigger_radius') {
-    if (obj.type === 'portal' || obj.type === 'black_hole' || obj.type === 'burst_bumper') {
+    if (obj.type === 'portal' || obj.type === 'black_hole' || obj.type === 'burst_bumper' || obj.type === 'stopwatch_bomb') {
+      const beforeTrigger = Math.max(0.2, toFinite(obj.triggerRadius, Math.max(toFinite(obj.radius, 0.6) + 0.05, 0.2)));
       const cx = toFinite(obj.x, 0);
       const cy = toFinite(obj.y, 0);
       const minRadius = Math.max(toFinite(obj.radius, 0.6) + 0.05, 0.2);
       const nextTrigger = Math.max(minRadius, Math.hypot(point.x - cx, point.y - cy));
       obj.triggerRadius = round1(nextTrigger);
+      applyMultiResizeFromPrimary(index, 'trigger_radius', beforeTrigger, obj.triggerRadius);
       drag.moved = true;
       return true;
     }
@@ -5333,11 +5811,15 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
       const vx = point.x - cx;
       const vy = point.y - cy;
       if (drag.type === 'size_x') {
+        const beforeWidth = Math.max(0.08, toFinite(obj.width, 1.2));
         const proj = Math.abs(vx * axisX.x + vy * axisX.y);
         obj.width = round1(Math.max(0.08, proj));
+        applyMultiResizeFromPrimary(index, 'size_x', beforeWidth, obj.width);
       } else {
+        const beforeHeight = Math.max(0.05, toFinite(obj.height, 0.2));
         const proj = Math.abs(vx * axisY.x + vy * axisY.y);
         obj.height = round1(Math.max(0.05, proj));
+        applyMultiResizeFromPrimary(index, 'size_y', beforeHeight, obj.height);
       }
       if (type === 'diamond_block') {
         const half = drag.type === 'size_x'
@@ -5359,10 +5841,18 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
     if (obj.type !== 'hammer' && obj.type !== 'fan') {
       return false;
     }
+    const beforeDir = toFinite(obj.dirDeg, obj.type === 'fan' ? 0 : 90);
+    const beforeDistance = Math.max(0.2, toFinite(obj.hitDistance, obj.type === 'fan' ? 2.8 : 0.95));
     const updated = setHammerDirectionAndDistance(obj, point, !!(event && event.shiftKey));
     if (!updated) {
       return false;
     }
+    const dirDelta = normalizeSignedDeg(toFinite(obj.dirDeg, beforeDir) - beforeDir);
+    const distanceScale = Math.max(0.01, toFinite(obj.hitDistance, beforeDistance) / Math.max(0.01, beforeDistance));
+    applyMultiResizeFromPrimary(index, 'hammer_dir', beforeDistance, obj.hitDistance, {
+      dirDelta,
+      distanceScale,
+    });
     drag.moved = true;
     return true;
   }
@@ -5422,7 +5912,27 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
         y: clamp(toFinite(snapped.y, target.y), 0, goalY),
       };
     }
-    moveObjectToWorld(obj, round1(target.x), round1(target.y));
+    const moveEntries = Array.isArray(drag.moveEntries) && drag.moveEntries.length > 0
+      ? drag.moveEntries
+      : [{ index, anchorX: toFinite(drag.anchorX, target.x), anchorY: toFinite(drag.anchorY, target.y) }];
+    const primaryAnchorX = toFinite(drag.anchorX, target.x);
+    const primaryAnchorY = toFinite(drag.anchorY, target.y);
+    const deltaX = round1(target.x - primaryAnchorX);
+    const deltaY = round1(target.y - primaryAnchorY);
+    for (let entryIndex = 0; entryIndex < moveEntries.length; entryIndex += 1) {
+      const entry = moveEntries[entryIndex];
+      const targetIndex = Math.floor(toFinite(entry && entry.index, -1));
+      if (targetIndex < 0 || targetIndex >= objects.length) {
+        continue;
+      }
+      const targetObj = objects[targetIndex];
+      if (!targetObj) {
+        continue;
+      }
+      const nextX = clamp(toFinite(entry && entry.anchorX, 0) + deltaX, 0, WORLD_WIDTH);
+      const nextY = clamp(toFinite(entry && entry.anchorY, 0) + deltaY, 0, goalY);
+      moveObjectToWorld(targetObj, round1(nextX), round1(nextY));
+    }
     drag.moved = true;
     return true;
   }
@@ -5452,7 +5962,7 @@ function finishDrag() {
     if (created && typeof created === 'object') {
       const objects = getObjects();
       objects.push(created);
-      editorState.selectedIndex = objects.length - 1;
+      setSingleSelectedIndex(objects.length - 1);
       if (tool === 'portal') {
         const firstPortalOid = String(editorState.pendingPortalOid || '').trim();
         if (!firstPortalOid) {
@@ -5576,7 +6086,7 @@ function handleMakerCanvasPointerDown(event) {
           ? '선풍기 방향 설정 시작'
           : (directionalType === 'sticky_pad' ? '점착패드 경로 설정 시작' : '해머 타격 설정 시작'),
       );
-      editorState.selectedIndex = index;
+      setSingleSelectedIndex(index);
       editorState.dragState = {
         type: 'hammer_target',
         index,
@@ -5597,6 +6107,7 @@ function handleMakerCanvasPointerDown(event) {
     }
     resetPendingHammer();
   }
+  getSelectedIndexes();
   const selectedIndex = editorState.selectedIndex;
   const selectedHandle = findSelectedHandle(point, layout);
   if (selectedIndex >= 0 && selectedHandle) {
@@ -5630,15 +6141,31 @@ function handleMakerCanvasPointerDown(event) {
   }
   if (tool === 'select') {
     const nearestIndex = findNearestObjectIndex(point.x, point.y);
-    editorState.selectedIndex = nearestIndex;
+    if (nearestIndex >= 0) {
+      if (event.shiftKey) {
+        const selected = getSelectedIndexes();
+        if (!selected.includes(nearestIndex)) {
+          selected.push(nearestIndex);
+        }
+        setSelectedIndexes(selected, { primaryIndex: nearestIndex });
+      } else {
+        setSingleSelectedIndex(nearestIndex);
+      }
+      editorState.floatingInspectorHiddenByUser = false;
+    } else if (!event.shiftKey) {
+      setSelectedIndexes([], { keepFloatingHidden: true });
+    }
     syncObjectList({ preserveNoSelection: true });
     if (nearestIndex >= 0) {
       rememberUndoState('오브젝트 이동 시작');
       beginMoveDrag(nearestIndex, point);
       editorState.suppressClickOnce = true;
-      updateMakerHint('오브젝트 드래그 이동중');
+      const selectedCount = getSelectedIndexes().length;
+      updateMakerHint(selectedCount > 1 ? `${selectedCount}개 오브젝트 그룹 이동중` : '오브젝트 드래그 이동중');
     } else {
-      updateMakerHint('선택 해제됨');
+      if (!event.shiftKey) {
+        updateMakerHint('선택 해제됨');
+      }
     }
     drawMakerCanvas();
     return;
@@ -5762,7 +6289,7 @@ function addObjectAt(tool, x, y, options = {}) {
       };
       objects.push(created);
       editorState.pendingWallOid = created.oid;
-      editorState.selectedIndex = objects.length - 1;
+      setSingleSelectedIndex(objects.length - 1);
     } else {
       const target = objects.find((item) => item && item.oid === editorState.pendingWallOid);
       if (!target || !isPolylineObject(target)) {
@@ -5774,7 +6301,7 @@ function addObjectAt(tool, x, y, options = {}) {
         if (targetWall.type === 'wall_corridor_polyline' || targetWall.type === 'wall_corridor_segment') {
           targetWall.gap = corridorGapForObject(targetWall, getCorridorGapInput());
         }
-        editorState.selectedIndex = objects.findIndex((item) => item === targetWall);
+        setSingleSelectedIndex(objects.findIndex((item) => item === targetWall));
       } else {
         const created = {
           oid: wallType === 'wall_corridor_polyline' ? nextOid('corridor') : nextOid('wall'),
@@ -5785,7 +6312,7 @@ function addObjectAt(tool, x, y, options = {}) {
         };
         objects.push(created);
         editorState.pendingWallOid = created.oid;
-        editorState.selectedIndex = objects.length - 1;
+        setSingleSelectedIndex(objects.length - 1);
       }
     }
     editorState.pendingWallStart = { x: endPoint.x, y: endPoint.y };
@@ -5796,7 +6323,7 @@ function addObjectAt(tool, x, y, options = {}) {
       return;
     }
     objects.push(created);
-    editorState.selectedIndex = objects.length - 1;
+    setSingleSelectedIndex(objects.length - 1);
     const firstPortalOid = String(editorState.pendingPortalOid || '').trim();
     if (!firstPortalOid) {
       editorState.pendingPortalOid = created.oid;
@@ -5833,7 +6360,7 @@ function addObjectAt(tool, x, y, options = {}) {
     }
   }
   if (!isPolylineTool(tool)) {
-    editorState.selectedIndex = objects.length - 1;
+    setSingleSelectedIndex(objects.length - 1);
   }
   syncObjectList();
   refreshCurrentJsonViewer();
@@ -5852,9 +6379,23 @@ function handleMakerCanvasClick(event) {
   }
   const tool = selectedTool();
   if (tool === 'select') {
-    editorState.selectedIndex = findNearestObjectIndex(point.x, point.y);
+    const nearestIndex = findNearestObjectIndex(point.x, point.y);
+    if (nearestIndex >= 0) {
+      if (event.shiftKey) {
+        const selected = getSelectedIndexes();
+        if (!selected.includes(nearestIndex)) {
+          selected.push(nearestIndex);
+        }
+        setSelectedIndexes(selected, { primaryIndex: nearestIndex });
+      } else {
+        setSingleSelectedIndex(nearestIndex);
+      }
+      editorState.floatingInspectorHiddenByUser = false;
+    } else if (!event.shiftKey) {
+      setSelectedIndexes([], { keepFloatingHidden: true });
+    }
     syncObjectList({ preserveNoSelection: true });
-    if (editorState.selectedIndex < 0) {
+    if (nearestIndex < 0 && !event.shiftKey) {
       updateMakerHint('선택 해제됨');
     }
     drawMakerCanvas();
@@ -6488,6 +7029,16 @@ function handleMakerCanvasRightClickAction() {
       : (tool === 'sticky_pad' ? '점착패드 목표점 설정 대기를 취소했습니다.' : '해머 방향 설정 대기를 취소했습니다.'));
     return;
   }
+  if (tool === 'select' && !editorState.dragState) {
+    const selectedCount = getSelectedIndexes().length;
+    if (selectedCount > 0 && editorState.floatingInspectorHiddenByUser !== true) {
+      editorState.floatingInspectorHiddenByUser = true;
+      setFloatingInspectorVisible(false);
+      drawMakerCanvas();
+      setStatus('우클릭: 오브젝트 소형 편집창 숨김');
+      return;
+    }
+  }
   setSelectedTool('select');
   resetPendingWall();
   resetPendingPortal();
@@ -6590,7 +7141,7 @@ function setupEvents() {
     cancelDrag();
     const tool = selectedTool();
     if (tool === 'select') {
-      updateMakerHint('선택 모드: 클릭 선택, 드래그 이동, Shift+회전은 45도 스냅');
+      updateMakerHint('선택 모드: 클릭 선택, Shift+클릭 다중선택, 드래그 이동, Shift 이동/회전 45도 스냅');
     } else if (tool === 'spawn_point') {
       updateMakerHint('공 시작점 모드: 클릭/드래그로 시작 위치를 지정');
     } else if (tool === 'wall_segment') {
@@ -6605,6 +7156,8 @@ function setupEvents() {
       updateMakerHint('블랙홀 모드: 드래그로 반경 생성, 주변을 빨아들여 화이트홀로 전송');
     } else if (tool === 'white_hole') {
       updateMakerHint('화이트홀 모드: 드래그로 반경 생성, 블랙홀에서 전송된 공이 랜덤 방향 발사');
+    } else if (tool === 'stopwatch_bomb') {
+      updateMakerHint('스탑워치 폭탄 모드: 드래그로 반경 생성, 기본 4초마다 주변 폭발(빨간 이펙트)');
     } else if (tool === 'hammer') {
       updateMakerHint(editorState.pendingHammerOid
         ? '해머 방향 설정 대기: 드래그/클릭으로 이동 방향·거리 지정'
@@ -6724,7 +7277,12 @@ function setupEvents() {
 
   bindEvent(elements.objectList, 'change', () => {
     const index = Number(elements.objectList && elements.objectList.value ? elements.objectList.value : -1);
-    editorState.selectedIndex = Number.isFinite(index) ? index : -1;
+    if (Number.isFinite(index) && index >= 0) {
+      setSingleSelectedIndex(index);
+      editorState.floatingInspectorHiddenByUser = false;
+    } else {
+      setSelectedIndexes([], { keepFloatingHidden: true });
+    }
     populateObjectEditor();
     drawMakerCanvas();
   });
@@ -6757,6 +7315,7 @@ function setupEvents() {
           trackUndo: false,
           liveReason: '오브젝트 실시간 반영',
           silentStatus: true,
+          preserveEditorState: true,
         });
       } catch (error) {
         setStatus(String(error && error.message ? error.message : error), 'error');
@@ -6913,6 +7472,7 @@ function setupEvents() {
         trackUndo: false,
         liveReason: '오브젝트 실시간 반영',
         silentStatus: true,
+        preserveEditorState: true,
       });
     } catch (error) {
       setStatus(String(error && error.message ? error.message : error), 'error');
@@ -7112,7 +7672,7 @@ function setupEvents() {
       return;
     }
     if (key === 'Delete') {
-      if (editorState.selectedIndex >= 0) {
+      if (getSelectedIndexes().length > 0) {
         try {
           runDeleteSelectedObjectAction('Delete 키 삭제', '선택 오브젝트 삭제 완료 (Delete)');
         } catch (error) {

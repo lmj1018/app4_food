@@ -17,6 +17,7 @@ const DEFAULT_OBJECT_COLORS = {
   portal: '#b68cff',
   blackHole: '#7b55b8',
   whiteHole: '#f4fbff',
+  stopwatch: '#ff5c6f',
   burst: '#5dff7a',
   hammer: '#ffa557',
   diamond: '#6affea',
@@ -661,6 +662,33 @@ function compileObject(rawObject, entityId) {
           radius: Math.max(0.16, toFiniteNumber(rawObject.radius, 0.62)),
           cooldownMs: Math.max(80, toFiniteNumber(rawObject.cooldownMs, 900)),
           launchImpulse: Math.max(0.1, toFiniteNumber(rawObject.launchImpulse, 4.6)),
+        },
+      };
+    case 'stopwatch_bomb':
+      return {
+        entity: compileCircle(rawObject, entityId, {
+          radius: 0.62,
+          restitution: 0.08,
+          density: 1,
+          life: -1,
+          x: 11.75,
+          y: 64,
+          color: DEFAULT_OBJECT_COLORS.stopwatch,
+          bodyType: 'static',
+        }),
+        behavior: {
+          kind: 'stopwatch_bomb',
+          oid: toId(rawObject.oid, `stopwatch_${entityId}`),
+          entityId,
+          x: toFiniteNumber(rawObject.x, 11.75),
+          y: toFiniteNumber(rawObject.y, 64),
+          radius: Math.max(0.12, toFiniteNumber(rawObject.radius, 0.62)),
+          triggerRadius: Math.max(
+            0.2,
+            toFiniteNumber(rawObject.triggerRadius, Math.max(0.12, toFiniteNumber(rawObject.radius, 0.62)) + 1.2),
+          ),
+          force: Math.max(0.1, toFiniteNumber(rawObject.force, 4.8)),
+          intervalMs: Math.max(120, toFiniteNumber(rawObject.intervalMs, 4000)),
         },
       };
     case 'hammer':
@@ -1817,6 +1845,136 @@ function createBurstBumperBehavior(def, env) {
   };
 }
 
+function createStopwatchBombBehavior(def, env) {
+  let nextBlastAt = 0;
+
+  function emitBlastEffect(radius) {
+    const roulette = env.getRoulette();
+    if (!roulette || !Array.isArray(roulette._effects)) {
+      return;
+    }
+    const centerX = toFiniteNumber(def.x, 0);
+    const centerY = toFiniteNumber(def.y, 0);
+    const baseRadius = Math.max(0.2, toFiniteNumber(radius, toFiniteNumber(def.triggerRadius, 2.2)));
+    roulette._effects.push({
+      elapsed: 0,
+      duration: 320,
+      isDestroy: false,
+      update(deltaMs) {
+        this.elapsed += toFiniteNumber(deltaMs, 0);
+        if (this.elapsed >= this.duration) {
+          this.isDestroy = true;
+        }
+      },
+      render(ctx, zoomScale) {
+        if (!ctx) {
+          return;
+        }
+        const ratio = clamp(this.elapsed / Math.max(1, this.duration), 0, 1);
+        const radiusNow = Math.max(0.05, baseRadius * (0.28 + ratio * 1.45));
+        const alpha = Math.max(0, 0.85 - ratio * 0.8);
+        const lineWidth = Math.max(0.06, 1.2 / Math.max(1, toFiniteNumber(zoomScale, 1)));
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = 'rgba(255, 74, 98, 0.98)';
+        ctx.lineWidth = lineWidth;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radiusNow, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(255, 149, 160, 0.92)';
+        ctx.lineWidth = lineWidth * 0.85;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radiusNow * 0.64, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      },
+    });
+  }
+
+  return {
+    kind: 'stopwatch_bomb',
+    oid: def.oid,
+    tick(now) {
+      if (env.isPaused()) {
+        return;
+      }
+      const intervalMs = Math.max(120, toFiniteNumber(def.intervalMs, 4000));
+      if (!Number.isFinite(toFiniteNumber(nextBlastAt, NaN)) || nextBlastAt <= 0) {
+        nextBlastAt = now + intervalMs;
+        return;
+      }
+      if (now < nextBlastAt) {
+        return;
+      }
+      nextBlastAt = now + intervalMs;
+      const roulette = env.getRoulette();
+      const physics = roulette && roulette.physics ? roulette.physics : null;
+      const box2d = env.getBox2D();
+      const centerX = toFiniteNumber(def.x, 0);
+      const centerY = toFiniteNumber(def.y, 0);
+      const triggerRadius = Math.max(0.2, toFiniteNumber(def.triggerRadius, 2.2));
+      const triggerRadiusSq = triggerRadius * triggerRadius;
+      const force = Math.max(0.1, toFiniteNumber(def.force, 4.8));
+      const rng = typeof env.getRng === 'function' ? env.getRng() : null;
+
+      if (roulette && physics && physics.marbleMap && box2d && typeof box2d.b2Vec2 === 'function') {
+        const marbles = Array.isArray(roulette._marbles) ? roulette._marbles : [];
+        for (let index = 0; index < marbles.length; index += 1) {
+          const marble = marbles[index];
+          if (!marble || typeof marble.id !== 'number') {
+            continue;
+          }
+          const body = physics.marbleMap[marble.id];
+          if (!body || typeof body.GetPosition !== 'function' || typeof body.ApplyLinearImpulseToCenter !== 'function') {
+            continue;
+          }
+          const pos = body.GetPosition();
+          let dx = toFiniteNumber(pos && pos.x, NaN) - centerX;
+          let dy = toFiniteNumber(pos && pos.y, NaN) - centerY;
+          if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
+            continue;
+          }
+          const distSq = dx * dx + dy * dy;
+          if (distSq > triggerRadiusSq) {
+            continue;
+          }
+          let distance = Math.sqrt(Math.max(distSq, 0.0000001));
+          if (distance <= 0.0001) {
+            const randomRad = (rng && typeof rng.next === 'function' ? rng.next() : Math.random()) * Math.PI * 2;
+            dx = Math.cos(randomRad);
+            dy = Math.sin(randomRad);
+            distance = 1;
+          }
+          const nx = dx / distance;
+          const ny = dy / distance;
+          const falloff = Math.max(0, 1 - distance / Math.max(0.0001, triggerRadius));
+          const impulse = force * (0.35 + falloff * 0.65);
+          try {
+            if (typeof body.SetEnabled === 'function') {
+              body.SetEnabled(true);
+            }
+            if (typeof body.SetAwake === 'function') {
+              body.SetAwake(true);
+            }
+            body.ApplyLinearImpulseToCenter(new box2d.b2Vec2(nx * impulse, ny * impulse), true);
+          } catch (_) {
+          }
+        }
+      }
+      emitBlastEffect(triggerRadius);
+    },
+    serializeState() {
+      return {
+        nextBlastAt: toFiniteNumber(nextBlastAt, 0),
+      };
+    },
+    restoreState(rawState) {
+      const safeState = rawState && typeof rawState === 'object' ? rawState : {};
+      nextBlastAt = Math.max(0, toFiniteNumber(safeState.nextBlastAt, 0));
+    },
+  };
+}
+
 function createHammerBehavior(def, env) {
   let lastScheduledAt = 0;
   let queue = [];
@@ -2507,6 +2665,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
   const fanDefs = defs
     .filter((item) => item && item.kind === 'fan')
     .map((item) => ({ ...item }));
+  const stopwatchDefs = defs
+    .filter((item) => item && item.kind === 'stopwatch_bomb')
+    .map((item) => ({ ...item }));
   const stickyDefs = defs
     .filter((item) => item && item.kind === 'sticky_pad')
     .map((item) => ({ ...item }));
@@ -2535,6 +2696,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
   for (const fanDef of fanDefs) {
     behaviors.push(createFanBehavior(fanDef, env));
   }
+  for (const stopwatchDef of stopwatchDefs) {
+    behaviors.push(createStopwatchBombBehavior(stopwatchDef, env));
+  }
   for (const stickyDef of stickyDefs) {
     behaviors.push(createStickyPadBehavior(stickyDef, env));
   }
@@ -2557,6 +2721,7 @@ export function createBehaviorRuntime(env, behaviorDefs) {
       const burst = {};
       const hammer = {};
       const fan = {};
+      const stopwatch = {};
       const sticky = {};
       const goalMarker = {};
       const wormhole = {};
@@ -2576,6 +2741,8 @@ export function createBehaviorRuntime(env, behaviorDefs) {
           hammer[behavior.oid] = state;
         } else if (behavior.kind === 'fan') {
           fan[behavior.oid] = state;
+        } else if (behavior.kind === 'stopwatch_bomb') {
+          stopwatch[behavior.oid] = state;
         } else if (behavior.kind === 'sticky_pad') {
           sticky[behavior.oid] = state;
         } else if (behavior.kind === 'goal_marker_image') {
@@ -2584,7 +2751,7 @@ export function createBehaviorRuntime(env, behaviorDefs) {
           wormhole[behavior.oid] = state;
         }
       }
-      return { portal, burst, hammer, fan, sticky, goalMarker, wormhole };
+      return { portal, burst, hammer, fan, stopwatch, sticky, goalMarker, wormhole };
     },
     restoreState(rawState) {
       const safeState = rawState && typeof rawState === 'object' ? rawState : {};
@@ -2592,6 +2759,7 @@ export function createBehaviorRuntime(env, behaviorDefs) {
       const burstState = safeState.burst && typeof safeState.burst === 'object' ? safeState.burst : {};
       const hammerState = safeState.hammer && typeof safeState.hammer === 'object' ? safeState.hammer : {};
       const fanState = safeState.fan && typeof safeState.fan === 'object' ? safeState.fan : {};
+      const stopwatchState = safeState.stopwatch && typeof safeState.stopwatch === 'object' ? safeState.stopwatch : {};
       const stickyState = safeState.sticky && typeof safeState.sticky === 'object' ? safeState.sticky : {};
       const goalMarkerState = safeState.goalMarker && typeof safeState.goalMarker === 'object' ? safeState.goalMarker : {};
       const wormholeState = safeState.wormhole && typeof safeState.wormhole === 'object' ? safeState.wormhole : {};
@@ -2608,6 +2776,8 @@ export function createBehaviorRuntime(env, behaviorDefs) {
           behavior.restoreState(hammerState[behavior.oid]);
         } else if (behavior.kind === 'fan') {
           behavior.restoreState(fanState[behavior.oid]);
+        } else if (behavior.kind === 'stopwatch_bomb') {
+          behavior.restoreState(stopwatchState[behavior.oid]);
         } else if (behavior.kind === 'sticky_pad') {
           behavior.restoreState(stickyState[behavior.oid]);
         } else if (behavior.kind === 'goal_marker_image') {
