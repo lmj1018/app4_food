@@ -161,6 +161,77 @@ function drawBottomBumperPath(ctx, halfLen, halfHeight) {
   ctx.closePath();
 }
 
+function buildBottomBumperColliderPoints(halfLen, halfHeight) {
+  const safeHalfLen = Math.max(0.08, toFiniteNumber(halfLen, 0.98));
+  const safeHalfHeight = Math.max(0.05, toFiniteNumber(halfHeight, 0.34));
+  const edgePad = Math.max(0.015, Math.min(0.11, safeHalfHeight * 0.16));
+  const tailX = -safeHalfLen;
+  const bulgeX = tailX - safeHalfLen * 0.3 - edgePad;
+  const midX = safeHalfLen * 0.4;
+  const tipX = safeHalfLen + edgePad * 0.55;
+  const top = safeHalfHeight * 0.72 + edgePad;
+  const shoulder = safeHalfHeight * 0.46 + edgePad * 0.28;
+  const wing = safeHalfHeight * 0.88 + edgePad * 0.62;
+  const points = [
+    [tailX, -top],
+    [tailX - safeHalfLen * 0.18 - edgePad * 0.45, -safeHalfHeight * 0.46 - edgePad * 0.22],
+    [bulgeX, 0],
+    [tailX - safeHalfLen * 0.18 - edgePad * 0.45, safeHalfHeight * 0.46 + edgePad * 0.22],
+    [tailX, top],
+    [midX, wing],
+    [tipX * 0.95 + edgePad * 0.26, shoulder],
+    [tipX, 0],
+    [tipX * 0.95 + edgePad * 0.26, -shoulder],
+    [midX, -wing],
+    [tailX, -top],
+  ];
+  return points;
+}
+
+function compileBottomBumperCollider(raw, entityId) {
+  const width = Math.max(0.08, toFiniteNumber(raw && raw.width, 0.98));
+  const height = Math.max(0.05, toFiniteNumber(raw && raw.height, 0.34));
+  const restitutionInput = toFiniteNumber(raw && raw.restitution, 0.62);
+  const frictionInput = toFiniteNumber(raw && raw.friction, 0.03);
+  const restitution = clamp(Math.max(0.38, restitutionInput), 0, 8);
+  const friction = clamp(Math.min(0.08, frictionInput), 0, 8);
+  const density = Math.max(0.01, toFiniteNumber(raw && raw.density, 1));
+  const sensor = toBoolean(raw && raw.sensor, false) || toBoolean(raw && raw.noCollision, false);
+  const life = Number.isFinite(Number(raw && raw.life))
+    ? Math.max(-1, Math.floor(Number(raw.life)))
+    : null;
+  const points = buildBottomBumperColliderPoints(width, height);
+  const props = {
+    density,
+    angularVelocity: 0,
+    restitution,
+    friction,
+  };
+  if (sensor) {
+    props.sensor = true;
+  }
+  if (life !== null) {
+    props.life = life;
+  }
+  return withEntityId(
+    {
+      position: {
+        x: toFiniteNumber(raw && raw.x, 11.75),
+        y: toFiniteNumber(raw && raw.y, 72),
+      },
+      type: 'kinematic',
+      props,
+      shape: {
+        type: 'polyline',
+        rotation: 0,
+        points,
+        color: 'rgba(0,0,0,0)',
+      },
+    },
+    entityId,
+  );
+}
+
 function withEntityId(entity, entityId) {
   const shape = entity.shape && typeof entity.shape === 'object'
     ? { ...entity.shape }
@@ -840,17 +911,15 @@ function compileObject(rawObject, entityId) {
           ? rawObject.color
           : DEFAULT_OBJECT_COLORS.bottomBumper;
       return {
-        entity: compileBox(
+        entity: compileBottomBumperCollider(
           {
             ...rawObject,
             width: Math.max(0.08, toFiniteNumber(rawObject.width, 0.98)),
             height: Math.max(0.05, toFiniteNumber(rawObject.height, 0.34)),
-            restitution: toFiniteNumber(rawObject.restitution, 0.16),
-            rotation: toFiniteNumber(rawObject.rotation, toFiniteNumber(rawObject.dirDeg, 270)),
-            color: 'rgba(0,0,0,0)',
+            restitution: Math.max(0.38, toFiniteNumber(rawObject.restitution, 0.62)),
+            friction: Math.min(0.08, toFiniteNumber(rawObject.friction, 0.03)),
           },
           entityId,
-          true,
         ),
         behavior: {
           kind: 'bottom_bumper',
@@ -1310,31 +1379,64 @@ function createBlackHoleNetworkBehavior(blackHoleDefs, whiteHoleDefs, env) {
           return;
         }
         const ratio = clamp(this.elapsed / Math.max(1, this.duration), 0, 1);
-        const glow = radius * (1.25 + safeIntensity * 0.18);
-        const lineWidth = Math.max(0.6 / Math.max(1, toFiniteNumber(zoomScale, 1)), 0.42);
-        const swirlCount = 4;
+        const zoom = Math.max(1, toFiniteNumber(zoomScale, 1));
+        const fade = Math.max(0, 1 - ratio);
+        const coreRadius = radius * (0.26 + (1 - ratio) * 0.2);
+        const fieldRadius = radius * (1.58 + safeIntensity * 0.34);
+        const lineWidth = Math.max(0.54 / zoom, 0.34);
+        const streakCount = 11;
         ctx.save();
         ctx.translate(cx, cy);
-        ctx.globalAlpha = Math.max(0, 0.78 * (1 - ratio));
-        ctx.fillStyle = `rgba(60, 26, 98, ${0.25 + (1 - ratio) * 0.28})`;
+        ctx.globalAlpha = 0.9 * fade;
+        ctx.fillStyle = `rgba(46, 20, 80, ${0.16 + fade * 0.22})`;
         ctx.beginPath();
-        ctx.arc(0, 0, radius * (0.85 + ratio * 0.25), 0, Math.PI * 2);
+        ctx.arc(0, 0, fieldRadius * (0.84 + ratio * 0.24), 0, Math.PI * 2);
         ctx.fill();
-        for (let i = 0; i < swirlCount; i += 1) {
-          const angle = ratio * Math.PI * 2.8 + (i / swirlCount) * Math.PI * 2;
-          const sx = Math.cos(angle) * glow;
-          const sy = Math.sin(angle) * glow;
-          ctx.strokeStyle = `rgba(168, 117, 238, ${0.52 * (1 - ratio)})`;
-          ctx.lineWidth = lineWidth;
+
+        for (let i = 0; i < streakCount; i += 1) {
+          const phase = ratio * 1.92 + (i / streakCount);
+          const baseAngle = phase * Math.PI * 2.3;
+          const outerRadius = fieldRadius * (0.86 + 0.12 * Math.sin(phase * Math.PI * 2));
+          const innerRadius = Math.max(coreRadius * 1.15, radius * (0.42 + 0.18 * Math.sin((phase + 0.2) * Math.PI * 2)));
+          const sx = Math.cos(baseAngle) * outerRadius;
+          const sy = Math.sin(baseAngle) * outerRadius;
+          const endAngle = baseAngle + 0.52 + ratio * 1.6;
+          const ex = Math.cos(endAngle) * innerRadius;
+          const ey = Math.sin(endAngle) * innerRadius;
+          const bendRadius = (outerRadius + innerRadius) * 0.52;
+          const bendAngle = baseAngle + 0.28 + ratio * 1.25;
+          const bx = Math.cos(bendAngle) * bendRadius;
+          const by = Math.sin(bendAngle) * bendRadius;
+          ctx.strokeStyle = `rgba(193, 144, 255, ${0.48 * fade})`;
+          ctx.lineWidth = lineWidth * (1 + (i % 3) * 0.12);
           ctx.beginPath();
           ctx.moveTo(sx, sy);
-          ctx.lineTo(sx * 0.3, sy * 0.3);
+          ctx.quadraticCurveTo(bx, by, ex, ey);
           ctx.stroke();
         }
-        ctx.strokeStyle = `rgba(199, 150, 255, ${0.66 * (1 - ratio)})`;
-        ctx.lineWidth = lineWidth * 1.15;
+
+        for (let i = 0; i < 7; i += 1) {
+          const particleT = ((ratio * 1.35) + i * 0.17) % 1;
+          const particleAngle = particleT * Math.PI * 4 + i * 0.72;
+          const particleRadius = coreRadius + (fieldRadius - coreRadius) * (1 - particleT);
+          const px = Math.cos(particleAngle) * particleRadius;
+          const py = Math.sin(particleAngle) * particleRadius;
+          const dotRadius = Math.max(0.012, radius * 0.04 * (1 - particleT * 0.75));
+          ctx.fillStyle = `rgba(216, 182, 255, ${0.34 * fade * (1 - particleT * 0.55)})`;
+          ctx.beginPath();
+          ctx.arc(px, py, dotRadius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        ctx.globalAlpha = Math.max(0, 0.96 * fade);
+        ctx.fillStyle = 'rgba(8, 6, 20, 0.82)';
         ctx.beginPath();
-        ctx.arc(0, 0, radius + ratio * (safeIntensity * 0.65), 0, Math.PI * 2);
+        ctx.arc(0, 0, coreRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = `rgba(199, 150, 255, ${0.56 * fade})`;
+        ctx.lineWidth = lineWidth * 1.12;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius * (0.78 + ratio * 0.2), 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
       },
