@@ -199,13 +199,145 @@ function buildBottomBumperColliderPoints(halfLen, halfHeight) {
   return points;
 }
 
+function normalizeClosedPolylinePoints(rawPoints) {
+  if (!Array.isArray(rawPoints)) {
+    return [];
+  }
+  const points = rawPoints
+    .map((point) => {
+      if (!Array.isArray(point) || point.length < 2) {
+        return null;
+      }
+      const x = toFiniteNumber(point[0], NaN);
+      const y = toFiniteNumber(point[1], NaN);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        return null;
+      }
+      return [x, y];
+    })
+    .filter((point) => !!point);
+  if (points.length >= 2) {
+    const first = points[0];
+    const last = points[points.length - 1];
+    if (Math.abs(first[0] - last[0]) < 0.000001 && Math.abs(first[1] - last[1]) < 0.000001) {
+      points.pop();
+    }
+  }
+  return points;
+}
+
+function isPointInsidePolygon(points, pointX, pointY) {
+  if (!Array.isArray(points) || points.length < 3) {
+    return false;
+  }
+  let inside = false;
+  for (let index = 0; index < points.length; index += 1) {
+    const a = points[index];
+    const b = points[(index + points.length - 1) % points.length];
+    if (!Array.isArray(a) || !Array.isArray(b)) {
+      continue;
+    }
+    const ax = toFiniteNumber(a[0], NaN);
+    const ay = toFiniteNumber(a[1], NaN);
+    const bx = toFiniteNumber(b[0], NaN);
+    const by = toFiniteNumber(b[1], NaN);
+    if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(bx) || !Number.isFinite(by)) {
+      continue;
+    }
+    const intersects = ((ay > pointY) !== (by > pointY))
+      && (pointX < ((bx - ax) * (pointY - ay)) / Math.max(0.0000001, (by - ay)) + ax);
+    if (intersects) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function closestPointOnSegment(pointX, pointY, ax, ay, bx, by) {
+  const abx = bx - ax;
+  const aby = by - ay;
+  const lenSq = abx * abx + aby * aby;
+  if (lenSq < 0.0000001) {
+    const dx = pointX - ax;
+    const dy = pointY - ay;
+    return {
+      x: ax,
+      y: ay,
+      distSq: dx * dx + dy * dy,
+    };
+  }
+  const t = clamp(((pointX - ax) * abx + (pointY - ay) * aby) / lenSq, 0, 1);
+  const x = ax + abx * t;
+  const y = ay + aby * t;
+  const dx = pointX - x;
+  const dy = pointY - y;
+  return {
+    x,
+    y,
+    distSq: dx * dx + dy * dy,
+  };
+}
+
+function closestPointOnClosedPolyline(points, pointX, pointY) {
+  if (!Array.isArray(points) || points.length < 2) {
+    return null;
+  }
+  let best = null;
+  for (let index = 0; index < points.length; index += 1) {
+    const a = points[index];
+    const b = points[(index + 1) % points.length];
+    if (!Array.isArray(a) || !Array.isArray(b)) {
+      continue;
+    }
+    const candidate = closestPointOnSegment(
+      pointX,
+      pointY,
+      toFiniteNumber(a[0], 0),
+      toFiniteNumber(a[1], 0),
+      toFiniteNumber(b[0], 0),
+      toFiniteNumber(b[1], 0),
+    );
+    if (!best || candidate.distSq < best.distSq) {
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+function getPolylineCentroid(points) {
+  if (!Array.isArray(points) || points.length === 0) {
+    return { x: 0, y: 0 };
+  }
+  let sumX = 0;
+  let sumY = 0;
+  let count = 0;
+  for (let index = 0; index < points.length; index += 1) {
+    const point = points[index];
+    if (!Array.isArray(point) || point.length < 2) {
+      continue;
+    }
+    const x = toFiniteNumber(point[0], NaN);
+    const y = toFiniteNumber(point[1], NaN);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      continue;
+    }
+    sumX += x;
+    sumY += y;
+    count += 1;
+  }
+  if (count <= 0) {
+    return { x: 0, y: 0 };
+  }
+  return { x: sumX / count, y: sumY / count };
+}
+
 function compileBottomBumperCollider(raw, entityId) {
   const width = Math.max(0.08, toFiniteNumber(raw && raw.width, 0.98));
   const height = Math.max(0.05, toFiniteNumber(raw && raw.height, 0.34));
   const restitutionInput = toFiniteNumber(raw && raw.restitution, 0.62);
   const frictionInput = toFiniteNumber(raw && raw.friction, 0.03);
-  const restitution = clamp(Math.max(0.38, restitutionInput), 0, 8);
-  const friction = clamp(Math.min(0.08, frictionInput), 0, 8);
+  const restitution = clamp(Math.max(0.62, restitutionInput), 0, 8);
+  const friction = clamp(Math.min(0.05, frictionInput), 0, 8);
   const density = Math.max(0.01, toFiniteNumber(raw && raw.density, 1));
   const sensor = toBoolean(raw && raw.sensor, false) || toBoolean(raw && raw.noCollision, false);
   const life = Number.isFinite(Number(raw && raw.life))
@@ -2494,6 +2626,136 @@ function createBottomBumperBehavior(def, env) {
     entry.angle = angleRad;
   }
 
+  function worldToLocalPoint(worldX, worldY, centerX, centerY, angleRad) {
+    const dx = worldX - centerX;
+    const dy = worldY - centerY;
+    const cosAngle = Math.cos(angleRad);
+    const sinAngle = Math.sin(angleRad);
+    return {
+      x: dx * cosAngle + dy * sinAngle,
+      y: -dx * sinAngle + dy * cosAngle,
+    };
+  }
+
+  function localToWorldPoint(localX, localY, centerX, centerY, angleRad) {
+    const cosAngle = Math.cos(angleRad);
+    const sinAngle = Math.sin(angleRad);
+    return {
+      x: centerX + localX * cosAngle - localY * sinAngle,
+      y: centerY + localX * sinAngle + localY * cosAngle,
+    };
+  }
+
+  function resolveMarblesInsideBody(transformState) {
+    if (!transformState) {
+      return;
+    }
+    const roulette = env.getRoulette();
+    const physics = roulette && roulette.physics ? roulette.physics : null;
+    const box2d = env.getBox2D();
+    if (!roulette || !physics || !physics.marbleMap || !box2d || typeof box2d.b2Vec2 !== 'function') {
+      return;
+    }
+    const entry = getEntry();
+    if (!entry || !entry.shape || !Array.isArray(entry.shape.points)) {
+      return;
+    }
+    const polygon = normalizeClosedPolylinePoints(entry.shape.points);
+    if (polygon.length < 3) {
+      return;
+    }
+    const centroid = getPolylineCentroid(polygon);
+    const clearance = Math.max(0.06, Math.min(0.24, transformState.halfHeight * 0.56));
+    const marbles = Array.isArray(roulette._marbles) ? roulette._marbles : [];
+    for (let index = 0; index < marbles.length; index += 1) {
+      const marble = marbles[index];
+      if (!marble || typeof marble.id !== 'number') {
+        continue;
+      }
+      const body = physics.marbleMap[marble.id];
+      if (!body || typeof body.GetPosition !== 'function') {
+        continue;
+      }
+      const position = body.GetPosition();
+      const worldX = toFiniteNumber(position && position.x, NaN);
+      const worldY = toFiniteNumber(position && position.y, NaN);
+      if (!Number.isFinite(worldX) || !Number.isFinite(worldY)) {
+        continue;
+      }
+      const local = worldToLocalPoint(
+        worldX,
+        worldY,
+        toFiniteNumber(transformState.centerX, toFiniteNumber(def.x, 0)),
+        toFiniteNumber(transformState.centerY, toFiniteNumber(def.y, 0)),
+        toFiniteNumber(transformState.angleRad, 0),
+      );
+      if (!isPointInsidePolygon(polygon, local.x, local.y)) {
+        continue;
+      }
+      const nearest = closestPointOnClosedPolyline(polygon, local.x, local.y);
+      if (!nearest) {
+        continue;
+      }
+      let outwardX = nearest.x - centroid.x;
+      let outwardY = nearest.y - centroid.y;
+      let outwardLen = Math.hypot(outwardX, outwardY);
+      if (outwardLen < 0.0001) {
+        outwardX = local.x - centroid.x;
+        outwardY = local.y - centroid.y;
+        outwardLen = Math.hypot(outwardX, outwardY);
+      }
+      if (outwardLen < 0.0001) {
+        outwardX = toFiniteNumber(transformState.tipDirX, 1);
+        outwardY = toFiniteNumber(transformState.tipDirY, 0);
+        outwardLen = Math.hypot(outwardX, outwardY);
+      }
+      if (outwardLen < 0.0001) {
+        continue;
+      }
+      const unitOutX = outwardX / outwardLen;
+      const unitOutY = outwardY / outwardLen;
+      const targetLocalX = nearest.x + unitOutX * clearance;
+      const targetLocalY = nearest.y + unitOutY * clearance;
+      const targetWorld = localToWorldPoint(
+        targetLocalX,
+        targetLocalY,
+        toFiniteNumber(transformState.centerX, toFiniteNumber(def.x, 0)),
+        toFiniteNumber(transformState.centerY, toFiniteNumber(def.y, 0)),
+        toFiniteNumber(transformState.angleRad, 0),
+      );
+      const pushX = toFiniteNumber(targetWorld.x, worldX) - worldX;
+      const pushY = toFiniteNumber(targetWorld.y, worldY) - worldY;
+      const pushLen = Math.hypot(pushX, pushY);
+      if (pushLen < 0.0001) {
+        continue;
+      }
+      const pushUnitX = pushX / pushLen;
+      const pushUnitY = pushY / pushLen;
+      const speed = Math.max(1.2, toFiniteNumber(def.force, 3.8) * 0.55);
+      const velocity = typeof body.GetLinearVelocity === 'function' ? body.GetLinearVelocity() : null;
+      const baseVx = toFiniteNumber(velocity && velocity.x, 0) * 0.22;
+      const baseVy = toFiniteNumber(velocity && velocity.y, 0) * 0.22;
+      const nextVx = baseVx + pushUnitX * speed;
+      const nextVy = baseVy + pushUnitY * speed;
+      try {
+        if (typeof body.SetEnabled === 'function') {
+          body.SetEnabled(true);
+        }
+        if (typeof body.SetAwake === 'function') {
+          body.SetAwake(true);
+        }
+        if (typeof body.SetTransform === 'function') {
+          const angle = typeof body.GetAngle === 'function' ? body.GetAngle() : 0;
+          body.SetTransform(new box2d.b2Vec2(targetWorld.x, targetWorld.y), angle);
+        }
+        if (typeof body.SetLinearVelocity === 'function') {
+          body.SetLinearVelocity(new box2d.b2Vec2(nextVx, nextVy));
+        }
+      } catch (_) {
+      }
+    }
+  }
+
   function ensureVisualEffect() {
     const roulette = env.getRoulette();
     if (!roulette || !Array.isArray(roulette._effects)) {
@@ -2659,6 +2921,7 @@ function createBottomBumperBehavior(def, env) {
       tipY,
       angleRad,
       halfLen,
+      halfHeight: Math.max(0.05, toFiniteNumber(def.height, 0.34)),
       tipDirX,
       tipDirY,
       isSwinging,
@@ -2764,6 +3027,7 @@ function createBottomBumperBehavior(def, env) {
         scheduleNextSwing(now);
       }
       const transformState = updateTransform(now);
+      resolveMarblesInsideBody(transformState);
       applySwingImpulse(now, transformState);
     },
     serializeState() {

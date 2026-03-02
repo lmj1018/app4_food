@@ -797,6 +797,33 @@ function enforceCompiledEntityPhysics() {
   }
 }
 
+function enforceMarbleBodyPhysics() {
+  const physics = getPhysics();
+  if (!physics || !physics.marbleMap || typeof physics.marbleMap !== 'object') {
+    return;
+  }
+  const marbleIds = Object.keys(physics.marbleMap);
+  for (let index = 0; index < marbleIds.length; index += 1) {
+    const marbleId = marbleIds[index];
+    const body = physics.marbleMap[marbleId];
+    if (!body) {
+      continue;
+    }
+    try {
+      if (typeof body.SetBullet === 'function') {
+        body.SetBullet(true);
+      }
+      if (typeof body.SetAwake === 'function') {
+        body.SetAwake(true);
+      }
+      if (typeof body.SetEnabled === 'function') {
+        body.SetEnabled(true);
+      }
+    } catch (_) {
+    }
+  }
+}
+
 function wireGoalEvent() {
   const roulette = getRoulette();
   if (!roulette || roulette.__v2GoalWired === true) {
@@ -1073,6 +1100,7 @@ async function applyMapJson(rawMapJson) {
     roulette.setMarbles(control.candidates.slice());
     suppressMarbleCooldownIndicator();
     alignSpawnToStage();
+    enforceMarbleBodyPhysics();
   }
   patchRendererMarbleImages();
   setStatus(`map loaded: ${control.mapId}`);
@@ -1134,8 +1162,10 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
     roulette.setMarbles(control.candidates.slice());
     suppressMarbleCooldownIndicator();
     alignSpawnToStage();
+    enforceMarbleBodyPhysics();
   } else if (!preserveMarbles) {
     alignSpawnToStage();
+    enforceMarbleBodyPhysics();
   }
   patchRendererMarbleImages();
 
@@ -1186,6 +1216,7 @@ async function setCandidates(rawCandidates) {
   roulette.setMarbles(candidates.slice());
   suppressMarbleCooldownIndicator();
   alignSpawnToStage();
+  enforceMarbleBodyPhysics();
   patchRendererMarbleImages();
   setWinningRank(control.winningRank);
   setStatus(`candidates set: ${candidates.length}`);
@@ -1596,6 +1627,7 @@ async function start() {
     roulette.setMarbles(control.candidates.slice());
     suppressMarbleCooldownIndicator();
     alignSpawnToStage();
+    enforceMarbleBodyPhysics();
     patchRendererMarbleImages();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     marbles = Array.isArray(roulette._marbles) ? roulette._marbles : [];
@@ -1654,6 +1686,7 @@ async function reset() {
   if (control.candidates.length > 0) {
     roulette.setMarbles(control.candidates.slice());
     alignSpawnToStage();
+    enforceMarbleBodyPhysics();
   }
   patchRendererMarbleImages();
   setWinningRank(control.winningRank);
