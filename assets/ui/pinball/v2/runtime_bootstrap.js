@@ -1388,11 +1388,17 @@ async function setSpeed(multiplier) {
 function getState() {
   const roulette = getRoulette();
   const marbles = roulette && Array.isArray(roulette._marbles) ? roulette._marbles : [];
+  const running = roulette ? roulette._isRunning === true : false;
+  const slowMotionActive = running && (
+    toFiniteNumber(roulette && roulette._timeScale, 1) < 0.999
+    || toFiniteNumber(roulette && roulette._goalDist, Number.POSITIVE_INFINITY) < 5
+  );
   return {
     runtimeRevision: RUNTIME_REVISION,
     mapId: control.mapId,
     paused: control.paused,
-    running: roulette ? roulette._isRunning === true : false,
+    running,
+    slowMotionActive,
     candidateCount: control.candidates.length,
     marbleCount: marbles.length,
     winningRank: control.winningRank,

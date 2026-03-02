@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -32,6 +33,13 @@ class PinballV2Screen extends StatefulWidget {
 class _PinballV2ScreenState extends State<PinballV2Screen> {
   static const String _pinballAssetDir = 'assets/ui/pinball';
   static const Duration _startupTimeout = Duration(seconds: 30);
+  static const List<String> _slowMotionBannerAssets = <String>[
+    'assets/background/p1_1.png',
+    'assets/background/p2_1.png',
+  ];
+  static const Duration _slowMotionFirstTrigger = Duration(seconds: 4);
+  static const Duration _slowMotionSecondTrigger = Duration(seconds: 8);
+  static const Duration _slowMotionBannerDuration = Duration(seconds: 3);
 
   late final WebViewController _controller;
   HttpServer? _localServer;
@@ -46,6 +54,16 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
   bool _isFinishing = false;
   bool _hasError = false;
   String _statusText = 'V2 엔진 로딩 중...';
+  bool _slowMotionActive = false;
+  DateTime? _slowMotionActiveSince;
+  int _slowMotionActivationCount = 0;
+  final Set<String> _slowMotionAssetsUsed = <String>{};
+  final Set<String> _slowMotionAvailableAssets = <String>{};
+  bool _slowMotionAssetsResolved = false;
+  String? _slowMotionBannerAsset;
+  String? _queuedSlowMotionBannerAsset;
+  Offset _slowMotionBannerOffset = Offset.zero;
+  Timer? _slowMotionBannerTimer;
 
   List<String>? _cachedCandidates;
 
@@ -103,6 +121,160 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
   void _clearWinnerMonitor() {
     _winnerMonitorTimer?.cancel();
     _winnerMonitorTimer = null;
+  }
+
+  void _clearSlowMotionBannerTimer() {
+    _slowMotionBannerTimer?.cancel();
+    _slowMotionBannerTimer = null;
+  }
+
+  void _resetSlowMotionBannerState() {
+    _clearSlowMotionBannerTimer();
+    _slowMotionActive = false;
+    _slowMotionActiveSince = null;
+    _slowMotionActivationCount = 0;
+    _slowMotionAssetsUsed.clear();
+    _queuedSlowMotionBannerAsset = null;
+    _slowMotionBannerAsset = null;
+    _slowMotionBannerOffset = Offset.zero;
+  }
+
+  Offset _entryOffsetForSlowMotionBanner(String assetPath) {
+    final lower = assetPath.toLowerCase();
+    if (lower.endsWith('p1_1.png')) {
+      return const Offset(-1.08, 0);
+    }
+    if (lower.endsWith('p2_1.png')) {
+      return const Offset(1.08, 0);
+    }
+    return Offset.zero;
+  }
+
+  Future<void> _resolveSlowMotionBannerAssets() async {
+    if (_slowMotionAssetsResolved) {
+      return;
+    }
+    _slowMotionAssetsResolved = true;
+    for (final assetPath in _slowMotionBannerAssets) {
+      try {
+        await rootBundle.load(assetPath);
+        _slowMotionAvailableAssets.add(assetPath);
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _warmUpSlowMotionBannerAssets() async {
+    await _resolveSlowMotionBannerAssets();
+    if (!mounted) {
+      return;
+    }
+    for (final assetPath in _slowMotionAvailableAssets) {
+      try {
+        await precacheImage(AssetImage(assetPath), context);
+      } catch (_) {}
+    }
+  }
+
+  String _pickRandomSlowMotionBannerAsset() {
+    if (_slowMotionAssetsUsed.length >= _slowMotionBannerAssets.length) {
+      return '';
+    }
+    final source = _slowMotionAvailableAssets.isNotEmpty
+        ? _slowMotionAvailableAssets.toList(growable: false)
+        : const <String>[];
+    if (source.isEmpty) {
+      return '';
+    }
+    final remaining = source
+        .where((asset) => !_slowMotionAssetsUsed.contains(asset))
+        .toList(growable: false);
+    if (remaining.isEmpty) {
+      return '';
+    }
+    if (remaining.length == 1) {
+      return remaining.first;
+    }
+    return remaining[Random().nextInt(remaining.length)];
+  }
+
+  void _enqueueSlowMotionBanner(String assetPath) {
+    if (assetPath.isEmpty ||
+        _slowMotionAssetsUsed.contains(assetPath) ||
+        _slowMotionAssetsUsed.length >= _slowMotionBannerAssets.length) {
+      return;
+    }
+    _slowMotionAssetsUsed.add(assetPath);
+    if (_slowMotionBannerAsset == null) {
+      _showSlowMotionBanner(assetPath);
+      return;
+    }
+    _queuedSlowMotionBannerAsset ??= assetPath;
+  }
+
+  void _showSlowMotionBanner(String assetPath) {
+    if (!mounted || !_slowMotionAvailableAssets.contains(assetPath)) {
+      return;
+    }
+    _clearSlowMotionBannerTimer();
+    final beginOffset = _entryOffsetForSlowMotionBanner(assetPath);
+    setState(() {
+      _slowMotionBannerAsset = assetPath;
+      _slowMotionBannerOffset = beginOffset;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _slowMotionBannerAsset != assetPath) {
+        return;
+      }
+      setState(() {
+        _slowMotionBannerOffset = Offset.zero;
+      });
+    });
+    _slowMotionBannerTimer = Timer(_slowMotionBannerDuration, () {
+      if (!mounted) {
+        return;
+      }
+      final queued = _queuedSlowMotionBannerAsset;
+      if (queued != null && queued.isNotEmpty) {
+        _queuedSlowMotionBannerAsset = null;
+        _showSlowMotionBanner(queued);
+        return;
+      }
+      setState(() {
+        _slowMotionBannerAsset = null;
+        _slowMotionBannerOffset = Offset.zero;
+      });
+    });
+  }
+
+  void _updateSlowMotionBanner(bool active) {
+    final now = DateTime.now();
+    if (active) {
+      if (!_slowMotionActive) {
+        _slowMotionActive = true;
+        _slowMotionActiveSince = now;
+        _slowMotionActivationCount += 1;
+      }
+      final startedAt = _slowMotionActiveSince ?? now;
+      final elapsed = now.difference(startedAt);
+      if (_slowMotionAssetsUsed.isEmpty && elapsed >= _slowMotionFirstTrigger) {
+        _enqueueSlowMotionBanner(_pickRandomSlowMotionBannerAsset());
+        return;
+      }
+      if (_slowMotionAssetsUsed.length == 1) {
+        final allowSecondByRepeat =
+            _slowMotionActivationCount >= 2 &&
+            elapsed >= _slowMotionFirstTrigger;
+        final allowSecondByLongSlow = elapsed >= _slowMotionSecondTrigger;
+        if (allowSecondByRepeat || allowSecondByLongSlow) {
+          _enqueueSlowMotionBanner(_pickRandomSlowMotionBannerAsset());
+        }
+      }
+      return;
+    }
+    if (_slowMotionActive) {
+      _slowMotionActive = false;
+      _slowMotionActiveSince = null;
+    }
   }
 
   ContentType _contentTypeForPath(String path) {
@@ -330,6 +502,7 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
     }
 
     _isStarting = true;
+    _resetSlowMotionBannerState();
     _startStartupTimer();
     _setStatus('V2 초기화 중...');
 
@@ -437,11 +610,20 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
     ? roulette._winner.name
     : '';
   const state = api && typeof api.getState === 'function' ? api.getState() : null;
-  return JSON.stringify({ winner, state });
+  const running = !!(state && state.running === true);
+  const timeScale = Number(roulette && roulette._timeScale);
+  const goalDist = Number(roulette && roulette._goalDist);
+  const slowMotionActive = !!(
+    running
+    && ((Number.isFinite(timeScale) && timeScale < 0.999) || (Number.isFinite(goalDist) && goalDist < 5))
+  );
+  return JSON.stringify({ winner, state, slowMotionActive, timeScale, goalDist });
 })()
 ''');
         final parsed = _decodeJsMap(raw);
         final winner = (parsed?['winner'] ?? '').toString().trim();
+        final slowMotionActive = parsed?['slowMotionActive'] == true;
+        _updateSlowMotionBanner(slowMotionActive);
         if (winner.isNotEmpty) {
           _finish(winner);
           return;
@@ -503,6 +685,7 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
     _isFinishing = true;
     _clearStartupTimer();
     _clearWinnerMonitor();
+    _clearSlowMotionBannerTimer();
     Navigator.pop<String>(context, winner);
   }
 
@@ -535,6 +718,7 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
   Future<void> _retry() async {
     _clearStartupTimer();
     _clearWinnerMonitor();
+    _resetSlowMotionBannerState();
     setState(() {
       _hasError = false;
       _didStart = false;
@@ -548,6 +732,12 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      unawaited(_warmUpSlowMotionBannerAssets());
+    });
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..addJavaScriptChannel(
@@ -590,6 +780,7 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
   void dispose() {
     _clearStartupTimer();
     _clearWinnerMonitor();
+    _clearSlowMotionBannerTimer();
     final server = _localServer;
     _localServer = null;
     if (server != null) {
@@ -600,6 +791,12 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
 
   @override
   Widget build(BuildContext context) {
+    final bannerCacheWidth = max(
+      1,
+      (MediaQuery.sizeOf(context).width *
+              MediaQuery.devicePixelRatioOf(context))
+          .round(),
+    );
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
@@ -644,6 +841,48 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
                 child: ElevatedButton(
                   onPressed: _retry,
                   child: const Text('다시 시도'),
+                ),
+              ),
+            ),
+          if (_slowMotionBannerAsset != null)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: IgnorePointer(
+                child: RepaintBoundary(
+                  child: ClipRect(
+                    child: AnimatedSlide(
+                      duration: const Duration(milliseconds: 420),
+                      curve: Curves.easeOutCubic,
+                      offset: _slowMotionBannerOffset,
+                      child: Image.asset(
+                        _slowMotionBannerAsset!,
+                        width: double.infinity,
+                        fit: BoxFit.fitWidth,
+                        alignment: Alignment.bottomCenter,
+                        filterQuality: FilterQuality.low,
+                        cacheWidth: bannerCacheWidth,
+                        gaplessPlayback: true,
+                        errorBuilder: (context, error, stackTrace) {
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (!mounted) {
+                              return;
+                            }
+                            _clearSlowMotionBannerTimer();
+                            if (_slowMotionBannerAsset != null) {
+                              setState(() {
+                                _slowMotionBannerAsset = null;
+                                _queuedSlowMotionBannerAsset = null;
+                                _slowMotionBannerOffset = Offset.zero;
+                              });
+                            }
+                          });
+                          return const SizedBox.shrink();
+                        },
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),

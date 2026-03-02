@@ -5283,6 +5283,10 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
         const half = round1(Math.max(0.12, Math.max(toFinite(obj.width, 0.12), toFinite(obj.height, 0.12))));
         obj.width = half;
         obj.height = half;
+      } else if (type === 'fan') {
+        const baseHalfSize = Math.max(toFinite(obj.width, 0.12), toFinite(obj.height, 0.08));
+        obj.triggerRadius = round1(Math.max(0.35, baseHalfSize + 0.35));
+        obj.hitDistance = round1(Math.max(0.5, baseHalfSize * 2.8));
       }
       drag.moved = true;
       return true;
