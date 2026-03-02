@@ -355,6 +355,84 @@
     #makerCanvas.panning {
       cursor: grabbing;
     }
+    .floating-object-inspector {
+      position: absolute;
+      z-index: 4;
+      min-width: 220px;
+      max-width: 280px;
+      border: 1px solid #466293;
+      border-radius: 10px;
+      background: rgba(8, 15, 30, 0.94);
+      box-shadow: 0 10px 20px rgba(0, 0, 0, 0.45);
+      backdrop-filter: blur(2px);
+      pointer-events: auto;
+      overflow: hidden;
+    }
+    .floating-object-inspector.hidden {
+      display: none;
+    }
+    .floating-object-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 8px 9px 7px;
+      border-bottom: 1px solid #38517e;
+      background: linear-gradient(180deg, #1a2c51 0%, #13223f 100%);
+    }
+    .floating-object-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: #cde0ff;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .floating-object-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .floating-object-actions button {
+      min-width: 56px;
+      padding: 5px 6px;
+      font-size: 11px;
+      border-radius: 7px;
+    }
+    .floating-object-body {
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 300px;
+      overflow: auto;
+    }
+    .floating-object-row {
+      display: grid;
+      grid-template-columns: 76px minmax(0, 1fr);
+      align-items: center;
+      gap: 6px;
+    }
+    .floating-object-row label {
+      font-size: 11px;
+      font-weight: 700;
+      color: #a8c2ee;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .floating-object-row input[type="text"],
+    .floating-object-row input[type="number"] {
+      width: 100%;
+      border: 1px solid #35517f;
+      border-radius: 7px;
+      background: #0a1630;
+      color: #d9e7ff;
+      padding: 6px 7px;
+      font-size: 12px;
+      min-width: 0;
+    }
     .tool-palette {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -574,6 +652,25 @@
       left: 10px;
       top: 5px;
       box-shadow: 0 0 0 2px rgba(255, 121, 203, 0.3);
+    }
+    .tool-shape.goal-marker {
+      width: 20px;
+      height: 9px;
+      left: 6px;
+      top: 6px;
+      border-radius: 3px;
+      background: linear-gradient(90deg, rgba(255, 123, 189, 0.6) 0%, rgba(255, 191, 224, 0.92) 52%, rgba(255, 123, 189, 0.6) 100%);
+      border: 1px solid rgba(255, 202, 230, 0.95);
+    }
+    .tool-shape.goal-marker::after {
+      content: "";
+      position: absolute;
+      width: 18px;
+      height: 2px;
+      left: 1px;
+      top: 3px;
+      background: rgba(255, 222, 241, 0.8);
+      border-radius: 1px;
     }
     .tool-shape.spawn {
       width: 16px;
@@ -855,6 +952,16 @@
               </div>
               <div class="maker-canvas-wrap">
                 <canvas id="makerCanvas" width="360" height="760"></canvas>
+                <div id="floatingObjectInspector" class="floating-object-inspector hidden" aria-hidden="true">
+                  <div class="floating-object-head">
+                    <span id="floatingObjectTitle" class="floating-object-title">선택 오브젝트</span>
+                    <div class="floating-object-actions">
+                      <button id="floatingReverseButton" type="button">반전</button>
+                      <button id="floatingDuplicateButton" type="button">복제</button>
+                    </div>
+                  </div>
+                  <div id="floatingObjectFields" class="floating-object-body"></div>
+                </div>
               </div>
             </div>
             <div class="maker-toolbar">
@@ -881,9 +988,11 @@
                 <label for="stageZoomInput">zoomY</label>
                 <input id="stageZoomInput" type="number" min="10" max="2000" step="0.5" value="200">
               </div>
-              <div class="maker-row">
+              <div class="maker-row" style="grid-template-columns:auto auto auto auto; gap:8px; align-items:center;">
                 <label for="stageDisableSkillsInput">스킬 금지</label>
                 <input id="stageDisableSkillsInput" type="checkbox">
+                <label for="stageResetOnObjectChangeInput">생성시 리셋</label>
+                <input id="stageResetOnObjectChangeInput" type="checkbox">
               </div>
               <div class="maker-toolbar">
                 <button id="fitStageButton">스테이지 자동맞춤</button>
@@ -911,6 +1020,7 @@
                 <button type="button" class="maker-tool-button" data-maker-tool="burst_bumper"><span class="tool-icon"><span class="tool-shape burst"></span></span><span class="tool-label">버스트 범퍼</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="domino_block"><span class="tool-icon"><span class="tool-shape domino"></span></span><span class="tool-label">도미노 블럭</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="physics_ball"><span class="tool-icon"><span class="tool-shape physics-ball"></span></span><span class="tool-label">물리 공</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="goal_marker_image"><span class="tool-icon"><span class="tool-shape goal-marker"></span></span><span class="tool-label">골라인 이미지</span></button>
               </div>
               <div class="maker-row" style="margin-top:6px;">
                 <label for="corridorGapInput">통로 간격</label>
@@ -934,6 +1044,7 @@
                 <option value="burst_bumper">버스트 범퍼</option>
                 <option value="domino_block">도미노 블럭</option>
                 <option value="physics_ball">물리 공</option>
+                <option value="goal_marker_image">골라인 이미지</option>
               </select>
             </div>
 
@@ -965,7 +1076,7 @@
                   <input id="objExtra2Input" type="number" step="0.1">
                 </div>
                 <div class="maker-row">
-                  <label for="objRadiusInput">반지름</label>
+                  <label id="objRadiusLabel" for="objRadiusInput">반지름</label>
                   <input id="objRadiusInput" type="number" step="0.05">
                 </div>
                 <div class="maker-row">
@@ -1016,7 +1127,7 @@
     <button id="resetButton">리셋</button>
     <button id="reloadButton">엔진 다시 불러오기</button>
     <div class="floating-group" role="group" aria-label="스냅샷 슬롯">
-      <span class="floating-group-title">스냅샷</span>
+      <span class="floating-group-title">세이브슬롯</span>
       <div class="floating-slot-radios">
         <label><input type="radio" name="snapshotSlot" value="slot1" checked> 1</label>
         <label><input type="radio" name="snapshotSlot" value="slot2"> 2</label>

@@ -22,7 +22,27 @@ const DEFAULT_OBJECT_COLORS = {
   sticky: '#ff8fc9',
   domino: '#ff67be',
   physicsBall: '#ff79cb',
+  goalMarker: '#ffc4e7',
 };
+
+const runtimeImageCache = new Map();
+
+function getRuntimeImage(src) {
+  const key = toId(src, './goal_line_tab1.svg');
+  if (runtimeImageCache.has(key)) {
+    return runtimeImageCache.get(key);
+  }
+  let image = null;
+  try {
+    image = new Image();
+    image.decoding = 'async';
+    image.src = key;
+  } catch (_) {
+    image = null;
+  }
+  runtimeImageCache.set(key, image);
+  return image;
+}
 
 function toFiniteNumber(value, fallback) {
   const num = Number(value);
@@ -595,6 +615,21 @@ function compileObject(rawObject, entityId) {
                 toFiniteNumber(rawObject.pathTargetX, toFiniteNumber(rawObject.x, 11.75) + 2.4),
                 toFiniteNumber(rawObject.pathTargetY, toFiniteNumber(rawObject.y, 70)),
               ],
+        },
+      };
+    case 'goal_marker_image':
+      return {
+        entity: null,
+        behavior: {
+          kind: 'goal_marker_image',
+          oid: toId(rawObject.oid, `goal_marker_${entityId}`),
+          x: toFiniteNumber(rawObject.x, 11.75),
+          y: toFiniteNumber(rawObject.y, 206),
+          width: Math.max(0.2, toFiniteNumber(rawObject.width, 6)),
+          height: Math.max(0.2, toFiniteNumber(rawObject.height, 1.8)),
+          rotation: toFiniteNumber(rawObject.rotation, 0),
+          opacity: clamp(toFiniteNumber(rawObject.opacity, 0.86), 0.05, 1),
+          imageSrc: toId(rawObject.imageSrc, './goal_line_tab1.svg'),
         },
       };
     default:
@@ -1463,7 +1498,7 @@ function createFanBehavior(def, env) {
     }
     const originX = toFiniteNumber(def.x, 0);
     const originY = toFiniteNumber(def.y, 0);
-    const duration = 200;
+    const duration = 360;
     roulette._effects.push({
       elapsed: 0,
       duration,
@@ -1479,8 +1514,8 @@ function createFanBehavior(def, env) {
           return;
         }
         const ratio = Math.max(0, Math.min(1, this.elapsed / this.duration));
-        const alpha = Math.max(0, 0.28 * (1 - ratio));
-        const length = Math.max(0.25, zoneLength * (0.78 + ratio * 0.42));
+        const alpha = Math.max(0.08, 0.5 * (1 - ratio * 0.78));
+        const length = Math.max(0.25, zoneLength * (0.82 + ratio * 0.5));
         const halfWidth = Math.max(0.2, zoneHalfWidth);
         const waveCount = Math.max(3, Math.floor(length * 2.4));
         const lineWidth = Math.max(0.8 / Math.max(1, toFiniteNumber(zoomScale, 1)), 0.55);
@@ -1488,8 +1523,8 @@ function createFanBehavior(def, env) {
         ctx.translate(originX, originY);
         ctx.rotate(dirRad);
         ctx.globalAlpha = alpha;
-        ctx.fillStyle = 'rgba(127,217,255,0.2)';
-        ctx.strokeStyle = 'rgba(143,230,255,0.95)';
+        ctx.fillStyle = 'rgba(127,217,255,0.36)';
+        ctx.strokeStyle = 'rgba(143,230,255,1)';
         ctx.lineWidth = lineWidth;
         ctx.beginPath();
         ctx.rect(0, -halfWidth, length, halfWidth * 2);
@@ -1499,15 +1534,15 @@ function createFanBehavior(def, env) {
         for (let lane = -1; lane <= 1; lane += 1) {
           const laneY = lane * (halfWidth * 0.52);
           const step = length / waveCount;
-          const amp = Math.max(0.06, halfWidth * 0.18);
+          const amp = Math.max(0.08, halfWidth * 0.22);
           ctx.moveTo(0, laneY);
           for (let i = 0; i <= waveCount; i += 1) {
             const x = i * step;
-            const waveY = laneY + Math.sin((i / waveCount) * Math.PI * 2.4 + ratio * Math.PI) * amp;
+            const waveY = laneY + Math.sin((i / waveCount) * Math.PI * 2.8 + ratio * Math.PI * 1.2) * amp;
             ctx.lineTo(x, waveY);
           }
         }
-        ctx.strokeStyle = 'rgba(194,245,255,0.95)';
+        ctx.strokeStyle = 'rgba(209,249,255,1)';
         ctx.lineWidth = lineWidth * 0.88;
         ctx.stroke();
         ctx.restore();
@@ -1551,7 +1586,7 @@ function createFanBehavior(def, env) {
 
       if (now >= nextVisualAt) {
         emitFanVisualEffect(now, dirRad, zoneLength, zoneHalfWidth);
-        nextVisualAt = now + 110;
+        nextVisualAt = now + 80;
       }
 
       for (let index = 0; index < marbles.length; index += 1) {
@@ -1831,6 +1866,76 @@ function createStickyPadBehavior(def, env) {
   };
 }
 
+function createGoalMarkerImageBehavior(def, env) {
+  let nextEmitAt = 0;
+  const image = getRuntimeImage(def.imageSrc || './goal_line_tab1.svg');
+
+  function emitRenderEffect(now) {
+    const roulette = env.getRoulette();
+    if (!roulette || !Array.isArray(roulette._effects)) {
+      return;
+    }
+    roulette._effects.push({
+      elapsed: 0,
+      duration: 220,
+      isDestroy: false,
+      update(deltaMs) {
+        this.elapsed += toFiniteNumber(deltaMs, 0);
+        if (this.elapsed >= this.duration) {
+          this.isDestroy = true;
+        }
+      },
+      render(ctx) {
+        if (!ctx) {
+          return;
+        }
+        const width = Math.max(0.2, toFiniteNumber(def.width, 6));
+        const height = Math.max(0.2, toFiniteNumber(def.height, 1.8));
+        const alpha = clamp(toFiniteNumber(def.opacity, 0.86), 0.05, 1);
+        const x = toFiniteNumber(def.x, 0);
+        const y = toFiniteNumber(def.y, 0);
+        const rotation = degToRad(toFiniteNumber(def.rotation, 0));
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(rotation);
+        ctx.globalAlpha = alpha;
+        if (image && image.complete && image.naturalWidth > 0) {
+          ctx.drawImage(image, -width, -height, width * 2, height * 2);
+        } else {
+          ctx.fillStyle = 'rgba(255, 140, 207, 0.45)';
+          ctx.strokeStyle = 'rgba(255, 205, 229, 0.95)';
+          ctx.lineWidth = 0.08;
+          ctx.beginPath();
+          ctx.rect(-width, -height, width * 2, height * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+        ctx.restore();
+      },
+    });
+  }
+
+  return {
+    kind: 'goal_marker_image',
+    oid: def.oid,
+    tick(now) {
+      if (now >= nextEmitAt) {
+        emitRenderEffect(now);
+        nextEmitAt = now + 120;
+      }
+    },
+    serializeState() {
+      return {
+        nextEmitAt: toFiniteNumber(nextEmitAt, 0),
+      };
+    },
+    restoreState(rawState) {
+      const safeState = rawState && typeof rawState === 'object' ? rawState : {};
+      nextEmitAt = toFiniteNumber(safeState.nextEmitAt, 0);
+    },
+  };
+}
+
 export function createBehaviorRuntime(env, behaviorDefs) {
   const defs = Array.isArray(behaviorDefs) ? behaviorDefs : [];
   const portalDefs = defs
@@ -1847,6 +1952,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
     .map((item) => ({ ...item }));
   const stickyDefs = defs
     .filter((item) => item && item.kind === 'sticky_pad')
+    .map((item) => ({ ...item }));
+  const goalMarkerDefs = defs
+    .filter((item) => item && item.kind === 'goal_marker_image')
     .map((item) => ({ ...item }));
 
   const portalByOid = new Map();
@@ -1870,6 +1978,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
   for (const stickyDef of stickyDefs) {
     behaviors.push(createStickyPadBehavior(stickyDef, env));
   }
+  for (const goalMarkerDef of goalMarkerDefs) {
+    behaviors.push(createGoalMarkerImageBehavior(goalMarkerDef, env));
+  }
 
   return {
     tick(now) {
@@ -1887,6 +1998,7 @@ export function createBehaviorRuntime(env, behaviorDefs) {
       const hammer = {};
       const fan = {};
       const sticky = {};
+      const goalMarker = {};
       for (let index = 0; index < behaviors.length; index += 1) {
         const behavior = behaviors[index];
         const state = behavior && typeof behavior.serializeState === 'function'
@@ -1905,9 +2017,11 @@ export function createBehaviorRuntime(env, behaviorDefs) {
           fan[behavior.oid] = state;
         } else if (behavior.kind === 'sticky_pad') {
           sticky[behavior.oid] = state;
+        } else if (behavior.kind === 'goal_marker_image') {
+          goalMarker[behavior.oid] = state;
         }
       }
-      return { portal, burst, hammer, fan, sticky };
+      return { portal, burst, hammer, fan, sticky, goalMarker };
     },
     restoreState(rawState) {
       const safeState = rawState && typeof rawState === 'object' ? rawState : {};
@@ -1916,6 +2030,7 @@ export function createBehaviorRuntime(env, behaviorDefs) {
       const hammerState = safeState.hammer && typeof safeState.hammer === 'object' ? safeState.hammer : {};
       const fanState = safeState.fan && typeof safeState.fan === 'object' ? safeState.fan : {};
       const stickyState = safeState.sticky && typeof safeState.sticky === 'object' ? safeState.sticky : {};
+      const goalMarkerState = safeState.goalMarker && typeof safeState.goalMarker === 'object' ? safeState.goalMarker : {};
       for (let index = 0; index < behaviors.length; index += 1) {
         const behavior = behaviors[index];
         if (!behavior || typeof behavior.restoreState !== 'function') {
@@ -1931,6 +2046,8 @@ export function createBehaviorRuntime(env, behaviorDefs) {
           behavior.restoreState(fanState[behavior.oid]);
         } else if (behavior.kind === 'sticky_pad') {
           behavior.restoreState(stickyState[behavior.oid]);
+        } else if (behavior.kind === 'goal_marker_image') {
+          behavior.restoreState(goalMarkerState[behavior.oid]);
         }
       }
     },
