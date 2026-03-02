@@ -472,8 +472,8 @@ function compileObject(rawObject, entityId) {
       return {
         entity: compileCircle(rawObject, entityId, {
           radius: 0.62,
-          restitution: 0.26,
-          density: 0.95,
+          restitution: 0.22,
+          density: 1.8,
           life: -1,
           x: 11.75,
           y: 40,

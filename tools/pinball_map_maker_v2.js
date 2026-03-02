@@ -39,6 +39,7 @@ let liveApplyTimer = 0;
 let liveApplyInFlight = false;
 let liveApplyPending = false;
 let liveApplyResetRequested = false;
+let liveApplyAutoStartRequested = false;
 let autoSaveTimer = 0;
 let autoSaveInFlight = false;
 let autoSavePending = false;
@@ -616,7 +617,7 @@ function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
         obj.density = Math.max(0.01, toFinite(obj.density, 1.35));
       } else if (type === 'physics_ball') {
         obj.bodyType = 'dynamic';
-        obj.density = Math.max(0.01, toFinite(obj.density, 0.95));
+        obj.density = Math.max(0.01, toFinite(obj.density, 1.8));
       } else if (type === 'burst_bumper') {
         obj.layers = Math.max(1, Math.floor(toFinite(obj.layers, 3)));
         obj.hpPerLayer = Math.max(1, Math.floor(toFinite(obj.hpPerLayer, 1)));
@@ -847,12 +848,14 @@ function renderMapCatalog(preferredMapId = '') {
   const options = mapCatalog
     .map((entry) => `<option value="${entry.id}">${entry.id}</option>`)
     .join('');
-  elements.mapSelect.innerHTML = options || '<option value="">등록된 맵 없음</option>';
+  elements.mapSelect.innerHTML = `<option value="">맵 선택...</option>${options}`;
   const picked = preferredMapId && mapCatalog.some((entry) => entry.id === preferredMapId)
     ? preferredMapId
-    : (mapCatalog[0] ? mapCatalog[0].id : '');
+    : '';
   if (picked) {
     elements.mapSelect.value = picked;
+  } else {
+    elements.mapSelect.value = '';
   }
   if (elements.mapNameInput) {
     elements.mapNameInput.value = elements.mapSelect.value || 'v2_custom_map';
@@ -897,7 +900,7 @@ async function fetchManifestFromServer() {
   });
 }
 
-async function refreshMapCatalog(preferredMapId = '') {
+async function refreshMapCatalog(preferredMapId = null) {
   const manifest = await fetchManifestFromServer();
   mapCatalog = manifest.maps
     .filter((entry) => {
@@ -928,7 +931,10 @@ async function refreshMapCatalog(preferredMapId = '') {
       file: String(entry.file).trim(),
       sort: Number.isFinite(Number(entry.sort)) ? Number(entry.sort) : 9999,
     }));
-  renderMapCatalog(preferredMapId || resolveCurrentMapId());
+  const nextPreferredMapId = typeof preferredMapId === 'string'
+    ? preferredMapId
+    : resolveCurrentMapId();
+  renderMapCatalog(nextPreferredMapId);
   if (mapCatalog.length > 0) {
     setStatus(`맵 목록 갱신 완료: ${mapCatalog.length}개`);
   } else {
@@ -940,6 +946,10 @@ function getFrameWindow() {
   return elements.engineFrame && elements.engineFrame.contentWindow
     ? elements.engineFrame.contentWindow
     : null;
+}
+
+function getEngineFrameWindow() {
+  return getFrameWindow();
 }
 
 function getPreviewFrameWindow() {
@@ -1359,7 +1369,7 @@ function defaultRestitutionForType(type) {
     case 'domino_block':
       return 0.08;
     case 'physics_ball':
-      return 0.26;
+      return 0.22;
     case 'hammer':
     case 'fan':
     case 'sticky_pad':
@@ -1757,8 +1767,8 @@ function createObjectByTool(tool, x, y) {
       x: px,
       y: py,
       radius: 0.62,
-      restitution: 0.26,
-      density: 0.95,
+      restitution: 0.22,
+      density: 1.8,
       color: OBJECT_COLOR_PRESET.physicsBall,
       bodyType: 'dynamic',
     };
@@ -2062,8 +2072,8 @@ function populateObjectEditor() {
   } else if (obj.type === 'physics_ball') {
     if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
     if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
-    if (elements.objExtra1Input) elements.objExtra1Input.value = String(round1(toFinite(obj.restitution, 0.26)));
-    if (elements.objExtra2Input) elements.objExtra2Input.value = String(round1(toFinite(obj.density, 0.95)));
+    if (elements.objExtra1Input) elements.objExtra1Input.value = String(round1(toFinite(obj.restitution, 0.22)));
+    if (elements.objExtra2Input) elements.objExtra2Input.value = String(round1(toFinite(obj.density, 1.8)));
     if (elements.objExtra1Label) elements.objExtra1Label.textContent = '탄성';
     if (elements.objExtra2Label) elements.objExtra2Label.textContent = '밀도';
   } else if (obj.type === 'portal') {
@@ -2329,7 +2339,8 @@ function positionFloatingObjectInspector(layout = null) {
   elements.floatingObjectInspector.style.top = `${Math.round(top)}px`;
 }
 
-function syncObjectList() {
+function syncObjectList(options = {}) {
+  const preserveNoSelection = options && options.preserveNoSelection === true;
   const objects = getObjects();
   if (!elements.objectList) {
     if (objects.length === 0) {
@@ -2338,12 +2349,16 @@ function syncObjectList() {
       return;
     }
     if (editorState.selectedIndex < 0 || editorState.selectedIndex >= objects.length) {
+      if (preserveNoSelection && editorState.selectedIndex < 0) {
+        populateObjectEditor();
+        return;
+      }
       editorState.selectedIndex = objects.length - 1;
     }
     populateObjectEditor();
     return;
   }
-  const options = objects
+  const optionItems = objects
     .map((obj, index) => {
       const oid = String(obj && obj.oid ? obj.oid : `obj_${index + 1}`);
       const type = String(obj && obj.type ? obj.type : 'unknown');
@@ -2361,16 +2376,20 @@ function syncObjectList() {
       return `<option value="${index}">${index + 1}. ${oid} [${type}]${suffix}</option>`;
     })
     .join('');
-  elements.objectList.innerHTML = options || '<option value="">오브젝트 없음</option>';
+  elements.objectList.innerHTML = `<option value="">선택 없음</option>${optionItems}`;
   if (objects.length === 0) {
     editorState.selectedIndex = -1;
     populateObjectEditor();
     return;
   }
   if (editorState.selectedIndex < 0 || editorState.selectedIndex >= objects.length) {
-    editorState.selectedIndex = objects.length - 1;
+    if (preserveNoSelection && editorState.selectedIndex < 0) {
+      editorState.selectedIndex = -1;
+    } else {
+      editorState.selectedIndex = objects.length - 1;
+    }
   }
-  elements.objectList.value = String(editorState.selectedIndex);
+  elements.objectList.value = editorState.selectedIndex >= 0 ? String(editorState.selectedIndex) : '';
   populateObjectEditor();
 }
 
@@ -2674,11 +2693,11 @@ function applyObjectEditorValues() {
     )));
     obj.restitution = round2(toFinite(
       elements.objExtra1Input ? elements.objExtra1Input.value : obj.restitution,
-      toFinite(obj.restitution, 0.26),
+      toFinite(obj.restitution, 0.22),
     ));
     obj.density = round2(Math.max(0.01, toFinite(
       elements.objExtra2Input ? elements.objExtra2Input.value : obj.density,
-      toFinite(obj.density, 0.95),
+      toFinite(obj.density, 1.8),
     )));
     obj.bodyType = 'dynamic';
     finalizeObjectEditorValues(obj);
@@ -2778,8 +2797,11 @@ function deleteSelectedObject() {
   refreshCurrentJsonViewer();
 }
 
-function queueObjectLiveDraftApply(reason = '') {
-  queueLiveDraftApply(reason, { objectMutation: true });
+function queueObjectLiveDraftApply(reason = '', options = {}) {
+  queueLiveDraftApply(reason, {
+    objectMutation: true,
+    autoResumeAfterReset: options && options.autoResumeAfterReset === true,
+  });
 }
 
 function runApplySelectedObjectValuesAction(options = {}) {
@@ -3324,7 +3346,7 @@ function findNearestObjectIndex(x, y) {
       bestIndex = index;
     }
   }
-  if (bestDistance > 2.2) {
+  if (bestDistance > 0.9) {
     return -1;
   }
   return bestIndex;
@@ -5390,7 +5412,7 @@ function finishDrag() {
       }
       syncObjectList();
       refreshCurrentJsonViewer();
-      queueObjectLiveDraftApply(`${toolDisplayName(tool)} 생성`);
+      queueObjectLiveDraftApply(`${toolDisplayName(tool)} 생성`, { autoResumeAfterReset: true });
       if (tool !== 'portal') {
         updateMakerHint(`${toolDisplayName(tool)} 생성 완료: ${created.oid || ''}`);
       }
@@ -5541,12 +5563,14 @@ function handleMakerCanvasPointerDown(event) {
   if (tool === 'select') {
     const nearestIndex = findNearestObjectIndex(point.x, point.y);
     editorState.selectedIndex = nearestIndex;
-    syncObjectList();
+    syncObjectList({ preserveNoSelection: true });
     if (nearestIndex >= 0) {
       rememberUndoState('오브젝트 이동 시작');
       beginMoveDrag(nearestIndex, point);
       editorState.suppressClickOnce = true;
       updateMakerHint('오브젝트 드래그 이동중');
+    } else {
+      updateMakerHint('선택 해제됨');
     }
     drawMakerCanvas();
     return;
@@ -5745,7 +5769,7 @@ function addObjectAt(tool, x, y, options = {}) {
   }
   syncObjectList();
   refreshCurrentJsonViewer();
-  queueObjectLiveDraftApply('오브젝트 추가');
+  queueObjectLiveDraftApply('오브젝트 추가', { autoResumeAfterReset: true });
   drawMakerCanvas();
 }
 
@@ -5761,7 +5785,10 @@ function handleMakerCanvasClick(event) {
   const tool = selectedTool();
   if (tool === 'select') {
     editorState.selectedIndex = findNearestObjectIndex(point.x, point.y);
-    syncObjectList();
+    syncObjectList({ preserveNoSelection: true });
+    if (editorState.selectedIndex < 0) {
+      updateMakerHint('선택 해제됨');
+    }
     drawMakerCanvas();
     return;
   }
@@ -5909,7 +5936,9 @@ async function applyDraftLiveNow(reason = '') {
   liveApplyInFlight = true;
   try {
     const shouldReset = liveApplyResetRequested === true;
+    const shouldAutoStartAfterReset = shouldReset && liveApplyAutoStartRequested === true;
     liveApplyResetRequested = false;
+    liveApplyAutoStartRequested = false;
     const api = await waitForEngineApi(8000);
     let restoredSlotId = '';
     let preserveMarblesForApply = !shouldReset;
@@ -5928,11 +5957,19 @@ async function applyDraftLiveNow(reason = '') {
       preserveRunning: preserveRunningForApply,
       updateCandidates: false,
     });
-    if (shouldReset) {
+    if (shouldReset && !shouldAutoStartAfterReset) {
       if (typeof api.pause === 'function') {
         await api.pause();
       }
       setPlayPauseUi(false);
+    }
+    if (shouldReset && shouldAutoStartAfterReset && typeof api.start === 'function') {
+      const startResult = await api.start();
+      if (!startResult || startResult.ok !== true) {
+        throw new Error(startResult && startResult.reason ? startResult.reason : '자동 시작 실패');
+      }
+      setCameraLock(false);
+      setPlayPauseUi(true);
     }
     ensureEngineCanvasFill();
     syncViewZoomInputFromEngine();
@@ -6027,6 +6064,9 @@ function queueLiveDraftApply(reason = '', options = {}) {
   }
   if (options && options.objectMutation === true && shouldResetOnObjectMutation()) {
     liveApplyResetRequested = true;
+    if (options.autoResumeAfterReset === true) {
+      liveApplyAutoStartRequested = true;
+    }
   }
   if (liveApplyTimer) {
     window.clearTimeout(liveApplyTimer);
@@ -6961,21 +7001,14 @@ async function boot() {
   }
   setBusy(true);
   try {
-    await refreshMapCatalog(initialMapId);
+    await refreshMapCatalog('');
     await loadEngineFrame();
     try {
       await loadPreviewFrame();
     } catch (previewError) {
       setPreviewStatus(String(previewError && previewError.message ? previewError.message : previewError), 'error');
     }
-    if (!selectedMapCatalogEntry() && mapCatalog.length > 0 && elements.mapSelect) {
-      elements.mapSelect.value = mapCatalog[0].id;
-    }
-    if (mapCatalog.length > 0) {
-      await loadSelectedCatalogMap();
-    } else {
-      await applyMapAndCandidates();
-    }
+    await applyMapAndCandidates();
     await applyLiveMarbleCountNow('');
   } catch (error) {
     setStatus(String(error && error.message ? error.message : error), 'error');

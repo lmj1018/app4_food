@@ -299,6 +299,7 @@ function patchPhysicsCreateEntities() {
       if (typeof fixtureDef.set_isSensor === 'function') {
         fixtureDef.set_isSensor(props.sensor === true);
       }
+      let createdFixture = null;
 
       if (shape.type === 'box') {
         const polygon = new box2d.b2PolygonShape();
@@ -309,12 +310,12 @@ function patchPhysicsCreateEntities() {
           toFiniteNumber(shape.rotation, 0),
         );
         fixtureDef.set_shape(polygon);
-        body.CreateFixture(fixtureDef);
+        createdFixture = body.CreateFixture(fixtureDef);
       } else if (shape.type === 'circle') {
         const circle = new box2d.b2CircleShape();
         circle.set_m_radius(Math.max(0.001, toFiniteNumber(shape.radius, 0.2)));
         fixtureDef.set_shape(circle);
-        body.CreateFixture(fixtureDef);
+        createdFixture = body.CreateFixture(fixtureDef);
       } else if (shape.type === 'polyline') {
         const points = Array.isArray(shape.points) ? shape.points : [];
         for (let pointIndex = 0; pointIndex < points.length - 1; pointIndex += 1) {
@@ -334,6 +335,12 @@ function patchPhysicsCreateEntities() {
           } else {
             body.CreateFixture(edge, Math.max(0.001, toFiniteNumber(props.density, 1)));
           }
+        }
+      }
+      if (props.sensor === true && createdFixture && typeof createdFixture.SetSensor === 'function') {
+        try {
+          createdFixture.SetSensor(true);
+        } catch (_) {
         }
       }
 
@@ -383,6 +390,100 @@ function patchPhysicsCreateEntities() {
     }
   };
   physics.__v2CreateEntitiesPatched = true;
+}
+
+function buildEntityTypeMapFromCompiled() {
+  const compiled = control.compiledMap && typeof control.compiledMap === 'object'
+    ? control.compiledMap
+    : null;
+  const objectIndex = compiled && Array.isArray(compiled.objectIndex)
+    ? compiled.objectIndex
+    : [];
+  const map = new Map();
+  for (let index = 0; index < objectIndex.length; index += 1) {
+    const entry = objectIndex[index];
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+    const entityId = Math.floor(toFiniteNumber(entry.entityId, NaN));
+    if (!Number.isFinite(entityId)) {
+      continue;
+    }
+    const type = typeof entry.type === 'string' ? entry.type.trim() : '';
+    if (!type) {
+      continue;
+    }
+    map.set(entityId, type);
+  }
+  return map;
+}
+
+function setBodyFixturesSensor(body, enabled) {
+  if (!body || typeof body.GetFixtureList !== 'function') {
+    return;
+  }
+  try {
+    let fixture = body.GetFixtureList();
+    while (fixture) {
+      if (typeof fixture.SetSensor === 'function') {
+        fixture.SetSensor(enabled === true);
+      }
+      fixture = typeof fixture.GetNext === 'function' ? fixture.GetNext() : null;
+    }
+  } catch (_) {
+  }
+}
+
+function enforceCompiledEntityPhysics() {
+  const physics = getPhysics();
+  const box2d = getBox2D();
+  if (!physics || !Array.isArray(physics.entities) || !box2d) {
+    return;
+  }
+  const entityTypeMap = buildEntityTypeMapFromCompiled();
+  if (entityTypeMap.size <= 0) {
+    return;
+  }
+  for (let index = 0; index < physics.entities.length; index += 1) {
+    const entry = physics.entities[index];
+    if (!entry || !entry.body) {
+      continue;
+    }
+    const shape = entry.shape && typeof entry.shape === 'object' ? entry.shape : null;
+    const eid = Math.floor(toFiniteNumber(shape && shape.__v2eid, NaN));
+    if (!Number.isFinite(eid)) {
+      continue;
+    }
+    const objectType = entityTypeMap.get(eid);
+    if (!objectType) {
+      continue;
+    }
+    const body = entry.body;
+    if (objectType === 'domino_block' || objectType === 'physics_ball') {
+      try {
+        if (typeof body.SetType === 'function') {
+          body.SetType(box2d.b2_dynamicBody);
+        }
+        if (typeof body.SetFixedRotation === 'function') {
+          body.SetFixedRotation(false);
+        }
+        if (typeof body.SetGravityScale === 'function') {
+          body.SetGravityScale(1);
+        }
+        if (typeof body.SetEnabled === 'function') {
+          body.SetEnabled(true);
+        }
+        if (typeof body.SetAwake === 'function') {
+          body.SetAwake(true);
+        }
+      } catch (_) {
+      }
+      continue;
+    }
+    if (objectType === 'black_hole' || objectType === 'white_hole') {
+      setBodyFixturesSensor(body, true);
+    }
+  }
 }
 
 function wireGoalEvent() {
@@ -614,6 +715,7 @@ async function applyMapJson(rawMapJson) {
   roulette.reset();
   patchPhysicsStep();
   patchPhysicsCreateEntities();
+  enforceCompiledEntityPhysics();
   setWinningRank(control.winningRank);
 
   control.behaviorRuntime = createBehaviorRuntime(createBehaviorEnvironment(), compiled.behaviorDefs);
@@ -667,6 +769,7 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
 
   physics.clearEntities();
   physics.createStage(stage);
+  enforceCompiledEntityPhysics();
 
   control.behaviorRuntime = createBehaviorRuntime(createBehaviorEnvironment(), compiled.behaviorDefs);
   startTickLoop();
