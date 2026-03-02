@@ -271,7 +271,10 @@ function setPayloadMarbleImages(raw) {
 
 function setPayloadGoalMarkerImage(raw) {
   const src = typeof raw === 'string' ? raw.trim() : '';
-  if (src.startsWith('data:image/')) {
+  const isDataImage = src.startsWith('data:image/');
+  const isHttpUrl = src.startsWith('http://') || src.startsWith('https://');
+  const isAppAssetPath = src.startsWith('/__app_asset/') || src.startsWith('__app_asset/');
+  if (isDataImage || isHttpUrl || isAppAssetPath) {
     window.__v2GoalMarkerImageDataUrl = src;
     return;
   }

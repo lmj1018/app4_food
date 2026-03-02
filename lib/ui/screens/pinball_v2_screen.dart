@@ -513,17 +513,35 @@ SOFTWARE.
       server.forEach((request) async {
         try {
           final relativePath = _normalizeAssetPath(request.uri.path);
-          var bytes = await _tryReadLocalMapBytes(relativePath);
-          if (bytes == null) {
-            final assetPath = '$_pinballAssetDir/$relativePath';
+          Uint8List bytes;
+          String contentPath = relativePath;
+          if (relativePath.startsWith('__app_asset/')) {
+            final assetPath = relativePath.substring('__app_asset/'.length);
+            if (assetPath.isEmpty || assetPath.contains('..')) {
+              throw Exception('invalid asset path');
+            }
             final data = await rootBundle.load(assetPath);
             bytes = data.buffer.asUint8List(
               data.offsetInBytes,
               data.lengthInBytes,
             );
+            contentPath = assetPath;
+          } else {
+            final localMapBytes = await _tryReadLocalMapBytes(relativePath);
+            if (localMapBytes != null) {
+              bytes = localMapBytes;
+            } else {
+              final assetPath = '$_pinballAssetDir/$relativePath';
+              final data = await rootBundle.load(assetPath);
+              bytes = data.buffer.asUint8List(
+                data.offsetInBytes,
+                data.lengthInBytes,
+              );
+              contentPath = relativePath;
+            }
           }
           request.response.headers.contentType = _contentTypeForPath(
-            relativePath,
+            contentPath,
           );
           request.response.headers.set('cache-control', 'no-store');
           request.response.add(bytes);
@@ -627,19 +645,29 @@ SOFTWARE.
     if (_goalLineImageDataUrl != null) {
       return _goalLineImageDataUrl!;
     }
-    var dataUrl = await _loadAssetAsDataUrl('assets/background/finish.png');
-    if (dataUrl.isEmpty) {
-      dataUrl = await _loadAssetAsDataUrl(
-        'assets/ui/pinball/goal_line_tab1.png',
-      );
+    final baseUri = await _ensureLocalServer();
+    Future<String> resolveAssetUrl(String assetPath) async {
+      try {
+        await rootBundle.load(assetPath);
+      } catch (_) {
+        return '';
+      }
+      final encodedAssetPath = assetPath
+          .split('/')
+          .map(Uri.encodeComponent)
+          .join('/');
+      return baseUri.replace(path: '/__app_asset/$encodedAssetPath').toString();
     }
-    if (dataUrl.isEmpty) {
-      dataUrl = await _loadAssetAsDataUrl(
-        'assets/ui/pinball/goal_line_tab1.svg',
-      );
+
+    var imageUrl = await resolveAssetUrl('assets/background/finish.png');
+    if (imageUrl.isEmpty) {
+      imageUrl = await resolveAssetUrl('assets/ui/pinball/goal_line_tab1.png');
     }
-    _goalLineImageDataUrl = dataUrl;
-    return dataUrl;
+    if (imageUrl.isEmpty) {
+      imageUrl = await resolveAssetUrl('assets/ui/pinball/goal_line_tab1.svg');
+    }
+    _goalLineImageDataUrl = imageUrl;
+    return imageUrl;
   }
 
   Future<String> _loadAssetAsDataUrl(String assetPath) async {

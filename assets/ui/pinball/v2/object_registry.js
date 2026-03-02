@@ -76,7 +76,10 @@ function normalizeGoalMarkerImageSrc(value) {
     const candidate = typeof window !== 'undefined'
       ? String(window.__v2GoalMarkerImageDataUrl || '').trim()
       : '';
-    if (candidate.startsWith('data:image/')) {
+    const isDataImage = candidate.startsWith('data:image/');
+    const isHttpUrl = candidate.startsWith('http://') || candidate.startsWith('https://');
+    const isAppAssetPath = candidate.startsWith('/__app_asset/') || candidate.startsWith('__app_asset/');
+    if (isDataImage || isHttpUrl || isAppAssetPath) {
       override = candidate;
     }
   } catch (_) {
