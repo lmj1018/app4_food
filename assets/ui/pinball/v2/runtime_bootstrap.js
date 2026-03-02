@@ -736,7 +736,12 @@ async function loadManifest() {
 }
 
 async function loadMapJsonById(mapId) {
-  const maps = await loadManifest();
+  let maps = [];
+  try {
+    maps = await loadManifest();
+  } catch (_) {
+    maps = [];
+  }
   const matched = maps.find(
     (entry) =>
       entry &&

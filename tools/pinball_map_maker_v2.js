@@ -6951,6 +6951,16 @@ function setupEvents() {
         setStatus('일시정지되었습니다');
         return;
       }
+      if (liveApplyTimer) {
+        window.clearTimeout(liveApplyTimer);
+        liveApplyTimer = 0;
+      }
+      await applyDraftMapToApi(api, {
+        live: true,
+        preserveMarbles: true,
+        preserveRunning: false,
+        updateCandidates: false,
+      });
       setCameraLock(false);
       const startResult = await api.start();
       if (!startResult || startResult.ok !== true) {
