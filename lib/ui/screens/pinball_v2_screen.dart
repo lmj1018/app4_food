@@ -82,6 +82,10 @@ SOFTWARE.
   bool _isFinishing = false;
   bool _hasError = false;
   String _statusText = 'V2 엔진 로딩 중...';
+  String _mapLabel = '';
+  bool _showMapLabelOverlay = false;
+  bool _didShowMapLabelOverlayOnce = false;
+  Timer? _mapLabelOverlayTimer;
   bool _slowMotionActive = false;
   DateTime? _slowMotionActiveSince;
   int _slowMotionActivationCount = 0;
@@ -181,6 +185,11 @@ SOFTWARE.
   void _clearWinnerMonitor() {
     _winnerMonitorTimer?.cancel();
     _winnerMonitorTimer = null;
+  }
+
+  void _clearMapLabelOverlayTimer() {
+    _mapLabelOverlayTimer?.cancel();
+    _mapLabelOverlayTimer = null;
   }
 
   void _clearSlowMotionBannerTimer() {
@@ -758,6 +767,64 @@ SOFTWARE.
     return null;
   }
 
+  Map<String, dynamic>? _coerceStringKeyMap(Object? raw) {
+    if (raw is! Map) {
+      return null;
+    }
+    return raw.map((key, value) => MapEntry(key.toString(), value));
+  }
+
+  String _extractMapLabel(Map<String, dynamic>? state) {
+    if (state != null) {
+      final directLabel = state['mapLabel'];
+      if (directLabel is String && directLabel.trim().isNotEmpty) {
+        return directLabel.trim();
+      }
+      final mapId = state['mapId'];
+      if (mapId is String && mapId.trim().isNotEmpty) {
+        return mapId.trim();
+      }
+    }
+    final fallback = widget.args.mapId.trim();
+    return fallback.isEmpty ? 'v2_default' : fallback;
+  }
+
+  void _syncMapLabel(Map<String, dynamic>? state, {bool forceShow = false}) {
+    final next = _extractMapLabel(state);
+    if (next.isEmpty) {
+      return;
+    }
+    if (next == _mapLabel && !forceShow) {
+      return;
+    }
+    _clearMapLabelOverlayTimer();
+    final shouldShow = forceShow || !_didShowMapLabelOverlayOnce;
+    if (!mounted) {
+      _mapLabel = next;
+      _showMapLabelOverlay = shouldShow;
+      if (shouldShow) {
+        _didShowMapLabelOverlayOnce = true;
+      }
+      return;
+    }
+    setState(() {
+      _mapLabel = next;
+      _showMapLabelOverlay = shouldShow;
+    });
+    if (!shouldShow) {
+      return;
+    }
+    _didShowMapLabelOverlayOnce = true;
+    _mapLabelOverlayTimer = Timer(const Duration(seconds: 2), () {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _showMapLabelOverlay = false;
+      });
+    });
+  }
+
   Future<void> _startPinball() async {
     if (!mounted ||
         _isStarting ||
@@ -929,6 +996,7 @@ SOFTWARE.
       });
       _didStart = true;
       _clearStartupTimer();
+      _syncMapLabel(_coerceStringKeyMap(parsed?['state']), forceShow: true);
       _setStatus('게임 진행 중...', clearError: true);
       _startWinnerMonitor();
     } catch (error) {
@@ -975,6 +1043,7 @@ SOFTWARE.
         }
         final state = parsed?['state'];
         if (state is Map && mounted) {
+          _syncMapLabel(_coerceStringKeyMap(state));
           final running = state['running'] == true;
           if (!running && !_hasError) {
             final text = (state['statusText'] ?? '').toString().trim();
@@ -1063,6 +1132,7 @@ SOFTWARE.
       _pushRuntimeDebug('spin_started', parsed['payload']);
       _didStart = true;
       _clearStartupTimer();
+      _syncMapLabel(_coerceStringKeyMap(parsed['payload']), forceShow: true);
       _setStatus('게임 진행 중...', clearError: true);
       _startWinnerMonitor();
     }
@@ -1071,6 +1141,7 @@ SOFTWARE.
   Future<void> _retry() async {
     _clearStartupTimer();
     _clearWinnerMonitor();
+    _clearMapLabelOverlayTimer();
     _resetSlowMotionBannerState();
     setState(() {
       _hasError = false;
@@ -1078,6 +1149,9 @@ SOFTWARE.
       _isStarting = false;
       _pageLoaded = false;
       _statusText = 'V2 엔진 다시 로딩 중...';
+      _mapLabel = '';
+      _showMapLabelOverlay = false;
+      _didShowMapLabelOverlayOnce = false;
     });
     await _loadPage(clearCache: true);
   }
@@ -1112,6 +1186,9 @@ SOFTWARE.
               _isStarting = false;
               _hasError = false;
               _statusText = 'V2 엔진 로딩 중...';
+              _mapLabel = '';
+              _showMapLabelOverlay = false;
+              _didShowMapLabelOverlayOnce = false;
             });
           },
           onPageFinished: (_) async {
@@ -1155,6 +1232,7 @@ SOFTWARE.
   void dispose() {
     _clearStartupTimer();
     _clearWinnerMonitor();
+    _clearMapLabelOverlayTimer();
     _clearSlowMotionBannerTimer();
     final server = _localServer;
     _localServer = null;
@@ -1177,45 +1255,89 @@ SOFTWARE.
       body: Stack(
         children: [
           Positioned.fill(child: WebViewWidget(controller: _controller)),
-          Positioned(
-            top: 28,
-            left: 12,
-            right: 12,
-            child: IgnorePointer(
-              ignoring: true,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: const Color(0xA0101420),
-                  border: Border.all(
-                    color: _hasError
-                        ? const Color(0xFFCC4A5A)
-                        : const Color(0xFF2D4C76),
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  _statusText,
-                  style: TextStyle(
-                    color: _hasError
-                        ? const Color(0xFFFFA3B1)
-                        : const Color(0xFF9EC0FF),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
+          if (_showMapLabelOverlay && _mapLabel.isNotEmpty)
+            SafeArea(
+              child: Align(
+                alignment: Alignment.topLeft,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 12, top: 10),
+                  child: IgnorePointer(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.55),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.22),
+                        ),
+                      ),
+                      child: Text(
+                        _mapLabel,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
+          if (!_hasError && !_didStart)
+            Container(
+              color: Colors.black,
+              alignment: Alignment.center,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 28),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        color: Colors.white70,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    const Text(
+                      '로딩중',
+                      style: TextStyle(color: Colors.white),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            ),
           if (_hasError)
             Positioned.fill(
               child: Center(
-                child: ElevatedButton(
-                  onPressed: _retry,
-                  child: const Text('다시 시도'),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 28),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _statusText,
+                        style: const TextStyle(
+                          color: Color(0xFFFFA3B1),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 16),
+                      ElevatedButton(
+                        onPressed: _retry,
+                        child: const Text('다시 시도'),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
