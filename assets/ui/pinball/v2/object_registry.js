@@ -16,10 +16,11 @@ const DEFAULT_OBJECT_COLORS = {
   circle: '#ff62bf',
   portal: '#b68cff',
   blackHole: '#7b55b8',
-  whiteHole: '#f4fbff',
+  whiteHole: '#f8f8f8',
   stopwatch: '#ff5c6f',
   burst: '#5dff7a',
   hammer: '#ffa557',
+  bottomBumper: '#58b8ff',
   diamond: '#6affea',
   fan: '#7fd9ff',
   sticky: '#ff8fc9',
@@ -766,6 +767,40 @@ function compileObject(rawObject, entityId) {
           hitDistance: Math.max(0, toFiniteNumber(rawObject.hitDistance, toFiniteNumber(rawObject.moveDistance, 0.95))),
         },
       };
+    case 'bottom_bumper':
+      return {
+        entity: compileBox(
+          {
+            ...rawObject,
+            width: Math.max(0.08, toFiniteNumber(rawObject.width, 0.98)),
+            height: Math.max(0.05, toFiniteNumber(rawObject.height, 0.34)),
+            restitution: toFiniteNumber(rawObject.restitution, 0.16),
+            rotation: toFiniteNumber(rawObject.rotation, toFiniteNumber(rawObject.dirDeg, 270)),
+            color: typeof rawObject.color === 'string' ? rawObject.color : DEFAULT_OBJECT_COLORS.bottomBumper,
+          },
+          entityId,
+          true,
+        ),
+        behavior: {
+          kind: 'bottom_bumper',
+          oid: toId(rawObject.oid, `bottom_bumper_${entityId}`),
+          entityId,
+          x: toFiniteNumber(rawObject.x, 11.75),
+          y: toFiniteNumber(rawObject.y, 72),
+          width: Math.max(0.08, toFiniteNumber(rawObject.width, 0.98)),
+          height: Math.max(0.05, toFiniteNumber(rawObject.height, 0.34)),
+          rotation: toFiniteNumber(rawObject.rotation, toFiniteNumber(rawObject.dirDeg, 270)),
+          dirDeg: toFiniteNumber(rawObject.dirDeg, toFiniteNumber(rawObject.rotation, 270)),
+          mirror: toBoolean(rawObject.mirror, false),
+          force: Math.max(0.1, toFiniteNumber(rawObject.force, 3.8)),
+          intervalMs: Math.max(80, toFiniteNumber(rawObject.intervalMs, 780)),
+          triggerRadius: Math.max(0.2, toFiniteNumber(rawObject.triggerRadius, 1.25)),
+          hitDistance: Math.max(0.2, toFiniteNumber(rawObject.hitDistance, 1.15)),
+          swingDeg: Math.max(2, toFiniteNumber(rawObject.swingDeg, 34)),
+          swingDurationMs: Math.max(60, toFiniteNumber(rawObject.swingDurationMs, 210)),
+          cooldownMs: Math.max(0, toFiniteNumber(rawObject.cooldownMs, 160)),
+        },
+      };
     case 'fan':
       return {
         entity: compileBox(
@@ -1244,7 +1279,7 @@ function createBlackHoleNetworkBehavior(blackHoleDefs, whiteHoleDefs, env) {
     const radius = Math.max(0.12, toFiniteNumber(def && def.radius, 0.62));
     const shortPulse = boosted || whitePulseToggle;
     whitePulseToggle = !whitePulseToggle;
-    const duration = shortPulse ? 180 : 320;
+    const duration = shortPulse ? 150 : 280;
     roulette._effects.push({
       elapsed: 0,
       duration,
@@ -1262,20 +1297,20 @@ function createBlackHoleNetworkBehavior(blackHoleDefs, whiteHoleDefs, env) {
         const ratio = clamp(this.elapsed / Math.max(1, this.duration), 0, 1);
         const lineWidth = Math.max(0.58 / Math.max(1, toFiniteNumber(zoomScale, 1)), 0.36);
         const pulseRadius = radius * (0.88 + ratio * (shortPulse ? 1.02 : 1.46));
-        const coreAlpha = shortPulse ? 0.38 : 0.3;
+        const coreAlpha = shortPulse ? 0.28 : 0.22;
         ctx.save();
         ctx.translate(cx, cy);
-        ctx.globalAlpha = Math.max(0, 1 - ratio * 0.9);
-        ctx.fillStyle = `rgba(244, 251, 255, ${coreAlpha})`;
+        ctx.globalAlpha = Math.max(0, 1 - ratio * 0.94);
+        ctx.fillStyle = `rgba(246, 246, 246, ${coreAlpha})`;
         ctx.beginPath();
         ctx.arc(0, 0, radius * (0.82 + (1 - ratio) * 0.22), 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = `rgba(255, 255, 255, ${0.46 * (1 - ratio)})`;
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.34 * (1 - ratio)})`;
         ctx.lineWidth = lineWidth;
         ctx.beginPath();
         ctx.arc(0, 0, pulseRadius, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.strokeStyle = `rgba(188, 235, 255, ${0.26 * (1 - ratio)})`;
+        ctx.strokeStyle = `rgba(225, 225, 225, ${0.18 * (1 - ratio)})`;
         ctx.lineWidth = lineWidth * 0.82;
         ctx.beginPath();
         ctx.arc(0, 0, pulseRadius * 1.25, 0, Math.PI * 2);
@@ -1283,7 +1318,7 @@ function createBlackHoleNetworkBehavior(blackHoleDefs, whiteHoleDefs, env) {
         ctx.restore();
       },
     });
-    nextWhiteVisualAtByOid[String(def && def.oid ? def.oid : '__white')] = now + (shortPulse ? 240 : 420);
+    nextWhiteVisualAtByOid[String(def && def.oid ? def.oid : '__white')] = now + (shortPulse ? 280 : 480);
   }
 
   function teleportToWhiteHole(marble, body, sourceDef, targetDef, now) {
@@ -2190,6 +2225,307 @@ function createHammerBehavior(def, env) {
   };
 }
 
+function createBottomBumperBehavior(def, env) {
+  const cooldownByMarble = {};
+  let nextSwingAt = 0;
+  let swingStartAt = 0;
+  let swingUntil = 0;
+  let lastTickAt = 0;
+  let lastCenterX = NaN;
+  let lastCenterY = NaN;
+  let nextVisualAt = 0;
+
+  function getEntry() {
+    const roulette = env.getRoulette();
+    const physics = roulette && roulette.physics ? roulette.physics : null;
+    const entities = physics && Array.isArray(physics.entities) ? physics.entities : [];
+    for (let index = 0; index < entities.length; index += 1) {
+      const entry = entities[index];
+      const entityId = toFiniteNumber(entry && entry.shape && entry.shape.__v2eid, NaN);
+      if (Number.isFinite(entityId) && entityId === toFiniteNumber(def.entityId, -1)) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  function randomUnit() {
+    const rng = typeof env.getRng === 'function' ? env.getRng() : null;
+    const next = rng && typeof rng.next === 'function' ? rng.next() : Math.random();
+    return clamp(toFiniteNumber(next, 0.5), 0, 1);
+  }
+
+  function scheduleNextSwing(now) {
+    const baseInterval = Math.max(80, toFiniteNumber(def.intervalMs, 780));
+    const factor = 0.62 + randomUnit() * 0.86;
+    nextSwingAt = now + Math.round(baseInterval * factor);
+  }
+
+  function applyBodyTransform(entry, centerX, centerY, angleRad, velocityX, velocityY) {
+    const box2d = env.getBox2D();
+    if (!entry || !entry.body || !box2d || typeof box2d.b2Vec2 !== 'function') {
+      if (entry) {
+        entry.x = centerX;
+        entry.y = centerY;
+      }
+      return;
+    }
+    const body = entry.body;
+    try {
+      if (typeof body.SetEnabled === 'function') {
+        body.SetEnabled(true);
+      }
+      if (typeof body.SetAwake === 'function') {
+        body.SetAwake(true);
+      }
+      if (typeof body.SetTransform === 'function') {
+        body.SetTransform(new box2d.b2Vec2(centerX, centerY), angleRad);
+      }
+      if (typeof body.SetLinearVelocity === 'function') {
+        body.SetLinearVelocity(new box2d.b2Vec2(velocityX, velocityY));
+      }
+      if (typeof body.SetAngularVelocity === 'function') {
+        body.SetAngularVelocity(0);
+      }
+    } catch (_) {
+    }
+    entry.x = centerX;
+    entry.y = centerY;
+    if (entry.position && typeof entry.position === 'object') {
+      entry.position.x = centerX;
+      entry.position.y = centerY;
+    }
+    if (entry.shape && typeof entry.shape === 'object') {
+      entry.shape.rotation = angleRad;
+    }
+  }
+
+  function emitSwingVisual(now, tipX, tipY) {
+    if (now < nextVisualAt) {
+      return;
+    }
+    nextVisualAt = now + 120;
+    const roulette = env.getRoulette();
+    if (!roulette || !Array.isArray(roulette._effects)) {
+      return;
+    }
+    roulette._effects.push({
+      elapsed: 0,
+      duration: 220,
+      isDestroy: false,
+      update(deltaMs) {
+        this.elapsed += toFiniteNumber(deltaMs, 0);
+        if (this.elapsed >= this.duration) {
+          this.isDestroy = true;
+        }
+      },
+      render(ctx, zoomScale) {
+        if (!ctx) {
+          return;
+        }
+        const ratio = clamp(this.elapsed / Math.max(1, this.duration), 0, 1);
+        const radius = 0.24 + ratio * 0.58;
+        const alpha = Math.max(0, 0.45 * (1 - ratio));
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = 'rgba(122, 214, 255, 0.95)';
+        ctx.lineWidth = Math.max(0.55, 1.15 / Math.max(1, toFiniteNumber(zoomScale, 1)));
+        ctx.beginPath();
+        ctx.arc(tipX, tipY, radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      },
+    });
+  }
+
+  function updateTransform(now) {
+    const entry = getEntry();
+    const baseCenterX = toFiniteNumber(def.x, 0);
+    const baseCenterY = toFiniteNumber(def.y, 0);
+    const halfLen = Math.max(0.08, toFiniteNumber(def.width, 0.98));
+    const baseDirRad = degToRad(toFiniteNumber(def.dirDeg, toFiniteNumber(def.rotation, 270)));
+    const swingMagnitude = degToRad(Math.max(2, toFiniteNumber(def.swingDeg, 34)));
+    const swingDuration = Math.max(60, toFiniteNumber(def.swingDurationMs, 210));
+    const mirror = def.mirror === true;
+    const pivotSign = mirror ? 1 : -1;
+    const swingSign = mirror ? -1 : 1;
+
+    let swingRatio = 0;
+    let isSwinging = false;
+    if (swingUntil > now) {
+      isSwinging = true;
+      const progress = clamp((now - swingStartAt) / Math.max(1, swingDuration), 0, 1);
+      if (progress <= 0.45) {
+        swingRatio = Math.sin((progress / 0.45) * (Math.PI / 2));
+      } else {
+        swingRatio = Math.cos(((progress - 0.45) / 0.55) * (Math.PI / 2));
+      }
+    }
+    const angleRad = baseDirRad + swingMagnitude * swingRatio * swingSign;
+    const axisX = Math.cos(angleRad);
+    const axisY = Math.sin(angleRad);
+    const pivotX = baseCenterX + Math.cos(baseDirRad) * halfLen * pivotSign;
+    const pivotY = baseCenterY + Math.sin(baseDirRad) * halfLen * pivotSign;
+    const centerX = pivotX - axisX * halfLen * pivotSign;
+    const centerY = pivotY - axisY * halfLen * pivotSign;
+    const tipSign = -pivotSign;
+    const tipX = centerX + axisX * halfLen * tipSign;
+    const tipY = centerY + axisY * halfLen * tipSign;
+
+    const dtSec = Math.max(0.004, Math.min(0.08, toFiniteNumber(now - lastTickAt, 16) / 1000));
+    const velocityX = Number.isFinite(lastCenterX) ? (centerX - lastCenterX) / Math.max(0.0001, dtSec) : 0;
+    const velocityY = Number.isFinite(lastCenterY) ? (centerY - lastCenterY) / Math.max(0.0001, dtSec) : 0;
+    applyBodyTransform(entry, centerX, centerY, angleRad, velocityX, velocityY);
+    lastCenterX = centerX;
+    lastCenterY = centerY;
+    lastTickAt = now;
+
+    return {
+      centerX,
+      centerY,
+      tipX,
+      tipY,
+      angleRad,
+      halfLen,
+      isSwinging,
+      dtScale: dtSec / (1 / 60),
+    };
+  }
+
+  function canHitMarble(marbleId, now) {
+    if (!Number.isFinite(toFiniteNumber(marbleId, NaN))) {
+      return false;
+    }
+    const expires = toFiniteNumber(cooldownByMarble[String(marbleId)], 0);
+    return now >= expires;
+  }
+
+  function setHitCooldown(marbleId, now) {
+    const cooldownMs = Math.max(0, toFiniteNumber(def.cooldownMs, 160));
+    cooldownByMarble[String(marbleId)] = now + cooldownMs;
+  }
+
+  function applySwingImpulse(now, transformState) {
+    if (!transformState) {
+      return;
+    }
+    const roulette = env.getRoulette();
+    const physics = roulette && roulette.physics ? roulette.physics : null;
+    const box2d = env.getBox2D();
+    if (!roulette || !physics || !physics.marbleMap || !box2d || typeof box2d.b2Vec2 !== 'function') {
+      return;
+    }
+    const marbles = Array.isArray(roulette._marbles) ? roulette._marbles : [];
+    if (marbles.length <= 0) {
+      return;
+    }
+    const triggerRadius = Math.max(0.2, toFiniteNumber(def.triggerRadius, 1.25));
+    const triggerRadiusSq = triggerRadius * triggerRadius;
+    const dirX = Math.cos(transformState.angleRad);
+    const dirY = Math.sin(transformState.angleRad);
+    const force = Math.max(0.1, toFiniteNumber(def.force, 3.8));
+    const stateScale = transformState.isSwinging ? 1 : 0.2;
+    const baseImpulse = force * Math.max(0.1, toFiniteNumber(transformState.dtScale, 1)) * stateScale;
+    if (baseImpulse <= 0.001) {
+      return;
+    }
+    for (let index = 0; index < marbles.length; index += 1) {
+      const marble = marbles[index];
+      if (!marble || typeof marble.id !== 'number' || !canHitMarble(marble.id, now)) {
+        continue;
+      }
+      const body = physics.marbleMap[marble.id];
+      if (!body || typeof body.GetPosition !== 'function' || typeof body.ApplyLinearImpulseToCenter !== 'function') {
+        continue;
+      }
+      const pos = body.GetPosition();
+      const dx = toFiniteNumber(pos && pos.x, NaN) - transformState.tipX;
+      const dy = toFiniteNumber(pos && pos.y, NaN) - transformState.tipY;
+      if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
+        continue;
+      }
+      const distSq = dx * dx + dy * dy;
+      if (distSq > triggerRadiusSq) {
+        continue;
+      }
+      const dist = Math.sqrt(Math.max(distSq, 0.000001));
+      const forward = dx * dirX + dy * dirY;
+      if (forward < -Math.max(0.18, transformState.halfLen * 0.35)) {
+        continue;
+      }
+      const falloff = Math.max(0, 1 - dist / triggerRadius);
+      const impulse = baseImpulse * (0.35 + falloff * 0.65);
+      const impulseX = dirX * impulse;
+      const impulseY = dirY * impulse - Math.max(0.03, impulse * 0.18);
+      try {
+        if (typeof body.SetEnabled === 'function') {
+          body.SetEnabled(true);
+        }
+        if (typeof body.SetAwake === 'function') {
+          body.SetAwake(true);
+        }
+        body.ApplyLinearImpulseToCenter(new box2d.b2Vec2(impulseX, impulseY), true);
+      } catch (_) {
+        continue;
+      }
+      setHitCooldown(marble.id, now);
+      emitSwingVisual(now, transformState.tipX, transformState.tipY);
+    }
+  }
+
+  return {
+    kind: 'bottom_bumper',
+    oid: def.oid,
+    tick(now) {
+      if (env.isPaused()) {
+        return;
+      }
+      if (!Number.isFinite(toFiniteNumber(nextSwingAt, NaN)) || nextSwingAt <= 0) {
+        scheduleNextSwing(now - Math.max(80, toFiniteNumber(def.intervalMs, 780)));
+      }
+      if (now >= nextSwingAt && swingUntil <= now) {
+        swingStartAt = now;
+        swingUntil = now + Math.max(60, toFiniteNumber(def.swingDurationMs, 210));
+        scheduleNextSwing(now);
+      }
+      const transformState = updateTransform(now);
+      applySwingImpulse(now, transformState);
+    },
+    serializeState() {
+      return {
+        nextSwingAt: toFiniteNumber(nextSwingAt, 0),
+        swingStartAt: toFiniteNumber(swingStartAt, 0),
+        swingUntil: toFiniteNumber(swingUntil, 0),
+        lastTickAt: toFiniteNumber(lastTickAt, 0),
+        lastCenterX: toFiniteNumber(lastCenterX, toFiniteNumber(def.x, 0)),
+        lastCenterY: toFiniteNumber(lastCenterY, toFiniteNumber(def.y, 0)),
+        nextVisualAt: toFiniteNumber(nextVisualAt, 0),
+        cooldownByMarble: { ...cooldownByMarble },
+      };
+    },
+    restoreState(rawState) {
+      const safeState = rawState && typeof rawState === 'object' ? rawState : {};
+      nextSwingAt = Math.max(0, toFiniteNumber(safeState.nextSwingAt, 0));
+      swingStartAt = Math.max(0, toFiniteNumber(safeState.swingStartAt, 0));
+      swingUntil = Math.max(0, toFiniteNumber(safeState.swingUntil, 0));
+      lastTickAt = Math.max(0, toFiniteNumber(safeState.lastTickAt, 0));
+      lastCenterX = toFiniteNumber(safeState.lastCenterX, toFiniteNumber(def.x, 0));
+      lastCenterY = toFiniteNumber(safeState.lastCenterY, toFiniteNumber(def.y, 0));
+      nextVisualAt = Math.max(0, toFiniteNumber(safeState.nextVisualAt, 0));
+      for (const key of Object.keys(cooldownByMarble)) {
+        delete cooldownByMarble[key];
+      }
+      const nextCooldown = safeState.cooldownByMarble && typeof safeState.cooldownByMarble === 'object'
+        ? safeState.cooldownByMarble
+        : {};
+      for (const key of Object.keys(nextCooldown)) {
+        cooldownByMarble[key] = toFiniteNumber(nextCooldown[key], 0);
+      }
+      updateTransform(Date.now());
+    },
+  };
+}
+
 function createFanBehavior(def, env) {
   let lastTickAt = 0;
   let nextVisualAt = 0;
@@ -2705,6 +3041,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
   const hammerDefs = defs
     .filter((item) => item && item.kind === 'hammer')
     .map((item) => ({ ...item }));
+  const bottomBumperDefs = defs
+    .filter((item) => item && item.kind === 'bottom_bumper')
+    .map((item) => ({ ...item }));
   const fanDefs = defs
     .filter((item) => item && item.kind === 'fan')
     .map((item) => ({ ...item }));
@@ -2736,6 +3075,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
   for (const hammerDef of hammerDefs) {
     behaviors.push(createHammerBehavior(hammerDef, env));
   }
+  for (const bottomBumperDef of bottomBumperDefs) {
+    behaviors.push(createBottomBumperBehavior(bottomBumperDef, env));
+  }
   for (const fanDef of fanDefs) {
     behaviors.push(createFanBehavior(fanDef, env));
   }
@@ -2763,6 +3105,7 @@ export function createBehaviorRuntime(env, behaviorDefs) {
       const portal = {};
       const burst = {};
       const hammer = {};
+      const bottomBumper = {};
       const fan = {};
       const stopwatch = {};
       const sticky = {};
@@ -2782,6 +3125,8 @@ export function createBehaviorRuntime(env, behaviorDefs) {
           burst[behavior.oid] = state;
         } else if (behavior.kind === 'hammer') {
           hammer[behavior.oid] = state;
+        } else if (behavior.kind === 'bottom_bumper') {
+          bottomBumper[behavior.oid] = state;
         } else if (behavior.kind === 'fan') {
           fan[behavior.oid] = state;
         } else if (behavior.kind === 'stopwatch_bomb') {
@@ -2794,13 +3139,14 @@ export function createBehaviorRuntime(env, behaviorDefs) {
           wormhole[behavior.oid] = state;
         }
       }
-      return { portal, burst, hammer, fan, stopwatch, sticky, goalMarker, wormhole };
+      return { portal, burst, hammer, bottomBumper, fan, stopwatch, sticky, goalMarker, wormhole };
     },
     restoreState(rawState) {
       const safeState = rawState && typeof rawState === 'object' ? rawState : {};
       const portalState = safeState.portal && typeof safeState.portal === 'object' ? safeState.portal : {};
       const burstState = safeState.burst && typeof safeState.burst === 'object' ? safeState.burst : {};
       const hammerState = safeState.hammer && typeof safeState.hammer === 'object' ? safeState.hammer : {};
+      const bottomBumperState = safeState.bottomBumper && typeof safeState.bottomBumper === 'object' ? safeState.bottomBumper : {};
       const fanState = safeState.fan && typeof safeState.fan === 'object' ? safeState.fan : {};
       const stopwatchState = safeState.stopwatch && typeof safeState.stopwatch === 'object' ? safeState.stopwatch : {};
       const stickyState = safeState.sticky && typeof safeState.sticky === 'object' ? safeState.sticky : {};
@@ -2817,6 +3163,8 @@ export function createBehaviorRuntime(env, behaviorDefs) {
           behavior.restoreState(burstState[behavior.oid]);
         } else if (behavior.kind === 'hammer') {
           behavior.restoreState(hammerState[behavior.oid]);
+        } else if (behavior.kind === 'bottom_bumper') {
+          behavior.restoreState(bottomBumperState[behavior.oid]);
         } else if (behavior.kind === 'fan') {
           behavior.restoreState(fanState[behavior.oid]);
         } else if (behavior.kind === 'stopwatch_bomb') {

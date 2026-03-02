@@ -97,6 +97,7 @@ SOFTWARE.
   String? _candidateImageKey;
   Map<String, String>? _candidateImageDataUrls;
   String? _goalLineImageDataUrl;
+  final List<String> _runtimeDebugTrail = <String>[];
 
   List<String> get _candidates => _cachedCandidates ??= () {
     final seen = <String>{};
@@ -135,6 +136,31 @@ SOFTWARE.
         _hasError = true;
       }
     });
+    if (error) {
+      _dumpRuntimeDebugTrail();
+    }
+  }
+
+  void _pushRuntimeDebug(String tag, [Object? payload]) {
+    final now = DateTime.now();
+    final stamp = now.toIso8601String();
+    final suffix = payload == null ? '' : ' ${_decodeJsString(payload)}';
+    final line = '$stamp [$tag]$suffix';
+    _runtimeDebugTrail.add(line);
+    if (_runtimeDebugTrail.length > 120) {
+      _runtimeDebugTrail.removeRange(0, _runtimeDebugTrail.length - 120);
+    }
+    debugPrint('[PinballV2] $line');
+  }
+
+  void _dumpRuntimeDebugTrail() {
+    if (_runtimeDebugTrail.isEmpty) {
+      return;
+    }
+    final start = max(0, _runtimeDebugTrail.length - 18);
+    for (var i = start; i < _runtimeDebugTrail.length; i++) {
+      debugPrint('[PinballV2][trace] ${_runtimeDebugTrail[i]}');
+    }
   }
 
   void _clearStartupTimer() {
@@ -559,6 +585,13 @@ SOFTWARE.
   }
 
   Future<void> _loadPage({bool clearCache = false}) async {
+    _pushRuntimeDebug('load_page_begin', <String, Object>{
+      'clearCache': clearCache,
+      'mapId': widget.args.mapId.trim().isEmpty
+          ? 'v2_default'
+          : widget.args.mapId.trim(),
+      'candidateCount': _candidates.length,
+    });
     if (clearCache) {
       try {
         await _controller.clearCache();
@@ -578,6 +611,7 @@ SOFTWARE.
       'appCacheBust': '${DateTime.now().microsecondsSinceEpoch}',
     };
     final uri = baseUri.replace(path: '/index_v2.html', queryParameters: query);
+    _pushRuntimeDebug('load_page_uri', uri.toString());
     await _controller.loadRequest(uri);
   }
 
@@ -737,6 +771,14 @@ SOFTWARE.
       return;
     }
 
+    _pushRuntimeDebug('start_pinball_requested', <String, Object>{
+      'pageLoaded': _pageLoaded,
+      'candidateCount': _candidates.length,
+      'autoStart': widget.args.autoStart,
+      'mapId': widget.args.mapId.trim().isEmpty
+          ? 'v2_default'
+          : widget.args.mapId.trim(),
+    });
     _isStarting = true;
     _resetSlowMotionBannerState();
     _startStartupTimer();
@@ -795,6 +837,38 @@ SOFTWARE.
     }
   };
   const run = async () => {
+    const ensureStarted = async (api, state) => {
+      if (!payload.autoStart) {
+        return { ok: true, state, fallbackStartCount: 0 };
+      }
+      let nextState = state;
+      let fallbackStartCount = 0;
+      for (let retry = 0; retry < 7; retry += 1) {
+        const running = !!(nextState && nextState.running === true);
+        const marbleCount = Number(nextState && nextState.marbleCount);
+        if (running && Number.isFinite(marbleCount) && marbleCount > 0) {
+          return { ok: true, state: nextState, fallbackStartCount };
+        }
+        if (!api || typeof api.start !== 'function') {
+          return { ok: false, reason: 'api.start unavailable', state: nextState, fallbackStartCount };
+        }
+        fallbackStartCount += 1;
+        const startResult = await api.start();
+        await sleep(90);
+        nextState = typeof api.getState === 'function' ? api.getState() : nextState;
+        if (!startResult || startResult.ok !== true) {
+          if (retry >= 6) {
+            return {
+              ok: false,
+              reason: String((startResult && startResult.reason) || 'start failed after init'),
+              state: nextState,
+              fallbackStartCount,
+            };
+          }
+        }
+      }
+      return { ok: false, reason: 'start retry exhausted', state: nextState, fallbackStartCount };
+    };
     for (let attempt = 0; attempt < 280; attempt += 1) {
       suppressUi();
       const api = window.__appPinballV2;
@@ -803,7 +877,27 @@ SOFTWARE.
           const initResult = await api.init(payload);
           suppressUi();
           const state = typeof api.getState === 'function' ? api.getState() : null;
-          return JSON.stringify({ ok: initResult && initResult.ok === true, initResult, state });
+          if (!initResult || initResult.ok !== true) {
+            return JSON.stringify({ ok: false, reason: String((initResult && initResult.reason) || 'init failed'), initResult, state, attempt });
+          }
+          const started = await ensureStarted(api, state);
+          if (!started.ok) {
+            return JSON.stringify({
+              ok: false,
+              reason: started.reason || 'start guard failed',
+              initResult,
+              state: started.state,
+              fallbackStartCount: started.fallbackStartCount || 0,
+              attempt,
+            });
+          }
+          return JSON.stringify({
+            ok: true,
+            initResult,
+            state: started.state,
+            fallbackStartCount: started.fallbackStartCount || 0,
+            attempt,
+          });
         } catch (error) {
           const reason = String(error && error.message ? error.message : error);
           return JSON.stringify({ ok: false, reason });
@@ -824,9 +918,15 @@ SOFTWARE.
                     parsed?['initResult']?['reason'] ??
                     'V2 init 실패')
                 .toString();
+        _pushRuntimeDebug('start_pinball_failed', parsed ?? reason);
         _setStatus(reason, error: true);
         return;
       }
+      _pushRuntimeDebug('start_pinball_ok', <String, Object?>{
+        'attempt': parsed?['attempt'],
+        'fallbackStartCount': parsed?['fallbackStartCount'],
+        'state': parsed?['state'],
+      });
       _didStart = true;
       _clearStartupTimer();
       _setStatus('게임 진행 중...', clearError: true);
@@ -940,20 +1040,27 @@ SOFTWARE.
       return;
     }
     final event = parsed['event']?.toString() ?? '';
+    if (event == 'debug') {
+      _pushRuntimeDebug('runtime', parsed['payload']);
+      return;
+    }
     if (event == 'goal') {
       final winner = _extractWinnerName(parsed['payload']);
       if (winner.isNotEmpty) {
+        _pushRuntimeDebug('goal', parsed['payload']);
         _finish(winner);
       }
       return;
     }
     if (event == 'ready') {
+      _pushRuntimeDebug('ready', parsed['payload']);
       if (!_didStart && !_isStarting) {
         await _startPinball();
       }
       return;
     }
     if (event == 'spinStarted') {
+      _pushRuntimeDebug('spin_started', parsed['payload']);
       _didStart = true;
       _clearStartupTimer();
       _setStatus('게임 진행 중...', clearError: true);
@@ -998,6 +1105,7 @@ SOFTWARE.
             if (!mounted) {
               return;
             }
+            _pushRuntimeDebug('page_started');
             setState(() {
               _pageLoaded = false;
               _didStart = false;
@@ -1010,6 +1118,7 @@ SOFTWARE.
             if (!mounted) {
               return;
             }
+            _pushRuntimeDebug('page_finished');
             setState(() {
               _pageLoaded = true;
               _statusText = '엔진 연결 대기 중...';
@@ -1030,6 +1139,11 @@ SOFTWARE.
             if (error.isForMainFrame != true) {
               return;
             }
+            _pushRuntimeDebug('page_error', <String, Object?>{
+              'errorCode': error.errorCode,
+              'description': error.description,
+              'url': error.url,
+            });
             _setStatus('V2 페이지 로드 실패', error: true);
           },
         ),

@@ -12,7 +12,7 @@ import {
   stableHash,
 } from './snapshot_manager.js';
 
-const RUNTIME_REVISION = 'v2-runtime-r20260302-03';
+const RUNTIME_REVISION = 'v2-runtime-r20260302-04';
 const STATUS_ELEMENT_ID = 'v2Status';
 
 function toFiniteNumber(value, fallback) {
@@ -87,6 +87,7 @@ const control = {
   mapDisableSkillsInSlowMotion: true,
   fromApp: false,
 };
+let initInFlightPromise = null;
 
 const marbleImageState = {
   dataUrls: {},
@@ -722,6 +723,26 @@ function setBodyFixturesSensor(body, enabled) {
     }
   } catch (_) {
   }
+}
+
+function postDebug(step, payload = {}) {
+  const safeStep = typeof step === 'string' ? step : 'debug';
+  const safePayload = payload && typeof payload === 'object' ? payload : {};
+  const eventPayload = {
+    step: safeStep,
+    mapId: control.mapId,
+    paused: control.paused,
+    statusText: control.statusText,
+    runtimeRevision: RUNTIME_REVISION,
+    ...safePayload,
+  };
+  try {
+    if (typeof console !== 'undefined' && typeof console.debug === 'function') {
+      console.debug('[pinball-v2]', safeStep, eventPayload);
+    }
+  } catch (_) {
+  }
+  postBridge('debug', eventPayload);
 }
 
 function enforceCompiledEntityPhysics() {
@@ -1566,6 +1587,10 @@ async function start() {
   patchPhysicsStep();
   patchPhysicsCreateEntities();
   patchPhysicsGetEntities();
+  postDebug('start_begin', {
+    candidateCount: Array.isArray(control.candidates) ? control.candidates.length : 0,
+    marbleCountBefore: Array.isArray(roulette && roulette._marbles) ? roulette._marbles.length : 0,
+  });
   let marbles = Array.isArray(roulette._marbles) ? roulette._marbles : [];
   if (marbles.length === 0 && control.candidates.length > 0) {
     roulette.setMarbles(control.candidates.slice());
@@ -1576,7 +1601,9 @@ async function start() {
     marbles = Array.isArray(roulette._marbles) ? roulette._marbles : [];
   }
   if (marbles.length === 0) {
-    return { ok: false, reason: 'No marbles to start' };
+    const failed = { ok: false, reason: 'No marbles to start' };
+    postDebug('start_failed', failed);
+    return failed;
   }
   setWinningRank(control.winningRank);
   control.goalReceived = false;
@@ -1590,6 +1617,10 @@ async function start() {
     count: marbles.length,
   });
   setStatus('running');
+  postDebug('start_ok', {
+    marbleCount: marbles.length,
+    winningRank: control.winningRank,
+  });
   return { ok: true };
 }
 
@@ -1671,69 +1702,102 @@ function getCurrentMapJson() {
 }
 
 async function init(payload = {}) {
-  await ensureRouletteReady();
-  ensureCanvasFillLayout();
-  control.fromApp = detectFromAppContext(payload);
-  applyAppVisualCompatibility();
-  patchPhysicsStep();
-  patchPhysicsCreateEntities();
-  patchPhysicsGetEntities();
-  wireGoalEvent();
-  startTickLoop();
+  if (initInFlightPromise) {
+    postDebug('init_wait_existing');
+    return initInFlightPromise;
+  }
+  initInFlightPromise = (async () => {
+    const safePayload = payload && typeof payload === 'object' ? payload : {};
+    postDebug('init_begin', {
+      payloadMapId: typeof safePayload.mapId === 'string' ? safePayload.mapId.trim() : '',
+      payloadCandidateCount: Array.isArray(safePayload.candidates) ? safePayload.candidates.length : 0,
+      autoStart: safePayload.autoStart === true,
+    });
+    await ensureRouletteReady();
+    ensureCanvasFillLayout();
+    control.fromApp = detectFromAppContext(safePayload);
+    applyAppVisualCompatibility();
+    patchPhysicsStep();
+    patchPhysicsCreateEntities();
+    patchPhysicsGetEntities();
+    wireGoalEvent();
+    startTickLoop();
 
-  const mapIdFromQuery = new URLSearchParams(window.location.search).get('mapId') || '';
-  const payloadMapId = typeof payload.mapId === 'string' ? payload.mapId.trim() : '';
-  const selectedMapId = payloadMapId || mapIdFromQuery || control.mapId || 'v2_default';
+    const mapIdFromQuery = new URLSearchParams(window.location.search).get('mapId') || '';
+    const payloadMapId = typeof safePayload.mapId === 'string' ? safePayload.mapId.trim() : '';
+    const selectedMapId = payloadMapId || mapIdFromQuery || control.mapId || 'v2_default';
 
-  const payloadCandidates = normalizeCandidates(payload.candidates);
-  if (payloadCandidates.length > 0) {
-    control.candidates = payloadCandidates;
-  }
-  if (Number.isFinite(Number(payload.winningRank))) {
-    setWinningRank(Math.max(1, Math.floor(Number(payload.winningRank))));
-  } else {
-    setWinningRank(control.winningRank);
-  }
-  if (Number.isFinite(Number(payload.seed))) {
-    control.rngSeed = toFiniteNumber(payload.seed, control.rngSeed);
-    control.rng.setSeed(control.rngSeed);
-  }
-  setPayloadMarbleImages(payload.imageDataUrls);
-  setPayloadGoalMarkerImage(payload.goalLineImageDataUrl);
+    const payloadCandidates = normalizeCandidates(safePayload.candidates);
+    if (payloadCandidates.length > 0) {
+      control.candidates = payloadCandidates;
+    }
+    if (Number.isFinite(Number(safePayload.winningRank))) {
+      setWinningRank(Math.max(1, Math.floor(Number(safePayload.winningRank))));
+    } else {
+      setWinningRank(control.winningRank);
+    }
+    if (Number.isFinite(Number(safePayload.seed))) {
+      control.rngSeed = toFiniteNumber(safePayload.seed, control.rngSeed);
+      control.rng.setSeed(control.rngSeed);
+    }
+    setPayloadMarbleImages(safePayload.imageDataUrls);
+    setPayloadGoalMarkerImage(safePayload.goalLineImageDataUrl);
 
-  const mapResult = await loadMapById(selectedMapId);
-  if (!mapResult.ok) {
-    setStatus(mapResult.reason || 'map load failed');
-    return mapResult;
-  }
-  if (control.candidates.length > 0) {
-    const candidateResult = await setCandidates(control.candidates);
-    if (!candidateResult || candidateResult.ok !== true) {
-      const reason = candidateResult && candidateResult.reason ? candidateResult.reason : 'set candidates failed';
-      setStatus(reason);
-      return { ok: false, reason };
+    const mapResult = await loadMapById(selectedMapId);
+    if (!mapResult.ok) {
+      const failed = { ok: false, reason: mapResult.reason || 'map load failed' };
+      setStatus(failed.reason);
+      postDebug('init_failed_map', failed);
+      return failed;
+    }
+    if (control.candidates.length > 0) {
+      const candidateResult = await setCandidates(control.candidates);
+      if (!candidateResult || candidateResult.ok !== true) {
+        const reason = candidateResult && candidateResult.reason ? candidateResult.reason : 'set candidates failed';
+        const failed = { ok: false, reason };
+        setStatus(reason);
+        postDebug('init_failed_candidates', failed);
+        return failed;
+      }
+      postDebug('init_candidates_ready', {
+        candidateCount: control.candidates.length,
+      });
+    }
+    if (safePayload.autoStart === true) {
+      const startResult = await start();
+      if (!startResult || startResult.ok !== true) {
+        const reason = startResult && startResult.reason ? startResult.reason : 'start failed';
+        const failed = { ok: false, reason };
+        setStatus(reason);
+        postDebug('init_failed_start', failed);
+        return failed;
+      }
+    } else {
+      await pause();
+      setSkillsEnabled(false);
+    }
+
+    postBridge('ready', {
+      mapId: control.mapId,
+      candidates: control.candidates.length,
+      runtimeRevision: RUNTIME_REVISION,
+    });
+    applyAppVisualCompatibility();
+    setStatus(`ready: ${control.mapId}`);
+    const success = { ok: true, mapId: control.mapId };
+    postDebug('init_ok', {
+      mapId: control.mapId,
+      candidateCount: control.candidates.length,
+    });
+    return success;
+  })();
+  try {
+    return await initInFlightPromise;
+  } finally {
+    if (initInFlightPromise) {
+      initInFlightPromise = null;
     }
   }
-  if (payload.autoStart === true) {
-    const startResult = await start();
-    if (!startResult || startResult.ok !== true) {
-      const reason = startResult && startResult.reason ? startResult.reason : 'start failed';
-      setStatus(reason);
-      return { ok: false, reason };
-    }
-  } else {
-    await pause();
-    setSkillsEnabled(false);
-  }
-
-  postBridge('ready', {
-    mapId: control.mapId,
-    candidates: control.candidates.length,
-    runtimeRevision: RUNTIME_REVISION,
-  });
-  applyAppVisualCompatibility();
-  setStatus(`ready: ${control.mapId}`);
-  return { ok: true, mapId: control.mapId };
 }
 
 const api = {
@@ -1761,7 +1825,19 @@ const api = {
 window.__appPinballV2 = api;
 installContextMenuGuard();
 setStatus('v2 runtime booting...');
-void init().catch((error) => {
-  const message = String(error && error.message ? error.message : error);
-  setStatus(`init failed: ${message}`);
-});
+const bootFromApp = detectFromAppContext();
+if (bootFromApp) {
+  control.fromApp = true;
+  ensureCanvasFillLayout();
+  applyAppVisualCompatibility();
+  setStatus('waiting init payload from app');
+  postDebug('boot_wait_app_init', {
+    search: String(window.location.search || ''),
+  });
+} else {
+  void init().catch((error) => {
+    const message = String(error && error.message ? error.message : error);
+    setStatus(`init failed: ${message}`);
+    postDebug('boot_init_failed', { message });
+  });
+}
