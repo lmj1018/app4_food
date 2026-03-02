@@ -2521,6 +2521,8 @@ function createBottomBumperBehavior(def, env) {
     const tipSign = -pivotSign;
     const tipX = centerX + axisX * halfLen * tipSign;
     const tipY = centerY + axisY * halfLen * tipSign;
+    const tipDirX = axisX * tipSign;
+    const tipDirY = axisY * tipSign;
 
     const dtSec = Math.max(0.004, Math.min(0.08, toFiniteNumber(now - lastTickAt, 16) / 1000));
     const velocityX = Number.isFinite(lastCenterX) ? (centerX - lastCenterX) / Math.max(0.0001, dtSec) : 0;
@@ -2537,6 +2539,8 @@ function createBottomBumperBehavior(def, env) {
       tipY,
       angleRad,
       halfLen,
+      tipDirX,
+      tipDirY,
       isSwinging,
       dtScale: dtSec / (1 / 60),
     };
@@ -2571,8 +2575,8 @@ function createBottomBumperBehavior(def, env) {
     }
     const triggerRadius = Math.max(0.2, toFiniteNumber(def.triggerRadius, 1.25));
     const triggerRadiusSq = triggerRadius * triggerRadius;
-    const dirX = Math.cos(transformState.angleRad);
-    const dirY = Math.sin(transformState.angleRad);
+    const dirX = toFiniteNumber(transformState.tipDirX, Math.cos(transformState.angleRad));
+    const dirY = toFiniteNumber(transformState.tipDirY, Math.sin(transformState.angleRad));
     const force = Math.max(0.1, toFiniteNumber(def.force, 3.8));
     const stateScale = transformState.isSwinging ? 1 : 0.2;
     const baseImpulse = force * Math.max(0.1, toFiniteNumber(transformState.dtScale, 1)) * stateScale;

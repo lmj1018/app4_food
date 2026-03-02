@@ -1733,6 +1733,76 @@ function isPolylineClosed(points, threshold = 0.001) {
   return Math.hypot(dx, dy) <= Math.max(0, toFinite(threshold, 0.001));
 }
 
+function getBottomBumperBaseDirDeg(obj) {
+  return normalizeDeg(toFinite(obj && obj.dirDeg, toFinite(obj && obj.rotation, 270)));
+}
+
+function getBottomBumperEffectiveDirDeg(obj) {
+  const base = getBottomBumperBaseDirDeg(obj);
+  return normalizeDeg(base + (obj && obj.mirror === true ? 180 : 0));
+}
+
+function getBottomBumperPivotWorld(obj) {
+  if (!obj || String(obj.type || '') !== 'bottom_bumper') {
+    return null;
+  }
+  const centerX = toFinite(obj.x, 0);
+  const centerY = toFinite(obj.y, 0);
+  const halfWidth = Math.max(0.08, toFinite(obj.width, 0.98));
+  const baseRad = (Math.PI / 180) * getBottomBumperBaseDirDeg(obj);
+  const pivotSign = obj.mirror === true ? 1 : -1;
+  return {
+    x: round1(centerX + Math.cos(baseRad) * halfWidth * pivotSign),
+    y: round1(centerY + Math.sin(baseRad) * halfWidth * pivotSign),
+  };
+}
+
+function recenterBottomBumperFromPivot(obj, pivotPoint, dirDeg = null) {
+  if (!obj || String(obj.type || '') !== 'bottom_bumper' || !pivotPoint) {
+    return false;
+  }
+  const nextDir = Number.isFinite(toFinite(dirDeg, NaN))
+    ? normalizeDeg(toFinite(dirDeg, 270))
+    : getBottomBumperBaseDirDeg(obj);
+  const halfWidth = Math.max(0.08, toFinite(obj.width, 0.98));
+  const pivotSign = obj.mirror === true ? 1 : -1;
+  const rad = (Math.PI / 180) * nextDir;
+  obj.dirDeg = round1(nextDir);
+  obj.rotation = obj.dirDeg;
+  obj.x = round1(toFinite(pivotPoint.x, 0) - Math.cos(rad) * halfWidth * pivotSign);
+  obj.y = round1(toFinite(pivotPoint.y, 0) - Math.sin(rad) * halfWidth * pivotSign);
+  return true;
+}
+
+function getBottomBumperDirectionHandleDistance(obj) {
+  const halfWidth = Math.max(0.08, toFinite(obj && obj.width, 0.98));
+  return Math.max(0.45, halfWidth * 2 + 0.35);
+}
+
+function setBottomBumperDirectionByPivot(obj, point, shiftKey = false) {
+  if (!obj || String(obj.type || '') !== 'bottom_bumper') {
+    return false;
+  }
+  const pivotPoint = getBottomBumperPivotWorld(obj);
+  if (!pivotPoint) {
+    return false;
+  }
+  let dx = toFinite(point && point.x, pivotPoint.x) - pivotPoint.x;
+  let dy = toFinite(point && point.y, pivotPoint.y) - pivotPoint.y;
+  if (Math.hypot(dx, dy) < 0.03) {
+    const fallbackEffectiveDeg = getBottomBumperEffectiveDirDeg(obj);
+    const fallbackRad = (Math.PI / 180) * fallbackEffectiveDeg;
+    dx = Math.cos(fallbackRad);
+    dy = Math.sin(fallbackRad);
+  }
+  let effectiveDirDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
+  if (shiftKey) {
+    effectiveDirDeg = snapAngleDeg(effectiveDirDeg, 45);
+  }
+  const baseDirDeg = normalizeDeg(effectiveDirDeg + (obj.mirror === true ? 180 : 0));
+  return recenterBottomBumperFromPivot(obj, pivotPoint, baseDirDeg);
+}
+
 function corridorGapForObject(obj, fallback = 1.2) {
   const base = Math.max(0.2, toFinite(fallback, 1.2));
   if (!obj || typeof obj !== 'object') {
@@ -3152,8 +3222,15 @@ function applyObjectEditorValues() {
     return;
   }
   if (obj.type === 'bottom_bumper') {
-    obj.x = round1(toFinite(elements.objXInput ? elements.objXInput.value : obj.x, toFinite(obj.x, 0)));
-    obj.y = round1(toFinite(elements.objYInput ? elements.objYInput.value : obj.y, toFinite(obj.y, 0)));
+    const previousX = toFinite(obj.x, 0);
+    const previousY = toFinite(obj.y, 0);
+    const previousPivot = getBottomBumperPivotWorld(obj);
+    const previousMirror = obj.mirror === true;
+    const nextX = round1(toFinite(elements.objXInput ? elements.objXInput.value : obj.x, previousX));
+    const nextY = round1(toFinite(elements.objYInput ? elements.objYInput.value : obj.y, previousY));
+    const centerEdited = Math.abs(nextX - previousX) > 0.0001 || Math.abs(nextY - previousY) > 0.0001;
+    obj.x = nextX;
+    obj.y = nextY;
     obj.triggerRadius = round1(toFinite(
       elements.objExtra1Input ? elements.objExtra1Input.value : obj.triggerRadius,
       toFinite(obj.triggerRadius, 1.25),
@@ -3170,6 +3247,9 @@ function applyObjectEditorValues() {
       : (rawRotation ? toFinite(rawRotation, fallbackDir) : fallbackDir);
     obj.dirDeg = round1(normalizeDeg(nextDir));
     obj.rotation = obj.dirDeg;
+    if (previousPivot && previousMirror !== obj.mirror && !centerEdited) {
+      recenterBottomBumperFromPivot(obj, previousPivot, obj.dirDeg);
+    }
     obj.force = round1(toFinite(elements.objForceInput ? elements.objForceInput.value : obj.force, toFinite(obj.force, 3.8)));
     obj.intervalMs = Math.round(Math.max(80, toFinite(
       elements.objIntervalInput ? elements.objIntervalInput.value : obj.intervalMs,
@@ -3326,7 +3406,11 @@ function reverseSelectedObjectRotation() {
       continue;
     }
     if (obj.type === 'bottom_bumper') {
+      const pivotPoint = getBottomBumperPivotWorld(obj);
       obj.mirror = obj.mirror !== true;
+      if (pivotPoint) {
+        recenterBottomBumperFromPivot(obj, pivotPoint, getBottomBumperBaseDirDeg(obj));
+      }
       lastMessage = `하단 범퍼 좌우 반전 완료 (mirror=${obj.mirror ? 1 : 0})`;
       changedCount += 1;
       continue;
@@ -4259,16 +4343,25 @@ function getHammerDirectionHandleWorld(obj) {
   if (!obj || !isAimDirectionalObject(obj)) {
     return null;
   }
-  const cx = toFinite(obj.x, 0);
-  const cy = toFinite(obj.y, 0);
-  const defaultDir = obj.type === 'bottom_bumper' ? 270 : (obj.type === 'fan' ? 0 : 90);
-  const dir = (Math.PI / 180) * normalizeDeg(toFinite(obj.dirDeg, defaultDir));
-  const defaultDistance = obj.type === 'fan' ? 2.8 : (obj.type === 'bottom_bumper' ? 1.15 : 0.95);
-  const distance = Math.max(0.2, toFinite(obj.hitDistance, defaultDistance));
+  const isBottomBumper = String(obj.type || '') === 'bottom_bumper';
+  const anchor = isBottomBumper
+    ? (getBottomBumperPivotWorld(obj) || { x: toFinite(obj.x, 0), y: toFinite(obj.y, 0) })
+    : { x: toFinite(obj.x, 0), y: toFinite(obj.y, 0) };
+  const defaultDir = obj.type === 'fan' ? 0 : 90;
+  const dirDeg = isBottomBumper
+    ? getBottomBumperEffectiveDirDeg(obj)
+    : normalizeDeg(toFinite(obj.dirDeg, defaultDir));
+  const dir = (Math.PI / 180) * dirDeg;
+  const defaultDistance = isBottomBumper
+    ? getBottomBumperDirectionHandleDistance(obj)
+    : (obj.type === 'fan' ? 2.8 : 0.95);
+  const distance = isBottomBumper
+    ? getBottomBumperDirectionHandleDistance(obj)
+    : Math.max(0.2, toFinite(obj.hitDistance, defaultDistance));
   return {
     kind: 'hammer_dir',
-    x: round1(cx + Math.cos(dir) * distance),
-    y: round1(cy + Math.sin(dir) * distance),
+    x: round1(anchor.x + Math.cos(dir) * distance),
+    y: round1(anchor.y + Math.sin(dir) * distance),
   };
 }
 
@@ -4878,15 +4971,23 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
     const hammerHandle = getHammerDirectionHandleWorld(obj);
     if (hammerHandle) {
       const hp = worldToCanvas(layout, hammerHandle.x, hammerHandle.y);
+      const centerWorld = {
+        x: toFinite(obj.x, 0),
+        y: toFinite(obj.y, 0),
+      };
       ctx.save();
       const isFan = obj.type === 'fan';
       const isBottomBumper = obj.type === 'bottom_bumper';
+      const anchorWorld = isBottomBumper
+        ? (getBottomBumperPivotWorld(obj) || centerWorld)
+        : centerWorld;
+      const anchor = worldToCanvas(layout, anchorWorld.x, anchorWorld.y);
       const lineColor = isFan ? '#8fe6ff' : (isBottomBumper ? '#8fd5ff' : '#9fd7ff');
       ctx.strokeStyle = lineColor;
       ctx.lineWidth = 1.6;
       ctx.setLineDash([6, 4]);
       ctx.beginPath();
-      ctx.moveTo(center.x, center.y);
+      ctx.moveTo(anchor.x, anchor.y);
       ctx.lineTo(hp.x, hp.y);
       ctx.stroke();
       ctx.setLineDash([]);
@@ -4894,10 +4995,15 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
         fill: 'rgba(8,16,36,0.95)',
         stroke: lineColor,
       });
-      const distWorld = Math.max(0.2, toFinite(obj.hitDistance, isFan ? 2.8 : (isBottomBumper ? 1.15 : 0.95)));
-      const dir = (Math.PI / 180) * normalizeDeg(toFinite(obj.dirDeg, isFan ? 0 : (isBottomBumper ? 270 : 90)));
-      const targetX = toFinite(obj.x, 0) + Math.cos(dir) * distWorld;
-      const targetY = toFinite(obj.y, 0) + Math.sin(dir) * distWorld;
+      const targetWorldX = toFinite(hammerHandle.x, anchorWorld.x);
+      const targetWorldY = toFinite(hammerHandle.y, anchorWorld.y);
+      const distWorld = Math.max(
+        0.2,
+        Math.hypot(targetWorldX - anchorWorld.x, targetWorldY - anchorWorld.y),
+      );
+      const dir = Math.atan2(targetWorldY - anchorWorld.y, targetWorldX - anchorWorld.x);
+      const targetX = anchorWorld.x + Math.cos(dir) * distWorld;
+      const targetY = anchorWorld.y + Math.sin(dir) * distWorld;
       if (isFan) {
         const zone = fanZoneConfig(obj);
         if (zone) {
@@ -4907,6 +5013,25 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
             waveStroke: 'rgba(189, 246, 255, 0.74)',
           });
         }
+      } else if (isBottomBumper) {
+        const preview = deepClone(obj);
+        setBottomBumperDirectionByPivot(preview, { x: targetX, y: targetY }, false);
+        const ghost = worldToCanvas(layout, toFinite(preview.x, 0), toFinite(preview.y, 0));
+        const halfW = Math.max(0.08, toFinite(preview.width, 0.9)) * layout.scale;
+        const halfH = Math.max(0.05, toFinite(preview.height, 0.32)) * layout.scale;
+        const drawDir = (Math.PI / 180) * getBottomBumperBaseDirDeg(preview);
+        ctx.translate(ghost.x, ghost.y);
+        ctx.rotate(drawDir);
+        if (preview.mirror === true) {
+          ctx.scale(-1, 1);
+        }
+        ctx.fillStyle = 'rgba(88, 184, 255, 0.2)';
+        ctx.strokeStyle = '#8fd5ff';
+        ctx.lineWidth = 1.5;
+        drawBottomBumperShapePath(ctx, halfW, halfH);
+        ctx.fill();
+        ctx.stroke();
+        drawBottomBumperPivotDetail(ctx, halfW, halfH);
       } else {
         const ghost = worldToCanvas(layout, targetX, targetY);
         const halfW = Math.max(0.08, toFinite(obj.width, 0.9)) * layout.scale;
@@ -5139,14 +5264,34 @@ function drawCreateDragPreview(ctx, layout, drag) {
   }
   ctx.lineWidth = 2;
   if (tool === 'bottom_bumper') {
-    const centerX = (left + left + width) / 2;
-    const centerY = (top + top + height) / 2;
+    const pivot = { x: start.x, y: start.y };
+    let dx = current.x - pivot.x;
+    let dy = current.y - pivot.y;
+    let length = Math.hypot(dx, dy);
+    if (length < 0.05) {
+      length = 1.96;
+      dx = 0;
+      dy = -length;
+    }
+    let angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+    if (drag.shiftKey) {
+      angle = snapAngleDeg(angle, 45);
+    }
+    const halfWidthWorld = Math.max(0.15, length / 2);
+    const halfHeightWorld = Math.max(0.08, Math.min(2.4, halfWidthWorld * 0.34));
+    const angleRad = (Math.PI / 180) * angle;
+    const centerWorldX = pivot.x + Math.cos(angleRad) * halfWidthWorld;
+    const centerWorldY = pivot.y + Math.sin(angleRad) * halfWidthWorld;
+    const center = worldToCanvas(layout, centerWorldX, centerWorldY);
+    const drawHalfWidth = halfWidthWorld * layout.scale;
+    const drawHalfHeight = halfHeightWorld * layout.scale;
     ctx.save();
-    ctx.translate(centerX, centerY);
-    drawBottomBumperShapePath(ctx, width / 2, height / 2);
+    ctx.translate(center.x, center.y);
+    ctx.rotate(angleRad);
+    drawBottomBumperShapePath(ctx, drawHalfWidth, drawHalfHeight);
     ctx.fill();
     ctx.stroke();
-    drawBottomBumperPivotDetail(ctx, width / 2, height / 2);
+    drawBottomBumperPivotDetail(ctx, drawHalfWidth, drawHalfHeight);
     ctx.restore();
   } else {
     ctx.beginPath();
@@ -5368,22 +5513,40 @@ function drawMakerCanvas() {
       const isFan = directional.type === 'fan';
       const isBottomBumper = directional.type === 'bottom_bumper';
       const isSticky = directional.type === 'sticky_pad';
-      const center = worldToCanvas(layout, directional.x, directional.y);
+      const centerWorld = {
+        x: toFinite(directional.x, 0),
+        y: toFinite(directional.y, 0),
+      };
+      const pivotWorld = isBottomBumper
+        ? (getBottomBumperPivotWorld(directional) || centerWorld)
+        : centerWorld;
+      const anchorWorld = isBottomBumper ? pivotWorld : centerWorld;
+      const anchor = worldToCanvas(layout, anchorWorld.x, anchorWorld.y);
       const hoverWorld = editorState.canvasHoverWorld;
       const pathB = Array.isArray(directional.pathB) ? directional.pathB : null;
       const stickyTargetX = pathB ? toFinite(pathB[0], toFinite(directional.x, 0) + 2.4) : toFinite(directional.x, 0) + 2.4;
       const stickyTargetY = pathB ? toFinite(pathB[1], toFinite(directional.y, 0)) : toFinite(directional.y, 0);
       const baseRad = (Math.PI / 180) * toFinite(
-        directional.dirDeg,
-        isFan ? 0 : (isBottomBumper ? 270 : 90),
+        isBottomBumper
+          ? getBottomBumperEffectiveDirDeg(directional)
+          : directional.dirDeg,
+        isFan ? 0 : 90,
       );
       const targetWorld = hoverWorld
         ? { x: hoverWorld.x, y: hoverWorld.y }
         : (isSticky
           ? { x: stickyTargetX, y: stickyTargetY }
           : {
-            x: toFinite(directional.x, 0) + Math.cos(baseRad) * Math.max(0.2, toFinite(directional.hitDistance, isFan ? 2.8 : (isBottomBumper ? 1.15 : 1))),
-            y: toFinite(directional.y, 0) + Math.sin(baseRad) * Math.max(0.2, toFinite(directional.hitDistance, isFan ? 2.8 : (isBottomBumper ? 1.15 : 1))),
+            x: anchorWorld.x + Math.cos(baseRad) * (
+              isBottomBumper
+                ? getBottomBumperDirectionHandleDistance(directional)
+                : Math.max(0.2, toFinite(directional.hitDistance, isFan ? 2.8 : 1))
+            ),
+            y: anchorWorld.y + Math.sin(baseRad) * (
+              isBottomBumper
+                ? getBottomBumperDirectionHandleDistance(directional)
+                : Math.max(0.2, toFinite(directional.hitDistance, isFan ? 2.8 : 1))
+            ),
           });
       const target = worldToCanvas(layout, targetWorld.x, targetWorld.y);
       ctx.save();
@@ -5391,7 +5554,7 @@ function drawMakerCanvas() {
       ctx.lineWidth = 1.8;
       ctx.setLineDash([6, 4]);
       ctx.beginPath();
-      ctx.moveTo(center.x, center.y);
+      ctx.moveTo(anchor.x, anchor.y);
       ctx.lineTo(target.x, target.y);
       ctx.stroke();
       ctx.setLineDash([]);
@@ -5400,16 +5563,16 @@ function drawMakerCanvas() {
         stroke: isSticky ? '#ffaad9' : (isFan ? '#8fe6ff' : (isBottomBumper ? '#8fd5ff' : '#9fd7ff')),
         lineWidth: 1.6,
       });
-      const dir = Math.atan2(target.y - center.y, target.x - center.x);
+      const dir = Math.atan2(target.y - anchor.y, target.x - anchor.x);
       const distWorld = Math.max(
         0.2,
         Math.hypot(
-          targetWorld.x - toFinite(directional.x, 0),
-          targetWorld.y - toFinite(directional.y, 0),
+          targetWorld.x - anchorWorld.x,
+          targetWorld.y - anchorWorld.y,
         ),
       );
-      const hitX = toFinite(directional.x, 0) + Math.cos(dir) * distWorld;
-      const hitY = toFinite(directional.y, 0) + Math.sin(dir) * distWorld;
+      const hitX = anchorWorld.x + Math.cos(dir) * distWorld;
+      const hitY = anchorWorld.y + Math.sin(dir) * distWorld;
       if (isFan) {
         const zone = fanZoneConfig(directional);
         if (zone) {
@@ -5433,6 +5596,25 @@ function drawMakerCanvas() {
         ctx.rect(-halfW, -halfH, halfW * 2, halfH * 2);
         ctx.fill();
         ctx.stroke();
+      } else if (isBottomBumper) {
+        const preview = deepClone(directional);
+        setBottomBumperDirectionByPivot(preview, targetWorld, false);
+        const ghost = worldToCanvas(layout, toFinite(preview.x, 0), toFinite(preview.y, 0));
+        const halfW = Math.max(0.08, toFinite(preview.width, 0.9)) * layout.scale;
+        const halfH = Math.max(0.05, toFinite(preview.height, 0.32)) * layout.scale;
+        const drawDir = (Math.PI / 180) * getBottomBumperBaseDirDeg(preview);
+        ctx.translate(ghost.x, ghost.y);
+        ctx.rotate(drawDir);
+        if (preview.mirror === true) {
+          ctx.scale(-1, 1);
+        }
+        ctx.fillStyle = 'rgba(88, 184, 255, 0.2)';
+        ctx.strokeStyle = '#8fd5ff';
+        ctx.lineWidth = 1.5;
+        drawBottomBumperShapePath(ctx, halfW, halfH);
+        ctx.fill();
+        ctx.stroke();
+        drawBottomBumperPivotDetail(ctx, halfW, halfH);
       } else {
         const ghost = worldToCanvas(layout, hitX, hitY);
         const halfW = Math.max(0.08, toFinite(directional.width, 0.9)) * layout.scale;
@@ -5803,18 +5985,29 @@ function createFanFromDrag(startWorld, endWorld) {
   };
 }
 
-function createBottomBumperFromDrag(startWorld, endWorld) {
+function createBottomBumperFromDrag(startWorld, endWorld, options = {}) {
   const mapJson = getMutableMap();
   const goalY = Math.max(25, toFinite(mapJson.stage && mapJson.stage.goalY, 210) + 4);
-  const start = clampWorldPoint(startWorld, goalY);
-  const end = clampWorldPoint(endWorld, goalY);
-  const minSize = 0.08;
-  const fullWidth = Math.max(minSize, Math.abs(end.x - start.x));
-  const fullHeight = Math.max(minSize, Math.abs(end.y - start.y));
-  const centerX = round1((start.x + end.x) / 2);
-  const centerY = round1((start.y + end.y) / 2);
-  const halfWidth = round1(Math.max(0.15, fullWidth / 2));
-  const halfHeight = round1(Math.max(0.08, fullHeight / 2));
+  const pivot = clampWorldPoint(startWorld, goalY);
+  let tip = clampWorldPoint(endWorld, goalY);
+  if (options.shiftKey === true) {
+    tip = snapPointBy45(pivot, tip);
+    tip = clampWorldPoint(tip, goalY);
+  }
+  let dx = tip.x - pivot.x;
+  let dy = tip.y - pivot.y;
+  let length = Math.hypot(dx, dy);
+  if (length < 0.05) {
+    length = 1.96;
+    dx = 0;
+    dy = -length;
+  }
+  const dirDeg = normalizeDeg((Math.atan2(dy, dx) * 180) / Math.PI);
+  const halfWidth = round1(Math.max(0.15, length / 2));
+  const halfHeight = round1(clamp(Math.max(0.08, halfWidth * 0.34), 0.08, 2.4));
+  const dirRad = (Math.PI / 180) * dirDeg;
+  const centerX = round1(pivot.x + Math.cos(dirRad) * halfWidth);
+  const centerY = round1(pivot.y + Math.sin(dirRad) * halfWidth);
   return {
     oid: nextOid('bottom_bumper'),
     type: 'bottom_bumper',
@@ -5822,8 +6015,8 @@ function createBottomBumperFromDrag(startWorld, endWorld) {
     y: centerY,
     width: halfWidth,
     height: halfHeight,
-    rotation: 270,
-    dirDeg: 270,
+    rotation: round1(dirDeg),
+    dirDeg: round1(dirDeg),
     mirror: false,
     force: 3.8,
     intervalMs: 780,
@@ -5871,13 +6064,16 @@ function setHammerDirectionAndDistance(obj, point, shiftKey = false) {
   if (!obj || !isAimDirectionalObject(obj)) {
     return false;
   }
+  if (obj.type === 'bottom_bumper') {
+    return setBottomBumperDirectionByPivot(obj, point, shiftKey);
+  }
   const cx = toFinite(obj.x, 0);
   const cy = toFinite(obj.y, 0);
   let dx = toFinite(point && point.x, cx) - cx;
   let dy = toFinite(point && point.y, cy) - cy;
   let distance = Math.hypot(dx, dy);
   if (distance < 0.05) {
-    const fallbackDistance = obj.type === 'fan' ? 2.8 : (obj.type === 'bottom_bumper' ? 1.15 : 1.1);
+    const fallbackDistance = obj.type === 'fan' ? 2.8 : 1.1;
     distance = Math.max(0.2, toFinite(obj.hitDistance, fallbackDistance));
     dx = distance;
     dy = 0;
@@ -6008,7 +6204,7 @@ function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
     return createHammerFromDrag(start, end);
   }
   if (tool === 'bottom_bumper') {
-    return createBottomBumperFromDrag(start, end);
+    return createBottomBumperFromDrag(start, end, options);
   }
   if (tool === 'fan') {
     return createFanFromDrag(start, end);
@@ -6196,9 +6392,18 @@ function applyMultiResizeFromPrimary(primaryIndex, dragType, beforeValue, afterV
         continue;
       }
       const dirDelta = toFinite(options.dirDelta, 0);
+      if (obj.type === 'bottom_bumper') {
+        const pivotPoint = getBottomBumperPivotWorld(obj);
+        if (!pivotPoint) {
+          continue;
+        }
+        const nextBaseDir = normalizeDeg(getBottomBumperBaseDirDeg(obj) + dirDelta);
+        recenterBottomBumperFromPivot(obj, pivotPoint, nextBaseDir);
+        continue;
+      }
       const distanceScale = Math.max(0.01, toFinite(options.distanceScale, 1));
-      const fallbackDir = obj.type === 'fan' ? 0 : (obj.type === 'bottom_bumper' ? 270 : 90);
-      const fallbackDistance = obj.type === 'fan' ? 2.8 : (obj.type === 'bottom_bumper' ? 1.15 : 0.95);
+      const fallbackDir = obj.type === 'fan' ? 0 : 90;
+      const fallbackDistance = obj.type === 'fan' ? 2.8 : 0.95;
       obj.dirDeg = round1(normalizeDeg(toFinite(obj.dirDeg, fallbackDir) + dirDelta));
       obj.rotation = obj.dirDeg;
       obj.hitDistance = round1(clamp(toFinite(obj.hitDistance, fallbackDistance) * distanceScale, 0.2, 24));
@@ -6387,16 +6592,24 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
     if (!isAimDirectionalObject(obj)) {
       return false;
     }
-    const fallbackDir = obj.type === 'fan' ? 0 : (obj.type === 'bottom_bumper' ? 270 : 90);
-    const fallbackDistance = obj.type === 'fan' ? 2.8 : (obj.type === 'bottom_bumper' ? 1.15 : 0.95);
+    const isBottomBumper = obj.type === 'bottom_bumper';
+    const fallbackDir = obj.type === 'fan' ? 0 : (isBottomBumper ? getBottomBumperBaseDirDeg(obj) : 90);
+    const fallbackDistance = obj.type === 'fan'
+      ? 2.8
+      : (isBottomBumper ? getBottomBumperDirectionHandleDistance(obj) : 0.95);
     const beforeDir = toFinite(obj.dirDeg, fallbackDir);
-    const beforeDistance = Math.max(0.2, toFinite(obj.hitDistance, fallbackDistance));
+    const beforeDistance = isBottomBumper
+      ? getBottomBumperDirectionHandleDistance(obj)
+      : Math.max(0.2, toFinite(obj.hitDistance, fallbackDistance));
     const updated = setHammerDirectionAndDistance(obj, point, !!(event && event.shiftKey));
     if (!updated) {
       return false;
     }
     const dirDelta = normalizeSignedDeg(toFinite(obj.dirDeg, beforeDir) - beforeDir);
-    const distanceScale = Math.max(0.01, toFinite(obj.hitDistance, beforeDistance) / Math.max(0.01, beforeDistance));
+    const afterDistance = isBottomBumper
+      ? getBottomBumperDirectionHandleDistance(obj)
+      : Math.max(0.2, toFinite(obj.hitDistance, fallbackDistance));
+    const distanceScale = Math.max(0.01, afterDistance / Math.max(0.01, beforeDistance));
     applyMultiResizeFromPrimary(index, 'hammer_dir', beforeDistance, obj.hitDistance, {
       dirDelta,
       distanceScale,
@@ -6535,7 +6748,7 @@ function finishDrag() {
         if (tool === 'fan') {
           createdHint = '선풍기 생성 완료: 드래그/클릭으로 바람 방향·거리 설정';
         } else if (tool === 'bottom_bumper') {
-          createdHint = '하단 범퍼 생성 완료: 드래그/클릭으로 타격 방향·거리 설정';
+          createdHint = '하단 범퍼 생성 완료: 드래그/클릭으로 축 기준 타격 각도 설정';
         } else if (tool === 'sticky_pad') {
           createdHint = '점착패드 생성 완료: 드래그/클릭으로 이동 목표점(B) 지정';
         }
@@ -6576,8 +6789,8 @@ function finishDrag() {
         queueObjectLiveDraftApply('선풍기 방향/거리 설정');
         updateMakerHint('선풍기 바람 방향 설정 완료');
       } else if (type === 'bottom_bumper') {
-        queueObjectLiveDraftApply('하단 범퍼 방향/거리 설정');
-        updateMakerHint('하단 범퍼 타격 방향 설정 완료');
+        queueObjectLiveDraftApply('하단 범퍼 각도 설정');
+        updateMakerHint('하단 범퍼 타격 각도 설정 완료');
       } else if (type === 'sticky_pad') {
         queueObjectLiveDraftApply('점착패드 이동 경로 설정');
         updateMakerHint('점착패드 A↔B 이동 경로 설정 완료');
@@ -6643,7 +6856,7 @@ function handleMakerCanvasPointerDown(event) {
       if (directionalType === 'fan') {
         directionalUndoLabel = '선풍기 방향 설정 시작';
       } else if (directionalType === 'bottom_bumper') {
-        directionalUndoLabel = '하단 범퍼 방향 설정 시작';
+        directionalUndoLabel = '하단 범퍼 각도 설정 시작';
       } else if (directionalType === 'sticky_pad') {
         directionalUndoLabel = '점착패드 경로 설정 시작';
       }
@@ -6661,7 +6874,7 @@ function handleMakerCanvasPointerDown(event) {
       if (directionalType === 'fan') {
         directionalHint = '선풍기 바람 방향/거리 설정중';
       } else if (directionalType === 'bottom_bumper') {
-        directionalHint = '하단 범퍼 타격 방향/거리 설정중';
+        directionalHint = '하단 범퍼 타격 각도 설정중';
       } else if (directionalType === 'sticky_pad') {
         directionalHint = '점착패드 이동 목표점 설정중';
       }
@@ -6687,7 +6900,7 @@ function handleMakerCanvasPointerDown(event) {
       updateMakerHint(selectedObj && selectedObj.type === 'fan'
         ? '선풍기 바람 방향/거리 드래그 편집중'
         : (selectedObj && selectedObj.type === 'bottom_bumper'
-          ? '하단 범퍼 타격 방향/거리 드래그 편집중'
+          ? '하단 범퍼 타격 각도 드래그 편집중'
           : '해머 타격 방향/거리 드래그 편집중'));
     } else if (selectedHandle.kind === 'sticky_target') {
       updateMakerHint('점착패드 이동 목표점 드래그 편집중');
@@ -6952,7 +7165,7 @@ function addObjectAt(tool, x, y, options = {}) {
       if (tool === 'fan') {
         createHint = '선풍기 생성 완료: 드래그/클릭으로 바람 방향·거리 설정';
       } else if (tool === 'bottom_bumper') {
-        createHint = '하단 범퍼 생성 완료: 드래그/클릭으로 타격 방향·거리 설정';
+        createHint = '하단 범퍼 생성 완료: 드래그/클릭으로 축 기준 타격 각도 설정';
       } else if (tool === 'sticky_pad') {
         createHint = '점착패드 생성 완료: 드래그/클릭으로 이동 목표점(B) 지정';
       }
@@ -7625,13 +7838,13 @@ function handleMakerCanvasRightClickAction() {
     updateMakerHint(tool === 'fan'
       ? '선풍기 방향 설정 입력 취소'
       : (tool === 'bottom_bumper'
-        ? '하단 범퍼 방향 설정 입력 취소'
+        ? '하단 범퍼 각도 설정 입력 취소'
         : (tool === 'sticky_pad' ? '점착패드 목표점 설정 입력 취소' : '해머 방향 설정 입력 취소')));
     drawMakerCanvas();
     setStatus(tool === 'fan'
       ? '선풍기 방향 설정 대기를 취소했습니다.'
       : (tool === 'bottom_bumper'
-        ? '하단 범퍼 방향 설정 대기를 취소했습니다.'
+        ? '하단 범퍼 각도 설정 대기를 취소했습니다.'
         : (tool === 'sticky_pad' ? '점착패드 목표점 설정 대기를 취소했습니다.' : '해머 방향 설정 대기를 취소했습니다.')));
     return;
   }
@@ -7772,8 +7985,8 @@ function setupEvents() {
         : '해머 모드: 드래그로 크기 생성 후, 점선 단계에서 방향·거리 지정');
     } else if (tool === 'bottom_bumper') {
       updateMakerHint(editorState.pendingHammerOid
-        ? '하단 범퍼 방향 설정 대기: 드래그/클릭으로 타격 방향·거리 지정'
-        : '하단 범퍼 모드: 드래그로 크기 생성 후, 점선 단계에서 방향·거리 지정');
+        ? '하단 범퍼 각도 설정 대기: 드래그/클릭으로 축 기준 타격 각도 지정'
+        : '하단 범퍼 모드: 축(동그란 부분)에서 드래그 생성 후, 점선 단계에서 타격 각도 지정');
     } else if (tool === 'fan') {
       updateMakerHint(editorState.pendingHammerOid
         ? '선풍기 방향 설정 대기: 드래그/클릭으로 바람 방향·거리 지정'
