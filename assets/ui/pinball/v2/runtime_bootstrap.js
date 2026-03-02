@@ -744,20 +744,42 @@ async function loadMapJsonById(mapId) {
       entry.id === mapId &&
       (entry.engine === undefined || entry.engine === 'v2'),
   );
-  if (!matched) {
+  const fileFromManifest = matched && typeof matched.file === 'string'
+    ? matched.file.trim()
+    : '';
+  const safeMapId = typeof mapId === 'string'
+    ? mapId.trim().replace(/[^a-zA-Z0-9_.-]/g, '')
+    : '';
+  const fallbackFile = safeMapId ? `${safeMapId}.json` : '';
+  const fileCandidates = [];
+  if (fileFromManifest) {
+    fileCandidates.push(fileFromManifest);
+  }
+  if (fallbackFile && !fileCandidates.includes(fallbackFile)) {
+    fileCandidates.push(fallbackFile);
+  }
+  if (fileCandidates.length === 0) {
     return { ok: false, reason: 'Map not found for snapshot mapId' };
   }
-  if (typeof matched.file !== 'string' || !matched.file.trim()) {
-    return { ok: false, reason: 'Map file is missing in manifest entry' };
+  let lastStatus = 0;
+  for (let index = 0; index < fileCandidates.length; index += 1) {
+    const fileName = fileCandidates[index];
+    const response = await fetch(`./maps/${fileName}?nocache=${Date.now()}`, {
+      cache: 'no-store',
+    });
+    if (!response.ok) {
+      lastStatus = response.status;
+      continue;
+    }
+    const mapJson = await response.json();
+    return { ok: true, mapJson };
   }
-  const response = await fetch(`./maps/${matched.file}?nocache=${Date.now()}`, {
-    cache: 'no-store',
-  });
-  if (!response.ok) {
-    return { ok: false, reason: `Map file load failed: ${response.status}` };
-  }
-  const mapJson = await response.json();
-  return { ok: true, mapJson };
+  return {
+    ok: false,
+    reason: lastStatus > 0
+      ? `Map file load failed: ${lastStatus}`
+      : 'Map file is missing in manifest entry',
+  };
 }
 
 function buildDefaultMapIfNeeded(mapId) {

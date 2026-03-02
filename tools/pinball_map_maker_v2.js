@@ -2710,7 +2710,7 @@ function applyObjectEditorValues() {
   obj.width = round1(toFinite(elements.objExtra1Input ? elements.objExtra1Input.value : obj.width, toFinite(obj.width, 1.2)));
   obj.height = round1(toFinite(elements.objExtra2Input ? elements.objExtra2Input.value : obj.height, toFinite(obj.height, 0.2)));
   if (obj.type === 'diamond_block') {
-    const half = round1(Math.max(0.12, Math.max(toFinite(obj.width, 0.12), toFinite(obj.height, 0.12))));
+    const half = round1(Math.max(0.12, toFinite(obj.width, toFinite(obj.height, 0.12))));
     obj.width = half;
     obj.height = half;
   }
@@ -5280,7 +5280,9 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
         obj.height = round1(Math.max(0.05, proj));
       }
       if (type === 'diamond_block') {
-        const half = round1(Math.max(0.12, Math.max(toFinite(obj.width, 0.12), toFinite(obj.height, 0.12))));
+        const half = drag.type === 'size_x'
+          ? round1(Math.max(0.12, toFinite(obj.width, 0.12)))
+          : round1(Math.max(0.12, toFinite(obj.height, 0.12)));
         obj.width = half;
         obj.height = half;
       } else if (type === 'fan') {

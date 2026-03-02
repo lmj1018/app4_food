@@ -1211,13 +1211,16 @@ class _RouletteScreenState extends State<RouletteScreen> {
   }
 
   List<_V2MapChoice> _parseBundledV2MapChoices(dynamic rawAssetManifest) {
-    if (rawAssetManifest is! Map) {
+    final keys = rawAssetManifest is Map
+        ? rawAssetManifest.keys
+        : (rawAssetManifest is Iterable ? rawAssetManifest : null);
+    if (keys == null) {
       return const <_V2MapChoice>[];
     }
     const prefix = 'assets/ui/pinball/maps/';
     final seen = <String>{};
     final parsed = <_V2MapChoice>[];
-    for (final key in rawAssetManifest.keys) {
+    for (final key in keys) {
       if (key is! String || !key.startsWith(prefix)) {
         continue;
       }
@@ -1239,6 +1242,13 @@ class _RouletteScreenState extends State<RouletteScreen> {
   }
 
   Future<List<_V2MapChoice>> _loadBundledV2MapChoices() async {
+    try {
+      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+      final parsed = _parseBundledV2MapChoices(manifest.listAssets());
+      if (parsed.isNotEmpty) {
+        return parsed;
+      }
+    } catch (_) {}
     try {
       final text = await rootBundle.loadString('AssetManifest.json');
       final raw = jsonDecode(text);

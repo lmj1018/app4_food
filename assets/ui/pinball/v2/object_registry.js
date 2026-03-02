@@ -717,7 +717,14 @@ function compileObject(rawObject, entityId) {
           y: toFiniteNumber(rawObject.y, 70),
           dirDeg: toFiniteNumber(rawObject.dirDeg, toFiniteNumber(rawObject.rotation, 0)),
           force: Math.max(0.01, toFiniteNumber(rawObject.force, 0.32)),
-          hitDistance: Math.max(0.2, toFiniteNumber(rawObject.hitDistance, 2.8)),
+          hitDistance: Math.max(
+            0.2,
+            toFiniteNumber(
+              rawObject.hitDistance,
+              Math.max(toFiniteNumber(rawObject.width, 0.48), toFiniteNumber(rawObject.height, 0.14)) * 2.8,
+            ),
+            Math.max(toFiniteNumber(rawObject.width, 0.48), toFiniteNumber(rawObject.height, 0.14)) * 2.8,
+          ),
           triggerRadius: Math.max(
             0.2,
             toFiniteNumber(
