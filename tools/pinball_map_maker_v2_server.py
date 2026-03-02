@@ -224,6 +224,42 @@ def save_map_payload(payload: dict[str, Any]) -> SaveResult:
     )
 
 
+def delete_map_payload(payload: dict[str, Any]) -> dict[str, str]:
+    raw_map_id = str(payload.get("mapId") or "").strip()
+    if not raw_map_id:
+        raise ValueError("mapId is required")
+    map_id = sanitize_map_id(raw_map_id)
+
+    manifest = load_manifest()
+    maps = manifest.get("maps")
+    if not isinstance(maps, list):
+        raise ValueError("Manifest is invalid")
+
+    index, entry = find_manifest_entry(manifest, map_id)
+    if entry is None or index is None:
+        raise ValueError("Map not found")
+
+    file_name = sanitize_map_file_name(entry.get("file"), map_id)
+    target_map_path = (MAPS_DIR / file_name).resolve()
+    if target_map_path.parent != MAPS_DIR.resolve():
+        raise ValueError("Invalid map file path")
+
+    del maps[index]
+    save_manifest(manifest)
+
+    if target_map_path.exists():
+        try:
+            target_map_path.unlink()
+        except Exception:
+            # Manifest delete succeeded; file cleanup best-effort.
+            pass
+
+    return {
+        "mapId": map_id,
+        "file": file_name,
+    }
+
+
 class PinballMapMakerHandler(SimpleHTTPRequestHandler):
     server_version = "PinballMapMakerV2HTTP/1.0"
 
@@ -343,6 +379,22 @@ class PinballMapMakerHandler(SimpleHTTPRequestHandler):
                         "mapId": result.map_id,
                         "title": result.title,
                         "file": result.file_name,
+                        "maps": list_maps_for_response(manifest),
+                    },
+                )
+                return
+
+            if path == "/__pinball_v2_api/delete":
+                payload = self.parse_json_body()
+                deleted = delete_map_payload(payload)
+                manifest = load_manifest()
+                self.send_json(
+                    HTTPStatus.OK,
+                    {
+                        "ok": True,
+                        "mapsDir": MAPS_DIR_DISPLAY,
+                        "deletedMapId": deleted["mapId"],
+                        "deletedFile": deleted["file"],
                         "maps": list_maps_for_response(manifest),
                     },
                 )

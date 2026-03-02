@@ -84,7 +84,45 @@ const control = {
   skillWarmupMs: 5000,
   skillDisabled: true,
   mapDisableSkills: false,
+  fromApp: false,
 };
+
+function detectFromAppContext(payload = null) {
+  const query = new URLSearchParams(window.location.search);
+  const byQuery = query.get('fromApp') === '1' || query.get('isPinballApp') === '1';
+  const byPayload = payload && typeof payload === 'object' && (payload.fromApp === true || payload.isPinballApp === true);
+  return byQuery || byPayload;
+}
+
+function applyAppVisualCompatibility() {
+  if (control.fromApp !== true) {
+    return;
+  }
+  const statusElement = document.getElementById(STATUS_ELEMENT_ID);
+  if (statusElement) {
+    statusElement.style.display = 'none';
+    statusElement.style.opacity = '0';
+    statusElement.style.pointerEvents = 'none';
+  }
+  const roulette = getRoulette();
+  if (!roulette) {
+    return;
+  }
+  if (Array.isArray(roulette._uiObjects) && roulette._uiObjects.length > 0) {
+    roulette._uiObjects = [];
+  }
+  if (roulette.__v2AppUiObjectMuted !== true && typeof roulette.addUiObject === 'function') {
+    roulette.__v2AppUiObjectMuted = true;
+    roulette.__v2AppOriginalAddUiObject = roulette.addUiObject.bind(roulette);
+    roulette.addUiObject = () => {};
+  }
+  const particleManager = roulette._particleManager;
+  if (particleManager && particleManager.__v2AppGoalFxMuted !== true && typeof particleManager.shot === 'function') {
+    particleManager.__v2AppGoalFxMuted = true;
+    particleManager.__v2AppOriginalShot = particleManager.shot.bind(particleManager);
+    particleManager.shot = () => {};
+  }
+}
 
 function installContextMenuGuard() {
   if (window.__v2RuntimeContextMenuGuard === true) {
@@ -673,6 +711,7 @@ function startTickLoop() {
   control.tickStarted = true;
   const tick = () => {
     const now = Date.now();
+    applyAppVisualCompatibility();
     suppressMarbleCooldownIndicator();
     updateSkillPolicy(now);
     if (control.behaviorRuntime && typeof control.behaviorRuntime.tick === 'function') {
@@ -1369,6 +1408,8 @@ function getCurrentMapJson() {
 
 async function init(payload = {}) {
   await ensureRouletteReady();
+  control.fromApp = detectFromAppContext(payload);
+  applyAppVisualCompatibility();
   patchPhysicsStep();
   patchPhysicsCreateEntities();
   patchPhysicsGetEntities();
@@ -1413,6 +1454,7 @@ async function init(payload = {}) {
     candidates: control.candidates.length,
     runtimeRevision: RUNTIME_REVISION,
   });
+  applyAppVisualCompatibility();
   setStatus(`ready: ${control.mapId}`);
   return { ok: true, mapId: control.mapId };
 }

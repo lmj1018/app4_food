@@ -78,6 +78,7 @@ const elements = {
   mapSelect: document.getElementById('mapSelect'),
   mapNameInput: document.getElementById('mapNameInput'),
   refreshMapListButton: document.getElementById('refreshMapListButton'),
+  deleteMapButton: document.getElementById('deleteMapButton'),
   saveAsNewMapButton: document.getElementById('saveAsNewMapButton'),
   reloadButton: document.getElementById('reloadButton'),
   playPauseToggleButton: document.getElementById('playPauseToggleButton'),
@@ -389,6 +390,7 @@ function setBusy(isBusy) {
     elements.mapSelect,
     elements.mapNameInput,
     elements.refreshMapListButton,
+    elements.deleteMapButton,
     elements.saveAsNewMapButton,
     elements.reloadButton,
     elements.playPauseToggleButton,
@@ -933,7 +935,7 @@ async function refreshMapCatalog(preferredMapId = null) {
     }));
   const nextPreferredMapId = typeof preferredMapId === 'string'
     ? preferredMapId
-    : resolveCurrentMapId();
+    : selectedMapIdFromDropdown();
   renderMapCatalog(nextPreferredMapId);
   if (mapCatalog.length > 0) {
     setStatus(`맵 목록 갱신 완료: ${mapCatalog.length}개`);
@@ -6295,6 +6297,16 @@ async function saveMapViaServer(payload) {
   });
 }
 
+async function deleteMapViaServer(mapId) {
+  return callMapMakerApi('delete', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ mapId }),
+  });
+}
+
 async function getCurrentMapJsonForSave() {
   if (workingMapJson && typeof workingMapJson === 'object') {
     return deepClone(workingMapJson);
@@ -6336,6 +6348,51 @@ async function saveAsNewMap() {
   }
   await loadSelectedCatalogMap();
   setStatus(`새 맵 저장 완료: ${newId}`);
+}
+
+async function deleteSelectedMapFromCatalog() {
+  const entry = selectedMapCatalogEntry();
+  if (!entry || !entry.id) {
+    throw new Error('삭제할 맵을 먼저 선택하세요');
+  }
+  const confirmed = window.confirm(`선택 맵을 삭제할까요?\n- ${entry.id}`);
+  if (!confirmed) {
+    return;
+  }
+  const deletingMapId = entry.id;
+  await deleteMapViaServer(deletingMapId);
+  await refreshMapCatalog('');
+  if (elements.mapSelect) {
+    elements.mapSelect.value = '';
+  }
+  const fallbackId = 'v2_custom_map';
+  setWorkingMapJson(buildDefaultMapJson(fallbackId), fallbackId);
+  clearUndoHistory();
+  syncStageInputsFromMap();
+  syncObjectList();
+  drawMakerCanvas();
+  if (elements.mapNameInput) {
+    elements.mapNameInput.value = fallbackId;
+  }
+  await withEngineAction(async (api) => {
+    await applyDraftMapToApi(api, {
+      live: false,
+      preserveMarbles: false,
+      preserveRunning: false,
+      updateCandidates: true,
+    });
+    ensureEngineCanvasFill();
+    syncViewZoomInputFromEngine();
+    setPlayPauseUi(readEngineRunning(api));
+    applyViewZoomToEngine(true);
+    applyMarbleSizeToEngines(getCurrentMarbleSizeScale(), { silent: true });
+    await syncPreviewFromDraft({
+      preserveMarbles: false,
+      preserveRunning: false,
+      updateCandidates: true,
+    });
+  }, { rethrow: true });
+  setStatus(`맵 삭제 완료: ${deletingMapId}`);
 }
 
 function handleMakerCanvasRightClickAction() {
@@ -6402,7 +6459,18 @@ function setupEvents() {
   bindEvent(elements.refreshMapListButton, 'click', async () => {
     setBusy(true);
     try {
-      await refreshMapCatalog(resolveCurrentMapId());
+      await refreshMapCatalog(selectedMapIdFromDropdown());
+    } catch (error) {
+      setStatus(String(error && error.message ? error.message : error), 'error');
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  bindEvent(elements.deleteMapButton, 'click', async () => {
+    setBusy(true);
+    try {
+      await deleteSelectedMapFromCatalog();
     } catch (error) {
       setStatus(String(error && error.message ? error.message : error), 'error');
     } finally {
@@ -6411,7 +6479,18 @@ function setupEvents() {
   });
 
   bindEvent(elements.mapSelect, 'change', async () => {
-    if (!selectedMapCatalogEntry()) {
+    const selected = selectedMapCatalogEntry();
+    if (!selected) {
+      const fallbackId = 'v2_custom_map';
+      setWorkingMapJson(buildDefaultMapJson(fallbackId), fallbackId);
+      clearUndoHistory();
+      syncStageInputsFromMap();
+      syncObjectList();
+      drawMakerCanvas();
+      if (elements.mapNameInput) {
+        elements.mapNameInput.value = fallbackId;
+      }
+      setStatus('맵 선택이 해제되어 빈 드래프트 맵으로 전환했습니다.');
       return;
     }
     setBusy(true);

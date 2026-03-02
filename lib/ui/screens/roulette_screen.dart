@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import '../../core/config/app_env.dart';
@@ -19,6 +22,7 @@ import '../../services/shared_preferences_cache_store.dart';
 import '../../services/device_location_service.dart';
 import '../widgets/glowing_action_button.dart';
 import 'pinball_screen.dart';
+import 'pinball_v2_screen.dart';
 import 'roulette_result_screen.dart';
 
 enum RouletteMode { food, store, custom }
@@ -1088,7 +1092,9 @@ class _RouletteScreenState extends State<RouletteScreen> {
       return 1;
     }
     final last = _lastAutoPinballMapIndex;
-    final candidates = all.where((index) => index != last).toList(growable: false);
+    final candidates = all
+        .where((index) => index != last)
+        .toList(growable: false);
     final pool = candidates.isEmpty ? all : candidates;
     final minCount = pool
         .map((index) => _autoPinballMapPickCounts[index] ?? 0)
@@ -1106,6 +1112,222 @@ class _RouletteScreenState extends State<RouletteScreen> {
       return _customEntries.length;
     }
     return _spinCandidates().length;
+  }
+
+  Future<File?> _resolveLocalV2ManifestFile() async {
+    final sep = Platform.pathSeparator;
+    final candidates = <String>[
+      <String>[
+        Directory.current.path,
+        'assets',
+        'ui',
+        'pinball',
+        'maps',
+        'manifest.json',
+      ].join(sep),
+      <String>[
+        Directory.current.path,
+        '..',
+        'assets',
+        'ui',
+        'pinball',
+        'maps',
+        'manifest.json',
+      ].join(sep),
+    ];
+    for (final path in candidates) {
+      try {
+        final file = File(path);
+        if (await file.exists()) {
+          return file;
+        }
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  List<_V2MapChoice> _parseV2MapChoices(dynamic rawManifest) {
+    if (rawManifest is! Map) {
+      return const <_V2MapChoice>[];
+    }
+    final maps = rawManifest['maps'];
+    if (maps is! List) {
+      return const <_V2MapChoice>[];
+    }
+    final parsed = <_V2MapChoice>[];
+    for (final item in maps) {
+      if (item is! Map) {
+        continue;
+      }
+      final engine = (item['engine'] ?? 'v2').toString().trim();
+      if (engine.isNotEmpty && engine != 'v2') {
+        continue;
+      }
+      if (item['enabled'] == false) {
+        continue;
+      }
+      final id = (item['id'] ?? '').toString().trim();
+      if (id.isEmpty) {
+        continue;
+      }
+      final title = (item['title'] ?? id).toString().trim();
+      final sortRaw = item['sort'];
+      final sort = sortRaw is num
+          ? sortRaw.toInt()
+          : int.tryParse('$sortRaw') ?? 9999;
+      parsed.add(
+        _V2MapChoice(id: id, title: title.isEmpty ? id : title, sort: sort),
+      );
+    }
+    parsed.sort((left, right) {
+      final sortCmp = left.sort.compareTo(right.sort);
+      if (sortCmp != 0) {
+        return sortCmp;
+      }
+      return left.id.compareTo(right.id);
+    });
+    return parsed;
+  }
+
+  Future<List<_V2MapChoice>> _loadV2MapChoices() async {
+    dynamic rawManifest;
+    final localFile = await _resolveLocalV2ManifestFile();
+    if (localFile != null) {
+      try {
+        final text = await localFile.readAsString();
+        rawManifest = jsonDecode(text);
+      } catch (_) {}
+    }
+    if (rawManifest == null) {
+      try {
+        final text = await rootBundle.loadString(
+          'assets/ui/pinball/maps/manifest.json',
+        );
+        rawManifest = jsonDecode(text);
+      } catch (_) {}
+    }
+    final choices = _parseV2MapChoices(rawManifest);
+    if (choices.isNotEmpty) {
+      return choices;
+    }
+    return const <_V2MapChoice>[
+      _V2MapChoice(id: 'v2_default', title: 'v2_default', sort: 100),
+    ];
+  }
+
+  Future<_PinballLaunchConfig?> _showPinballLaunchPicker({
+    required int suggestedMapIndex,
+  }) async {
+    final v2Maps = await _loadV2MapChoices();
+    if (!mounted) {
+      return null;
+    }
+    return showDialog<_PinballLaunchConfig>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF101214),
+          title: const Text(
+            '맵 선택 (임시 테스트)',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+          ),
+          content: SizedBox(
+            width: 440,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '기존 V1 맵',
+                    style: TextStyle(
+                      color: Color(0xFF9EC0FF),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  for (final mapChoice in _pinballMapChoices)
+                    ListTile(
+                      dense: true,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      title: Text(
+                        mapChoice.title,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      subtitle: Text(
+                        mapChoice.subtitle,
+                        style: const TextStyle(
+                          color: Color(0xFF9FB0C7),
+                          fontSize: 12,
+                        ),
+                      ),
+                      trailing: mapChoice.mapIndex == suggestedMapIndex
+                          ? const Icon(
+                              Icons.recommend_rounded,
+                              color: Color(0xFF64D5FF),
+                              size: 18,
+                            )
+                          : null,
+                      onTap: () {
+                        Navigator.of(
+                          dialogContext,
+                        ).pop(_PinballLaunchConfig.v1(mapChoice.mapIndex));
+                      },
+                    ),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'V2 사용자 맵 (assets/ui/pinball/maps)',
+                    style: TextStyle(
+                      color: Color(0xFF9EC0FF),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  for (final map in v2Maps)
+                    ListTile(
+                      dense: true,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      title: Text(
+                        map.id,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      subtitle: Text(
+                        map.title,
+                        style: const TextStyle(
+                          color: Color(0xFF9FB0C7),
+                          fontSize: 12,
+                        ),
+                      ),
+                      trailing: const Icon(
+                        Icons.build_circle_outlined,
+                        color: Color(0xFFC7A8FF),
+                        size: 18,
+                      ),
+                      onTap: () {
+                        Navigator.of(
+                          dialogContext,
+                        ).pop(_PinballLaunchConfig.v2(map.id));
+                      },
+                    ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('취소'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   bool get _isSpinGateMode =>
@@ -1136,7 +1358,9 @@ class _RouletteScreenState extends State<RouletteScreen> {
     if (_isSpinning) {
       return _mode == RouletteMode.custom ? '커스텀 항목 선택 중...' : '선택 후보 검색 중...';
     }
-    if (_isRewardedAdLoading || _isRewardedAdShowing || _isAdBonusIntroShowing) {
+    if (_isRewardedAdLoading ||
+        _isRewardedAdShowing ||
+        _isAdBonusIntroShowing) {
       return '광고 준비 중...';
     }
     if (!_isSpinGateMode) {
@@ -1380,10 +1604,16 @@ class _RouletteScreenState extends State<RouletteScreen> {
       unawaited(_loadCurrentLocation(silentFail: true));
     }
     final previewCount = _pinballPreviewCandidateCount();
-    final selectedMapIndex = _pickAutoPinballMapIndex(
+    final suggestedMapIndex = _pickAutoPinballMapIndex(
       disallowMap4: previewCount <= 5,
     );
-    return _spin(selectedMapIndex: selectedMapIndex, hasLocation: hasLocation);
+    final launchConfig = await _showPinballLaunchPicker(
+      suggestedMapIndex: suggestedMapIndex,
+    );
+    if (launchConfig == null) {
+      return false;
+    }
+    return _spin(launchConfig: launchConfig, hasLocation: hasLocation);
   }
 
   Future<void> _showAdBonusIntro() async {
@@ -1447,11 +1677,11 @@ class _RouletteScreenState extends State<RouletteScreen> {
   }
 
   Future<bool> _spin({
-    required int selectedMapIndex,
+    required _PinballLaunchConfig launchConfig,
     required bool hasLocation,
   }) async {
     if (_mode == RouletteMode.custom) {
-      return _spinCustom(selectedMapIndex: selectedMapIndex, hasLocation: hasLocation);
+      return _spinCustom(launchConfig: launchConfig, hasLocation: hasLocation);
     }
 
     if (!_hasValidGroupSelection) {
@@ -1460,7 +1690,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
     }
 
     if (_mode == RouletteMode.store) {
-      return _spinStore(selectedMapIndex: selectedMapIndex, hasLocation: hasLocation);
+      return _spinStore(launchConfig: launchConfig, hasLocation: hasLocation);
     }
 
     final filteredCandidates = _spinCandidates();
@@ -1481,9 +1711,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
         query: filteredCandidates.first.keyword,
         mode: _mode,
         radiusMeters: _selectedRadiusM,
-        selectedReasonLabel: _resolveFoodReasonLabel(
-          filteredCandidates.first,
-        ),
+        selectedReasonLabel: _resolveFoodReasonLabel(filteredCandidates.first),
         preferPopularOnOpen: false,
         originLat: hasLocation ? _lat : null,
         originLng: hasLocation ? _lng : null,
@@ -1493,7 +1721,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
       );
       didComplete = await _handlePostSpinResult(
         args: fallback,
-        selectedMapIndex: selectedMapIndex,
+        launchConfig: launchConfig,
         candidateNames: filteredCandidates
             .map((candidate) => candidate.keyword)
             .toList(growable: false),
@@ -1510,7 +1738,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
   }
 
   Future<bool> _spinCustom({
-    required int selectedMapIndex,
+    required _PinballLaunchConfig launchConfig,
     required bool hasLocation,
   }) async {
     if (!_hasValidCustomEntries) {
@@ -1556,7 +1784,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
           originLabel: hasLocation ? _locationLabel : null,
           showSearchButton: hasMatch && hasLocation,
         ),
-        selectedMapIndex: selectedMapIndex,
+        launchConfig: launchConfig,
         candidateNames: entries,
       );
     } finally {
@@ -1571,7 +1799,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
   }
 
   Future<bool> _spinStore({
-    required int selectedMapIndex,
+    required _PinballLaunchConfig launchConfig,
     required bool hasLocation,
   }) async {
     if (!hasLocation) {
@@ -1671,7 +1899,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
         originLng: _lng,
         originLabel: _locationLabel,
       ),
-      selectedMapIndex: selectedMapIndex,
+      launchConfig: launchConfig,
       candidateNames: gameCandidates,
       rankedCandidates: ranked,
     );
@@ -1680,7 +1908,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
 
   Future<bool> _handlePostSpinResult({
     required RouletteResultArgs args,
-    required int selectedMapIndex,
+    required _PinballLaunchConfig launchConfig,
     required List<String> candidateNames,
     List<RankedPlace> rankedCandidates = const <RankedPlace>[],
   }) async {
@@ -1693,20 +1921,33 @@ class _RouletteScreenState extends State<RouletteScreen> {
       return false;
     }
 
-    final effectiveMapIndex =
-        normalizedCandidates.length <= 5 && selectedMapIndex == 4
-        ? _pickAutoPinballMapIndex(disallowMap4: true)
-        : selectedMapIndex;
-    _recordAutoPinballMapSelection(effectiveMapIndex);
     final navigator = Navigator.of(context);
-    final pinballResult = await navigator.pushNamed(
-      PinballScreen.routeName,
-      arguments: PinballScreenArgs(
-        candidates: normalizedCandidates,
-        autoStart: true,
-        selectedMapIndex: effectiveMapIndex,
-      ),
-    );
+    final Object? pinballResult;
+    if (launchConfig.useV2) {
+      pinballResult = await navigator.pushNamed(
+        PinballV2Screen.routeName,
+        arguments: PinballV2ScreenArgs(
+          candidates: normalizedCandidates,
+          mapId: launchConfig.v2MapId ?? 'v2_default',
+          autoStart: true,
+        ),
+      );
+    } else {
+      final selectedMapIndex = launchConfig.v1MapIndex ?? 1;
+      final effectiveMapIndex =
+          normalizedCandidates.length <= 5 && selectedMapIndex == 4
+          ? _pickAutoPinballMapIndex(disallowMap4: true)
+          : selectedMapIndex;
+      _recordAutoPinballMapSelection(effectiveMapIndex);
+      pinballResult = await navigator.pushNamed(
+        PinballScreen.routeName,
+        arguments: PinballScreenArgs(
+          candidates: normalizedCandidates,
+          autoStart: true,
+          selectedMapIndex: effectiveMapIndex,
+        ),
+      );
+    }
     if (!mounted || pinballResult == null || pinballResult is! String) {
       return false;
     }
@@ -2011,193 +2252,220 @@ class _RouletteScreenState extends State<RouletteScreen> {
                     clipBehavior: Clip.none,
                     children: [
                       Card(
-                    color: const Color(0xFFE8ECEE),
-                    elevation: 0,
-                    margin: EdgeInsets.zero,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      side: const BorderSide(
-                        color: Color(0xFFD8E0E2),
-                        width: 1,
-                      ),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          AnimatedSize(
-                            duration: const Duration(milliseconds: 300),
-                            curve: Curves.easeInOutCubic,
-                            alignment: Alignment.topCenter,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const SizedBox(height: 12),
-                                if (isCustomMode) ...[
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      TextButton(
-                                        onPressed: () =>
-                                            _changeCustomItemCount(-1),
-                                        style: TextButton.styleFrom(
-                                          minimumSize: const Size(44, 44),
-                                          padding: EdgeInsets.zero,
-                                          foregroundColor: const Color(
-                                            0xFF6A7E85,
+                        color: const Color(0xFFE8ECEE),
+                        elevation: 0,
+                        margin: EdgeInsets.zero,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          side: const BorderSide(
+                            color: Color(0xFFD8E0E2),
+                            width: 1,
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              AnimatedSize(
+                                duration: const Duration(milliseconds: 300),
+                                curve: Curves.easeInOutCubic,
+                                alignment: Alignment.topCenter,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const SizedBox(height: 12),
+                                    if (isCustomMode) ...[
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          TextButton(
+                                            onPressed: () =>
+                                                _changeCustomItemCount(-1),
+                                            style: TextButton.styleFrom(
+                                              minimumSize: const Size(44, 44),
+                                              padding: EdgeInsets.zero,
+                                              foregroundColor: const Color(
+                                                0xFF6A7E85,
+                                              ),
+                                            ),
+                                            child: const Icon(
+                                              Icons
+                                                  .remove_circle_outline_rounded,
+                                              size: 28,
+                                            ),
                                           ),
-                                        ),
-                                        child: const Icon(
-                                          Icons.remove_circle_outline_rounded,
-                                          size: 28,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 16),
-                                      Text(
-                                        '$_customItemCount',
-                                        style: textTheme.displaySmall?.copyWith(
-                                          fontWeight: FontWeight.w900,
-                                          color: const Color(0xFFE16A95),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 16),
-                                      TextButton(
-                                        onPressed: () =>
-                                            _changeCustomItemCount(1),
-                                        style: TextButton.styleFrom(
-                                          minimumSize: const Size(44, 44),
-                                          padding: EdgeInsets.zero,
-                                          foregroundColor: const Color(
-                                            0xFF6A7E85,
-                                          ),
-                                        ),
-                                        child: const Icon(
-                                          Icons.add_circle_outline_rounded,
-                                          size: 28,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 12),
-                                  ...List.generate(
-                                    _customItemControllers.length,
-                                    (index) {
-                                      return Padding(
-                                        padding: const EdgeInsets.only(
-                                          bottom: 10,
-                                        ),
-                                        child: TextField(
-                                          controller:
-                                              _customItemControllers[index],
-                                          onChanged: (_) => setState(() {}),
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                          decoration: InputDecoration(
-                                            isDense: true,
-                                            contentPadding:
-                                                const EdgeInsets.symmetric(
-                                                  horizontal: 16,
-                                                  vertical: 12,
+                                          const SizedBox(width: 16),
+                                          Text(
+                                            '$_customItemCount',
+                                            style: textTheme.displaySmall
+                                                ?.copyWith(
+                                                  fontWeight: FontWeight.w900,
+                                                  color: const Color(
+                                                    0xFFE16A95,
+                                                  ),
                                                 ),
-                                            hintText: '음식이름 ${index + 1}',
-                                            hintStyle: TextStyle(
-                                              color: Colors.grey.withValues(
-                                                alpha: 0.5,
+                                          ),
+                                          const SizedBox(width: 16),
+                                          TextButton(
+                                            onPressed: () =>
+                                                _changeCustomItemCount(1),
+                                            style: TextButton.styleFrom(
+                                              minimumSize: const Size(44, 44),
+                                              padding: EdgeInsets.zero,
+                                              foregroundColor: const Color(
+                                                0xFF6A7E85,
                                               ),
                                             ),
-                                            filled: true,
-                                            fillColor: Colors.white,
-                                            border: OutlineInputBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(25),
-                                              borderSide: const BorderSide(
-                                                color: Color(0xFFD8E0E2),
-                                              ),
-                                            ),
-                                            enabledBorder: OutlineInputBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(25),
-                                              borderSide: const BorderSide(
-                                                color: Color(0xFFD8E0E2),
-                                              ),
-                                            ),
-                                            focusedBorder: OutlineInputBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(25),
-                                              borderSide: const BorderSide(
-                                                color: Color(0xFFD81A60),
-                                                width: 1.5,
-                                              ),
+                                            child: const Icon(
+                                              Icons.add_circle_outline_rounded,
+                                              size: 28,
                                             ),
                                           ),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                ] else ...[
-                                  Transform.translate(
-                                    offset: const Offset(0, -12),
-                                    child: _AnimatedSegmentedControl<bool>(
-                                      items: const [false, true],
-                                      selectedItem: _isMenuManual,
-                                      itemLabelBuilder: (isManual) => isManual
-                                          ? '직접 선택'
-                                          : (_mode == RouletteMode.store
-                                                ? '음식점 랜덤'
-                                                : '메뉴 랜덤'),
-                                      onItemSelected: (isManual) {
-                                        if (isManual) {
-                                          _setMenuManual();
-                                        } else {
-                                          _setMenuRandom();
-                                        }
-                                      },
-                                    ),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  IgnorePointer(
-                                    ignoring: !_isMenuManual,
-                                    child: Container(
-                                      padding: _isMenuManual
-                                          ? const EdgeInsets.all(8)
-                                          : const EdgeInsets.fromLTRB(
-                                              8,
-                                              8,
-                                              8,
-                                              0,
+                                        ],
+                                      ),
+                                      const SizedBox(height: 12),
+                                      ...List.generate(
+                                        _customItemControllers.length,
+                                        (index) {
+                                          return Padding(
+                                            padding: const EdgeInsets.only(
+                                              bottom: 10,
                                             ),
-                                      decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(12),
-                                        color: const Color(0x08000000),
-                                        border: Border.all(
-                                          color: const Color(0x22000000),
+                                            child: TextField(
+                                              controller:
+                                                  _customItemControllers[index],
+                                              onChanged: (_) => setState(() {}),
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                              decoration: InputDecoration(
+                                                isDense: true,
+                                                contentPadding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 16,
+                                                      vertical: 12,
+                                                    ),
+                                                hintText: '음식이름 ${index + 1}',
+                                                hintStyle: TextStyle(
+                                                  color: Colors.grey.withValues(
+                                                    alpha: 0.5,
+                                                  ),
+                                                ),
+                                                filled: true,
+                                                fillColor: Colors.white,
+                                                border: OutlineInputBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(25),
+                                                  borderSide: const BorderSide(
+                                                    color: Color(0xFFD8E0E2),
+                                                  ),
+                                                ),
+                                                enabledBorder:
+                                                    OutlineInputBorder(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            25,
+                                                          ),
+                                                      borderSide:
+                                                          const BorderSide(
+                                                            color: Color(
+                                                              0xFFD8E0E2,
+                                                            ),
+                                                          ),
+                                                    ),
+                                                focusedBorder:
+                                                    OutlineInputBorder(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            25,
+                                                          ),
+                                                      borderSide:
+                                                          const BorderSide(
+                                                            color: Color(
+                                                              0xFFD81A60,
+                                                            ),
+                                                            width: 1.5,
+                                                          ),
+                                                    ),
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ] else ...[
+                                      Transform.translate(
+                                        offset: const Offset(0, -12),
+                                        child: _AnimatedSegmentedControl<bool>(
+                                          items: const [false, true],
+                                          selectedItem: _isMenuManual,
+                                          itemLabelBuilder: (isManual) =>
+                                              isManual
+                                              ? '직접 선택'
+                                              : (_mode == RouletteMode.store
+                                                    ? '음식점 랜덤'
+                                                    : '메뉴 랜덤'),
+                                          onItemSelected: (isManual) {
+                                            if (isManual) {
+                                              _setMenuManual();
+                                            } else {
+                                              _setMenuRandom();
+                                            }
+                                          },
                                         ),
                                       ),
-                                      child: SizedBox(
-                                        height: _isMenuManual ? 320 : 328,
-                                        child: Stack(
-                                          children: [
-                                            Opacity(
-                                              opacity: _isMenuManual ? 1.0 : 0.0,
-                                              child: Row(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Expanded(
-                                                    child: _FilterColumnCard(
-                                                      title: _cuisineTitle,
-                                                      children: _CuisineType.values
-                                                          .where(
-                                                            (v) =>
-                                                                v !=
-                                                                _CuisineType.random,
-                                                          )
-                                                          .map(
-                                                            (v) =>
-                                                                _FilterToggleTile(
-                                                                  label: v.label,
+                                      const SizedBox(height: 10),
+                                      IgnorePointer(
+                                        ignoring: !_isMenuManual,
+                                        child: Container(
+                                          padding: _isMenuManual
+                                              ? const EdgeInsets.all(8)
+                                              : const EdgeInsets.fromLTRB(
+                                                  8,
+                                                  8,
+                                                  8,
+                                                  0,
+                                                ),
+                                          decoration: BoxDecoration(
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
+                                            color: const Color(0x08000000),
+                                            border: Border.all(
+                                              color: const Color(0x22000000),
+                                            ),
+                                          ),
+                                          child: SizedBox(
+                                            height: _isMenuManual ? 320 : 328,
+                                            child: Stack(
+                                              children: [
+                                                Opacity(
+                                                  opacity: _isMenuManual
+                                                      ? 1.0
+                                                      : 0.0,
+                                                  child: Row(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      Expanded(
+                                                        child: _FilterColumnCard(
+                                                          title: _cuisineTitle,
+                                                          children: _CuisineType
+                                                              .values
+                                                              .where(
+                                                                (v) =>
+                                                                    v !=
+                                                                    _CuisineType
+                                                                        .random,
+                                                              )
+                                                              .map(
+                                                                (
+                                                                  v,
+                                                                ) => _FilterToggleTile(
+                                                                  label:
+                                                                      v.label,
                                                                   selected:
                                                                       _selectedCuisines
                                                                           .contains(
@@ -2210,26 +2478,33 @@ class _RouletteScreenState extends State<RouletteScreen> {
                                                                         v,
                                                                       ),
                                                                 ),
-                                                          )
-                                                          .toList(),
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 8),
-                                                  Expanded(
-                                                    child: _FilterColumnCard(
-                                                      title: _foodTypeTitle,
-                                                      children: _FoodType.values
-                                                          .where(
-                                                            (v) =>
-                                                                v !=
-                                                                _FoodType.random,
-                                                          )
-                                                          .map(
-                                                            (v) =>
-                                                                _FilterToggleTile(
-                                                                  label: v.label,
-                                                                  selected: _selectedFoodTypes
-                                                                      .contains(v),
+                                                              )
+                                                              .toList(),
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 8),
+                                                      Expanded(
+                                                        child: _FilterColumnCard(
+                                                          title: _foodTypeTitle,
+                                                          children: _FoodType
+                                                              .values
+                                                              .where(
+                                                                (v) =>
+                                                                    v !=
+                                                                    _FoodType
+                                                                        .random,
+                                                              )
+                                                              .map(
+                                                                (
+                                                                  v,
+                                                                ) => _FilterToggleTile(
+                                                                  label:
+                                                                      v.label,
+                                                                  selected:
+                                                                      _selectedFoodTypes
+                                                                          .contains(
+                                                                            v,
+                                                                          ),
                                                                   enabled:
                                                                       _isMenuManual,
                                                                   onTap: () =>
@@ -2237,41 +2512,44 @@ class _RouletteScreenState extends State<RouletteScreen> {
                                                                         v,
                                                                       ),
                                                                 ),
-                                                          )
-                                                          .toList(),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                            if (!_isMenuManual)
-                                              Positioned(
-                                                left: 0,
-                                                right: 0,
-                                                bottom: 0,
-                                                child: ClipRRect(
-                                                  borderRadius:
-                                                      BorderRadius.circular(8),
-                                                  child: Image.asset(
-                                                    'assets/background/random.png',
-                                                    fit: BoxFit.cover,
-                                                    alignment: Alignment.bottomCenter,
+                                                              )
+                                                              .toList(),
+                                                        ),
+                                                      ),
+                                                    ],
                                                   ),
                                                 ),
-                                              ),
-                                          ],
+                                                if (!_isMenuManual)
+                                                  Positioned(
+                                                    left: 0,
+                                                    right: 0,
+                                                    bottom: 0,
+                                                    child: ClipRRect(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            8,
+                                                          ),
+                                                      child: Image.asset(
+                                                        'assets/background/random.png',
+                                                        fit: BoxFit.cover,
+                                                        alignment: Alignment
+                                                            .bottomCenter,
+                                                      ),
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                          ),
                                         ),
                                       ),
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
-                    ),
-                  ),
                       Positioned.fill(
                         child: IgnorePointer(
                           child: CustomPaint(painter: _NeonPainter()),
@@ -2283,7 +2561,8 @@ class _RouletteScreenState extends State<RouletteScreen> {
                 const SizedBox(height: 28),
                 GlowingActionButton(
                   onTap: canSpin ? _onSpinButtonPressed : null,
-                  isLoading: _isSpinning ||
+                  isLoading:
+                      _isSpinning ||
                       _isRewardedAdLoading ||
                       _isRewardedAdShowing ||
                       _isAdBonusIntroShowing,
@@ -2440,6 +2719,36 @@ class _PinballMapChoice {
   final int mapIndex;
   final String title;
   final String subtitle;
+}
+
+class _PinballLaunchConfig {
+  const _PinballLaunchConfig._({
+    required this.useV2,
+    this.v1MapIndex,
+    this.v2MapId,
+  });
+
+  const _PinballLaunchConfig.v1(int mapIndex)
+    : this._(useV2: false, v1MapIndex: mapIndex);
+
+  const _PinballLaunchConfig.v2(String mapId)
+    : this._(useV2: true, v2MapId: mapId);
+
+  final bool useV2;
+  final int? v1MapIndex;
+  final String? v2MapId;
+}
+
+class _V2MapChoice {
+  const _V2MapChoice({
+    required this.id,
+    required this.title,
+    required this.sort,
+  });
+
+  final String id;
+  final String title;
+  final int sort;
 }
 
 class _RouletteCandidate {
