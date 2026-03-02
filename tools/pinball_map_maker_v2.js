@@ -6177,6 +6177,10 @@ async function loadEngineFrame() {
   if (!initResult || initResult.ok !== true) {
     throw new Error(initResult && initResult.reason ? initResult.reason : '초기화에 실패했습니다');
   }
+  const startupCandidates = await api.setCandidates(buildAutoCandidates(getCurrentMarbleCount()));
+  if (!startupCandidates || startupCandidates.ok !== true) {
+    throw new Error(startupCandidates && startupCandidates.reason ? startupCandidates.reason : '초기 공 후보 설정 실패');
+  }
   if (typeof api.getCurrentMapJson === 'function') {
     const mapJson = api.getCurrentMapJson();
     if (mapJson && typeof mapJson === 'object') {
@@ -6964,9 +6968,15 @@ async function boot() {
     } catch (previewError) {
       setPreviewStatus(String(previewError && previewError.message ? previewError.message : previewError), 'error');
     }
-    if (selectedMapCatalogEntry()) {
-      await loadSelectedCatalogMap();
+    if (!selectedMapCatalogEntry() && mapCatalog.length > 0 && elements.mapSelect) {
+      elements.mapSelect.value = mapCatalog[0].id;
     }
+    if (mapCatalog.length > 0) {
+      await loadSelectedCatalogMap();
+    } else {
+      await applyMapAndCandidates();
+    }
+    await applyLiveMarbleCountNow('');
   } catch (error) {
     setStatus(String(error && error.message ? error.message : error), 'error');
   } finally {
