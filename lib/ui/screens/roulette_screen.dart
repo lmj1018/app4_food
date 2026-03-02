@@ -1146,6 +1146,108 @@ class _RouletteScreenState extends State<RouletteScreen> {
     return null;
   }
 
+  Future<List<Directory>> _resolveLocalV2MapsDirs() async {
+    final sep = Platform.pathSeparator;
+    final candidates = <String>[
+      <String>[
+        Directory.current.path,
+        'assets',
+        'ui',
+        'pinball',
+        'maps',
+      ].join(sep),
+      <String>[
+        Directory.current.path,
+        '..',
+        'assets',
+        'ui',
+        'pinball',
+        'maps',
+      ].join(sep),
+    ];
+    final dirs = <Directory>[];
+    for (final path in candidates) {
+      try {
+        final dir = Directory(path);
+        if (await dir.exists()) {
+          dirs.add(dir);
+        }
+      } catch (_) {}
+    }
+    return dirs;
+  }
+
+  Future<List<_V2MapChoice>> _loadLocalV2MapFileChoices() async {
+    final dirs = await _resolveLocalV2MapsDirs();
+    if (dirs.isEmpty) {
+      return const <_V2MapChoice>[];
+    }
+    final seen = <String>{};
+    final parsed = <_V2MapChoice>[];
+    for (final dir in dirs) {
+      try {
+        await for (final entity in dir.list(followLinks: false)) {
+          if (entity is! File) {
+            continue;
+          }
+          final fileName = entity.uri.pathSegments.isNotEmpty
+              ? entity.uri.pathSegments.last
+              : '';
+          final lower = fileName.toLowerCase();
+          if (!lower.endsWith('.json') || lower == 'manifest.json') {
+            continue;
+          }
+          final id = fileName.substring(0, fileName.length - 5).trim();
+          if (id.isEmpty || !seen.add(id)) {
+            continue;
+          }
+          parsed.add(
+            _V2MapChoice(id: id, title: id, sort: 8000 + parsed.length),
+          );
+        }
+      } catch (_) {}
+    }
+    return parsed;
+  }
+
+  List<_V2MapChoice> _parseBundledV2MapChoices(dynamic rawAssetManifest) {
+    if (rawAssetManifest is! Map) {
+      return const <_V2MapChoice>[];
+    }
+    const prefix = 'assets/ui/pinball/maps/';
+    final seen = <String>{};
+    final parsed = <_V2MapChoice>[];
+    for (final key in rawAssetManifest.keys) {
+      if (key is! String || !key.startsWith(prefix)) {
+        continue;
+      }
+      final fileName = key.substring(prefix.length);
+      final lower = fileName.toLowerCase();
+      if (!lower.endsWith('.json') || lower == 'manifest.json') {
+        continue;
+      }
+      if (fileName.contains('/')) {
+        continue;
+      }
+      final id = fileName.substring(0, fileName.length - 5).trim();
+      if (id.isEmpty || !seen.add(id)) {
+        continue;
+      }
+      parsed.add(_V2MapChoice(id: id, title: id, sort: 8500 + parsed.length));
+    }
+    return parsed;
+  }
+
+  Future<List<_V2MapChoice>> _loadBundledV2MapChoices() async {
+    try {
+      final text = await rootBundle.loadString('AssetManifest.json');
+      final raw = jsonDecode(text);
+      return _parseBundledV2MapChoices(raw);
+    } catch (_) {
+      return const <_V2MapChoice>[];
+    }
+  }
+
   List<_V2MapChoice> _parseV2MapChoices(dynamic rawManifest) {
     if (rawManifest is! Map) {
       return const <_V2MapChoice>[];
@@ -1207,8 +1309,25 @@ class _RouletteScreenState extends State<RouletteScreen> {
       } catch (_) {}
     }
     final choices = _parseV2MapChoices(rawManifest);
-    if (choices.isNotEmpty) {
-      return choices;
+    final merged = <String, _V2MapChoice>{
+      for (final choice in choices) choice.id: choice,
+    };
+    for (final choice in await _loadLocalV2MapFileChoices()) {
+      merged.putIfAbsent(choice.id, () => choice);
+    }
+    for (final choice in await _loadBundledV2MapChoices()) {
+      merged.putIfAbsent(choice.id, () => choice);
+    }
+    final resolved = merged.values.toList(growable: false)
+      ..sort((left, right) {
+        final sortCmp = left.sort.compareTo(right.sort);
+        if (sortCmp != 0) {
+          return sortCmp;
+        }
+        return left.id.compareTo(right.id);
+      });
+    if (resolved.isNotEmpty) {
+      return resolved;
     }
     return const <_V2MapChoice>[
       _V2MapChoice(id: 'v2_default', title: 'v2_default', sort: 100),

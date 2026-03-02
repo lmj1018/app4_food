@@ -388,7 +388,7 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
       shared: true,
     );
     _localServer = server;
-    _localBaseUri = Uri.parse('http://127.0.0.1:$server.port');
+    _localBaseUri = Uri.parse('http://127.0.0.1:${server.port}');
 
     unawaited(
       server.forEach((request) async {
