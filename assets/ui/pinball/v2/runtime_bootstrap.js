@@ -84,7 +84,14 @@ const control = {
   skillWarmupMs: 5000,
   skillDisabled: true,
   mapDisableSkills: false,
+  mapDisableSkillsInSlowMotion: true,
   fromApp: false,
+};
+
+const marbleImageState = {
+  dataUrls: {},
+  images: new Map(),
+  revision: 0,
 };
 
 function detectFromAppContext(payload = null) {
@@ -216,6 +223,83 @@ function getRoulette() {
     : null;
 }
 
+function normalizeImageDataUrlMap(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return {};
+  }
+  const out = {};
+  const entries = Object.entries(raw);
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    const rawName = entry && entry.length > 0 ? entry[0] : '';
+    const rawSrc = entry && entry.length > 1 ? entry[1] : '';
+    const name = typeof rawName === 'string' ? rawName.trim() : '';
+    const src = typeof rawSrc === 'string' ? rawSrc.trim() : '';
+    if (!name || !src || !src.startsWith('data:image/')) {
+      continue;
+    }
+    out[name] = src;
+  }
+  return out;
+}
+
+function setPayloadMarbleImages(raw) {
+  const normalized = normalizeImageDataUrlMap(raw);
+  marbleImageState.dataUrls = normalized;
+  marbleImageState.images.clear();
+  const names = Object.keys(normalized);
+  for (let index = 0; index < names.length; index += 1) {
+    const name = names[index];
+    const src = normalized[name];
+    if (!name || !src) {
+      continue;
+    }
+    let image = null;
+    try {
+      image = new Image();
+      image.decoding = 'async';
+      image.src = src;
+    } catch (_) {
+      image = null;
+    }
+    if (image) {
+      marbleImageState.images.set(name, image);
+    }
+  }
+  marbleImageState.revision += 1;
+}
+
+function patchRendererMarbleImages() {
+  const roulette = getRoulette();
+  const renderer = roulette && roulette._renderer && typeof roulette._renderer === 'object'
+    ? roulette._renderer
+    : null;
+  if (!renderer || typeof renderer.getMarbleImage !== 'function') {
+    return false;
+  }
+  if (renderer.__v2MarbleImagePatchRevision === marbleImageState.revision) {
+    return true;
+  }
+  if (typeof renderer.__v2OriginalGetMarbleImage !== 'function') {
+    renderer.__v2OriginalGetMarbleImage = renderer.getMarbleImage.bind(renderer);
+  }
+  renderer.getMarbleImage = (name) => {
+    const marbleName = typeof name === 'string' ? name.trim() : '';
+    if (marbleName) {
+      const image = marbleImageState.images.get(marbleName);
+      if (image && image.complete && image.naturalWidth > 0) {
+        return image;
+      }
+      if (image) {
+        return image;
+      }
+    }
+    return renderer.__v2OriginalGetMarbleImage(name);
+  };
+  renderer.__v2MarbleImagePatchRevision = marbleImageState.revision;
+  return true;
+}
+
 function getPhysics() {
   const roulette = getRoulette();
   return roulette && roulette.physics ? roulette.physics : null;
@@ -277,7 +361,8 @@ function updateSkillPolicy(nowMs) {
   const inWarmup = nowMs < warmupUntil;
   const slowNearGoal = toFiniteNumber(roulette._timeScale, 1) < 0.999
     || toFiniteNumber(roulette._goalDist, Number.POSITIVE_INFINITY) < 5;
-  setSkillsEnabled(!(inWarmup || slowNearGoal));
+  const disableBySlowMotion = control.mapDisableSkillsInSlowMotion !== false && slowNearGoal;
+  setSkillsEnabled(!(inWarmup || disableBySlowMotion));
 }
 
 function getSortedMarbleIds(physics) {
@@ -751,6 +836,7 @@ function startTickLoop() {
     const now = Date.now();
     ensureCanvasFillLayout();
     applyAppVisualCompatibility();
+    patchRendererMarbleImages();
     suppressMarbleCooldownIndicator();
     updateSkillPolicy(now);
     if (control.behaviorRuntime && typeof control.behaviorRuntime.tick === 'function') {
@@ -834,6 +920,9 @@ function buildDefaultMapIfNeeded(mapId) {
     stage: {
       goalY: 210,
       zoomY: 200,
+      disableSkills: false,
+      disableSkillsInSlowMotion: true,
+      skillWarmupMs: 5000,
       spawn: { x: 10.25, y: 0, columns: 10, spacingX: 0.6, visibleRows: 5 },
     },
     objects: [],
@@ -861,6 +950,8 @@ async function applyMapJson(rawMapJson) {
   control.mapJson = mapJson;
   control.compiledMap = compiled;
   control.mapDisableSkills = compiled && compiled.stage && compiled.stage.disableSkills === true;
+  control.mapDisableSkillsInSlowMotion = !(compiled && compiled.stage && compiled.stage.disableSkillsInSlowMotion === false);
+  control.skillWarmupMs = Math.max(0, toFiniteNumber(compiled && compiled.stage && compiled.stage.skillWarmupMs, 5000));
   control.allEntityIds = compiled.objectIndex
     .map((entry) => toFiniteNumber(entry.entityId, NaN))
     .filter((value) => Number.isFinite(value));
@@ -882,6 +973,7 @@ async function applyMapJson(rawMapJson) {
     suppressMarbleCooldownIndicator();
     alignSpawnToStage();
   }
+  patchRendererMarbleImages();
   setStatus(`map loaded: ${control.mapId}`);
   return { ok: true, mapId: control.mapId };
 }
@@ -917,6 +1009,8 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
   control.mapJson = mapJson;
   control.compiledMap = compiled;
   control.mapDisableSkills = compiled && compiled.stage && compiled.stage.disableSkills === true;
+  control.mapDisableSkillsInSlowMotion = !(compiled && compiled.stage && compiled.stage.disableSkillsInSlowMotion === false);
+  control.skillWarmupMs = Math.max(0, toFiniteNumber(compiled && compiled.stage && compiled.stage.skillWarmupMs, 5000));
   control.allEntityIds = compiled.objectIndex
     .map((entry) => toFiniteNumber(entry.entityId, NaN))
     .filter((value) => Number.isFinite(value));
@@ -942,6 +1036,7 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
   } else if (!preserveMarbles) {
     alignSpawnToStage();
   }
+  patchRendererMarbleImages();
 
   setWinningRank(control.winningRank);
   if (preserveRunning && runningBefore) {
@@ -990,6 +1085,7 @@ async function setCandidates(rawCandidates) {
   roulette.setMarbles(candidates.slice());
   suppressMarbleCooldownIndicator();
   alignSpawnToStage();
+  patchRendererMarbleImages();
   setWinningRank(control.winningRank);
   setStatus(`candidates set: ${candidates.length}`);
   return { ok: true, count: candidates.length };
@@ -1439,6 +1535,7 @@ async function reset() {
     roulette.setMarbles(control.candidates.slice());
     alignSpawnToStage();
   }
+  patchRendererMarbleImages();
   setWinningRank(control.winningRank);
   setStatus('reset complete');
   return { ok: true };
@@ -1468,6 +1565,12 @@ function getState() {
     candidateCount: control.candidates.length,
     marbleCount: marbles.length,
     winningRank: control.winningRank,
+    skillPolicy: {
+      disableAll: control.mapDisableSkills,
+      disableInSlowMotion: control.mapDisableSkillsInSlowMotion,
+      warmupMs: control.skillWarmupMs,
+      skillDisabled: control.skillDisabled,
+    },
     statusText: control.statusText,
     snapshotCount: listSnapshots().length,
     lastSnapshotHash: control.lastSnapshotHash,
@@ -1506,6 +1609,7 @@ async function init(payload = {}) {
     control.rngSeed = toFiniteNumber(payload.seed, control.rngSeed);
     control.rng.setSeed(control.rngSeed);
   }
+  setPayloadMarbleImages(payload.imageDataUrls);
 
   const mapResult = await loadMapById(selectedMapId);
   if (!mapResult.ok) {

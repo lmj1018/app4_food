@@ -16,7 +16,7 @@ const DEFAULT_OBJECT_COLORS = {
   circle: '#ff62bf',
   portal: '#b68cff',
   blackHole: '#7b55b8',
-  whiteHole: '#c8abff',
+  whiteHole: '#f4fbff',
   burst: '#5dff7a',
   hammer: '#ffa557',
   diamond: '#6affea',
@@ -328,9 +328,9 @@ function compileCircle(raw, entityId, defaults) {
   const density = Math.max(0.01, toFiniteNumber(raw.density, defaults.density));
   const linearDamping = Math.max(0, toFiniteNumber(raw.linearDamping, 0));
   const angularDamping = Math.max(0, toFiniteNumber(raw.angularDamping, 0));
-  const fixedRotation = toBoolean(raw.fixedRotation, false);
-  const gravityScale = Math.max(0, toFiniteNumber(raw.gravityScale, 1));
-  const sensor = toBoolean(raw.sensor, false);
+  const fixedRotation = toBoolean(raw.fixedRotation, toBoolean(defaults && defaults.fixedRotation, false));
+  const gravityScale = Math.max(0, toFiniteNumber(raw.gravityScale, toFiniteNumber(defaults && defaults.gravityScale, 1)));
+  const sensor = toBoolean(raw.sensor, toBoolean(defaults && defaults.sensor, false));
   const life = Number.isFinite(Number(raw.life)) ? Math.max(-1, Math.floor(Number(raw.life))) : defaults.life;
   const color = typeof raw.color === 'string' ? raw.color : defaults.color;
   const rawBodyType = typeof raw === 'object' && raw
@@ -633,10 +633,10 @@ function compileObject(rawObject, entityId) {
           ),
           suctionForce: Math.max(
             0.35,
-            toFiniteNumber(rawObject.suctionForce, toFiniteNumber(rawObject.force, 0.55)),
+            toFiniteNumber(rawObject.suctionForce, toFiniteNumber(rawObject.force, 0.8)),
           ),
           cooldownMs: Math.max(80, toFiniteNumber(rawObject.cooldownMs, 900)),
-          launchImpulse: Math.max(0.1, toFiniteNumber(rawObject.launchImpulse, 2.9)),
+          launchImpulse: Math.max(0.1, toFiniteNumber(rawObject.launchImpulse, 3.6)),
         },
       };
     case 'white_hole':
@@ -660,7 +660,7 @@ function compileObject(rawObject, entityId) {
           y: toFiniteNumber(rawObject.y, 62),
           radius: Math.max(0.16, toFiniteNumber(rawObject.radius, 0.62)),
           cooldownMs: Math.max(80, toFiniteNumber(rawObject.cooldownMs, 900)),
-          launchImpulse: Math.max(0.1, toFiniteNumber(rawObject.launchImpulse, 2.9)),
+          launchImpulse: Math.max(0.1, toFiniteNumber(rawObject.launchImpulse, 4.6)),
         },
       };
     case 'hammer':
@@ -863,6 +863,14 @@ export function compileMap(mapJson) {
     goalY: Math.max(20, toFiniteNumber(stageRaw.goalY, DEFAULT_STAGE.goalY)),
     zoomY: Math.max(0, toFiniteNumber(stageRaw.zoomY, DEFAULT_STAGE.zoomY)),
     disableSkills: stageRaw.disableSkills === true,
+    disableSkillsInSlowMotion: stageRaw.disableSkillsInSlowMotion !== false,
+    skillWarmupMs: Math.max(
+      0,
+      toFiniteNumber(
+        stageRaw.skillWarmupMs,
+        toFiniteNumber(stageRaw.skillWarmupSec, 5) * 1000,
+      ),
+    ),
     spawn: {
       x: toFiniteNumber(spawnRaw.x, DEFAULT_STAGE.spawn.x),
       y: toFiniteNumber(spawnRaw.y, DEFAULT_STAGE.spawn.y),
@@ -1072,6 +1080,9 @@ function createPortalBehavior(def, portalByOid, env) {
 function createBlackHoleNetworkBehavior(blackHoleDefs, whiteHoleDefs, env) {
   const cooldownByMarble = {};
   let lastTickAt = 0;
+  const nextBlackVisualAtByOid = {};
+  const nextWhiteVisualAtByOid = {};
+  let whitePulseToggle = false;
 
   const blackDefs = Array.isArray(blackHoleDefs) ? blackHoleDefs : [];
   const whiteDefs = Array.isArray(whiteHoleDefs) ? whiteHoleDefs : [];
@@ -1095,6 +1106,115 @@ function createBlackHoleNetworkBehavior(blackHoleDefs, whiteHoleDefs, env) {
     return whiteDefs[Math.max(0, Math.min(index, whiteDefs.length - 1))] || whiteDefs[0];
   }
 
+  function emitBlackHoleVisual(def, now, intensity = 1) {
+    const roulette = env.getRoulette();
+    if (!roulette || !Array.isArray(roulette._effects)) {
+      return;
+    }
+    const cx = toFiniteNumber(def && def.x, 0);
+    const cy = toFiniteNumber(def && def.y, 0);
+    const radius = Math.max(0.12, toFiniteNumber(def && def.radius, 0.72));
+    const safeIntensity = clamp(toFiniteNumber(intensity, 1), 0.45, 2.8);
+    const duration = Math.round(clamp(220 + safeIntensity * 160, 180, 560));
+    roulette._effects.push({
+      elapsed: 0,
+      duration,
+      isDestroy: false,
+      update(deltaMs) {
+        this.elapsed += toFiniteNumber(deltaMs, 0);
+        if (this.elapsed >= this.duration) {
+          this.isDestroy = true;
+        }
+      },
+      render(ctx, zoomScale) {
+        if (!ctx) {
+          return;
+        }
+        const ratio = clamp(this.elapsed / Math.max(1, this.duration), 0, 1);
+        const glow = radius * (1.25 + safeIntensity * 0.18);
+        const lineWidth = Math.max(0.6 / Math.max(1, toFiniteNumber(zoomScale, 1)), 0.42);
+        const swirlCount = 4;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.globalAlpha = Math.max(0, 0.78 * (1 - ratio));
+        ctx.fillStyle = `rgba(60, 26, 98, ${0.25 + (1 - ratio) * 0.28})`;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius * (0.85 + ratio * 0.25), 0, Math.PI * 2);
+        ctx.fill();
+        for (let i = 0; i < swirlCount; i += 1) {
+          const angle = ratio * Math.PI * 2.8 + (i / swirlCount) * Math.PI * 2;
+          const sx = Math.cos(angle) * glow;
+          const sy = Math.sin(angle) * glow;
+          ctx.strokeStyle = `rgba(168, 117, 238, ${0.52 * (1 - ratio)})`;
+          ctx.lineWidth = lineWidth;
+          ctx.beginPath();
+          ctx.moveTo(sx, sy);
+          ctx.lineTo(sx * 0.3, sy * 0.3);
+          ctx.stroke();
+        }
+        ctx.strokeStyle = `rgba(199, 150, 255, ${0.66 * (1 - ratio)})`;
+        ctx.lineWidth = lineWidth * 1.15;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius + ratio * (safeIntensity * 0.65), 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      },
+    });
+    nextBlackVisualAtByOid[String(def && def.oid ? def.oid : '__black')] = now + 110;
+  }
+
+  function emitWhiteHoleVisual(def, now, boosted = false) {
+    const roulette = env.getRoulette();
+    if (!roulette || !Array.isArray(roulette._effects)) {
+      return;
+    }
+    const cx = toFiniteNumber(def && def.x, 0);
+    const cy = toFiniteNumber(def && def.y, 0);
+    const radius = Math.max(0.12, toFiniteNumber(def && def.radius, 0.62));
+    const shortPulse = boosted || whitePulseToggle;
+    whitePulseToggle = !whitePulseToggle;
+    const duration = shortPulse ? 220 : 420;
+    roulette._effects.push({
+      elapsed: 0,
+      duration,
+      isDestroy: false,
+      update(deltaMs) {
+        this.elapsed += toFiniteNumber(deltaMs, 0);
+        if (this.elapsed >= this.duration) {
+          this.isDestroy = true;
+        }
+      },
+      render(ctx, zoomScale) {
+        if (!ctx) {
+          return;
+        }
+        const ratio = clamp(this.elapsed / Math.max(1, this.duration), 0, 1);
+        const lineWidth = Math.max(0.65 / Math.max(1, toFiniteNumber(zoomScale, 1)), 0.45);
+        const pulseRadius = radius * (0.92 + ratio * (shortPulse ? 1.4 : 2.1));
+        const coreAlpha = shortPulse ? 0.72 : 0.56;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.globalAlpha = Math.max(0, 1 - ratio * 0.85);
+        ctx.fillStyle = `rgba(244, 251, 255, ${coreAlpha})`;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius * (0.82 + (1 - ratio) * 0.22), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.88 * (1 - ratio)})`;
+        ctx.lineWidth = lineWidth;
+        ctx.beginPath();
+        ctx.arc(0, 0, pulseRadius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = `rgba(188, 235, 255, ${0.58 * (1 - ratio)})`;
+        ctx.lineWidth = lineWidth * 0.82;
+        ctx.beginPath();
+        ctx.arc(0, 0, pulseRadius * 1.25, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      },
+    });
+    nextWhiteVisualAtByOid[String(def && def.oid ? def.oid : '__white')] = now + (shortPulse ? 150 : 270);
+  }
+
   function teleportToWhiteHole(marble, body, sourceDef, targetDef, now) {
     const box2d = env.getBox2D();
     if (!box2d || typeof box2d.b2Vec2 !== 'function') {
@@ -1105,8 +1225,8 @@ function createBlackHoleNetworkBehavior(blackHoleDefs, whiteHoleDefs, env) {
     const launchImpulse = Math.max(
       0.1,
       Math.max(
-        toFiniteNumber(targetDef && targetDef.launchImpulse, 2.9),
-        toFiniteNumber(sourceDef && sourceDef.launchImpulse, 2.9),
+        toFiniteNumber(targetDef && targetDef.launchImpulse, 4.6),
+        toFiniteNumber(sourceDef && sourceDef.launchImpulse, 3.6),
       ),
     );
     const rng = typeof env.getRng === 'function' ? env.getRng() : null;
@@ -1151,6 +1271,7 @@ function createBlackHoleNetworkBehavior(blackHoleDefs, whiteHoleDefs, env) {
       ),
     );
     setCooldown(marble.id, now + cooldownMs);
+    emitWhiteHoleVisual(targetDef, now, true);
     return true;
   }
 
@@ -1174,6 +1295,28 @@ function createBlackHoleNetworkBehavior(blackHoleDefs, whiteHoleDefs, env) {
       const dtMs = Math.max(8, Math.min(80, toFiniteNumber(now - lastTickAt, 16)));
       lastTickAt = now;
       const deltaScale = dtMs / 16.666;
+      for (let index = 0; index < blackDefs.length; index += 1) {
+        const black = blackDefs[index];
+        if (!black || !black.oid) {
+          continue;
+        }
+        const key = String(black.oid);
+        const dueAt = toFiniteNumber(nextBlackVisualAtByOid[key], 0);
+        if (now >= dueAt) {
+          emitBlackHoleVisual(black, now, 1);
+        }
+      }
+      for (let index = 0; index < whiteDefs.length; index += 1) {
+        const white = whiteDefs[index];
+        if (!white || !white.oid) {
+          continue;
+        }
+        const key = String(white.oid);
+        const dueAt = toFiniteNumber(nextWhiteVisualAtByOid[key], 0);
+        if (now >= dueAt) {
+          emitWhiteHoleVisual(white, now, false);
+        }
+      }
 
       for (let marbleIndex = 0; marbleIndex < marbles.length; marbleIndex += 1) {
         const marble = marbles[marbleIndex];
@@ -1218,7 +1361,7 @@ function createBlackHoleNetworkBehavior(blackHoleDefs, whiteHoleDefs, env) {
           const nx = dx / dist;
           const ny = dy / dist;
           const falloff = Math.max(0, 1 - dist / suctionRadius);
-          const suctionForce = Math.max(0.35, toFiniteNumber(black.suctionForce, toFiniteNumber(black.force, 0.55)));
+          const suctionForce = Math.max(0.35, toFiniteNumber(black.suctionForce, toFiniteNumber(black.force, 0.8)));
           const pullImpulse = suctionForce * deltaScale * (0.75 + falloff * 2.4);
           try {
             if (typeof body.SetEnabled === 'function') {
@@ -1241,6 +1384,7 @@ function createBlackHoleNetworkBehavior(blackHoleDefs, whiteHoleDefs, env) {
           if (dist > captureRadius) {
             continue;
           }
+          emitBlackHoleVisual(black, now, 1.7);
           const target = pickWhiteHole();
           if (!target) {
             continue;
@@ -1259,6 +1403,9 @@ function createBlackHoleNetworkBehavior(blackHoleDefs, whiteHoleDefs, env) {
       return {
         cooldownByMarble: { ...cooldownByMarble },
         lastTickAt: toFiniteNumber(lastTickAt, 0),
+        nextBlackVisualAtByOid: { ...nextBlackVisualAtByOid },
+        nextWhiteVisualAtByOid: { ...nextWhiteVisualAtByOid },
+        whitePulseToggle,
       };
     },
     restoreState(rawState) {
@@ -1273,6 +1420,25 @@ function createBlackHoleNetworkBehavior(blackHoleDefs, whiteHoleDefs, env) {
         cooldownByMarble[key] = toFiniteNumber(cooldownState[key], 0);
       }
       lastTickAt = toFiniteNumber(nextState.lastTickAt, 0);
+      const blackVisualState = nextState.nextBlackVisualAtByOid && typeof nextState.nextBlackVisualAtByOid === 'object'
+        ? nextState.nextBlackVisualAtByOid
+        : {};
+      const whiteVisualState = nextState.nextWhiteVisualAtByOid && typeof nextState.nextWhiteVisualAtByOid === 'object'
+        ? nextState.nextWhiteVisualAtByOid
+        : {};
+      for (const key of Object.keys(nextBlackVisualAtByOid)) {
+        delete nextBlackVisualAtByOid[key];
+      }
+      for (const key of Object.keys(nextWhiteVisualAtByOid)) {
+        delete nextWhiteVisualAtByOid[key];
+      }
+      for (const key of Object.keys(blackVisualState)) {
+        nextBlackVisualAtByOid[key] = toFiniteNumber(blackVisualState[key], 0);
+      }
+      for (const key of Object.keys(whiteVisualState)) {
+        nextWhiteVisualAtByOid[key] = toFiniteNumber(whiteVisualState[key], 0);
+      }
+      whitePulseToggle = nextState.whitePulseToggle === true;
     },
   };
 }

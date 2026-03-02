@@ -14,6 +14,7 @@ const MAX_UNDO_HISTORY = 50;
 const ENABLE_COORDINATE_OVERLAY = false;
 const GOAL_MARKER_IMAGE_DEFAULT_SRC = '../../background/finish.png';
 const GOAL_MARKER_IMAGE_PREVIEW_SRC = '../assets/background/finish.png';
+const DEFAULT_SKILL_WARMUP_SEC = 5;
 const OBJECT_COLOR_PRESET = {
   wall: '#ff7cc8',
   box: '#ff4fa8',
@@ -22,7 +23,7 @@ const OBJECT_COLOR_PRESET = {
   rotor: '#ff66c8',
   portal: '#b68cff',
   blackHole: '#7b55b8',
-  whiteHole: '#c8abff',
+  whiteHole: '#f4fbff',
   hammer: '#ffa557',
   fan: '#7fd9ff',
   burst: '#5dff7a',
@@ -101,7 +102,11 @@ const elements = {
   viewZoomInput: document.getElementById('viewZoomInput'),
   marbleSizeInput: document.getElementById('marbleSizeInput'),
   stageZoomInput: document.getElementById('stageZoomInput'),
+  stageSkillPolicyExpandInput: document.getElementById('stageSkillPolicyExpandInput'),
+  stageSkillPolicyPanel: document.getElementById('stageSkillPolicyPanel'),
   stageDisableSkillsInput: document.getElementById('stageDisableSkillsInput'),
+  stageDisableSkillsSlowInput: document.getElementById('stageDisableSkillsSlowInput'),
+  stageSkillWarmupSecInput: document.getElementById('stageSkillWarmupSecInput'),
   stageResetOnObjectChangeInput: document.getElementById('stageResetOnObjectChangeInput'),
   applyViewZoomButton: document.getElementById('applyViewZoomButton'),
   applyMarbleSizeButton: document.getElementById('applyMarbleSizeButton'),
@@ -404,7 +409,11 @@ function setBusy(isBusy) {
     elements.viewZoomInput,
     elements.marbleSizeInput,
     elements.stageZoomInput,
+    elements.stageSkillPolicyExpandInput,
     elements.stageResetOnObjectChangeInput,
+    elements.stageDisableSkillsInput,
+    elements.stageDisableSkillsSlowInput,
+    elements.stageSkillWarmupSecInput,
     elements.applyViewZoomButton,
     elements.applyMarbleSizeButton,
     elements.fitStageButton,
@@ -498,6 +507,8 @@ function buildDefaultMapJson(mapId = 'v2_custom_map') {
       leftWallX: 2.5,
       rightWallX: 21,
       disableSkills: false,
+      disableSkillsInSlowMotion: true,
+      skillWarmupSec: DEFAULT_SKILL_WARMUP_SEC,
       spawn: { x: 10.25, y: 0, columns: 10, spacingX: 0.6, visibleRows: 5 },
     },
     objects: [],
@@ -632,15 +643,15 @@ function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
       } else if (type === 'black_hole') {
         obj.radius = Math.max(0.18, toFinite(obj.radius, 0.72));
         obj.triggerRadius = Math.max(obj.radius + 0.2, toFinite(obj.triggerRadius, 2.1));
-        obj.suctionForce = Math.max(0.35, toFinite(obj.suctionForce, toFinite(obj.force, 0.55)));
-        obj.launchImpulse = Math.max(0.1, toFinite(obj.launchImpulse, 2.9));
+        obj.suctionForce = Math.max(0.35, toFinite(obj.suctionForce, toFinite(obj.force, 0.8)));
+        obj.launchImpulse = Math.max(0.1, toFinite(obj.launchImpulse, 3.6));
         obj.cooldownMs = Math.max(80, Math.floor(toFinite(obj.cooldownMs, 900)));
         if (typeof obj.color !== 'string' || !obj.color.trim()) {
           obj.color = OBJECT_COLOR_PRESET.blackHole;
         }
       } else if (type === 'white_hole') {
         obj.radius = Math.max(0.16, toFinite(obj.radius, 0.62));
-        obj.launchImpulse = Math.max(0.1, toFinite(obj.launchImpulse, 2.9));
+        obj.launchImpulse = Math.max(0.1, toFinite(obj.launchImpulse, 4.6));
         obj.cooldownMs = Math.max(80, Math.floor(toFinite(obj.cooldownMs, 900)));
         if (typeof obj.color !== 'string' || !obj.color.trim()) {
           obj.color = OBJECT_COLOR_PRESET.whiteHole;
@@ -672,6 +683,16 @@ function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
   source.stage.leftWallX = safeLeft;
   source.stage.rightWallX = safeRight;
   source.stage.disableSkills = source.stage.disableSkills === true;
+  source.stage.disableSkillsInSlowMotion = source.stage.disableSkillsInSlowMotion !== false;
+  source.stage.skillWarmupSec = round2(clamp(
+    toFinite(
+      source.stage.skillWarmupSec,
+      toFinite(source.stage.skillWarmupMs, DEFAULT_SKILL_WARMUP_SEC * 1000) / 1000,
+    ),
+    0,
+    60,
+  ));
+  source.stage.skillWarmupMs = Math.round(source.stage.skillWarmupSec * 1000);
   return source;
 }
 
@@ -766,6 +787,25 @@ function undoLastChange() {
   return true;
 }
 
+function setSkillPolicyPanelOpen(open) {
+  const expanded = open === true;
+  if (elements.stageSkillPolicyPanel) {
+    elements.stageSkillPolicyPanel.classList.toggle('open', expanded);
+  }
+  if (elements.stageSkillPolicyExpandInput) {
+    elements.stageSkillPolicyExpandInput.checked = expanded;
+  }
+}
+
+function readSkillWarmupSecondsFromInput() {
+  const raw = elements.stageSkillWarmupSecInput ? elements.stageSkillWarmupSecInput.value : DEFAULT_SKILL_WARMUP_SEC;
+  const safe = round2(clamp(toFinite(raw, DEFAULT_SKILL_WARMUP_SEC), 0, 60));
+  if (elements.stageSkillWarmupSecInput) {
+    elements.stageSkillWarmupSecInput.value = String(safe);
+  }
+  return safe;
+}
+
 function syncStageInputsFromMap() {
   const mapJson = getMutableMap();
   if (elements.stageZoomInput) {
@@ -774,6 +814,21 @@ function syncStageInputsFromMap() {
   if (elements.stageDisableSkillsInput) {
     elements.stageDisableSkillsInput.checked = mapJson.stage && mapJson.stage.disableSkills === true;
   }
+  if (elements.stageDisableSkillsSlowInput) {
+    elements.stageDisableSkillsSlowInput.checked = !(mapJson.stage && mapJson.stage.disableSkillsInSlowMotion === false);
+  }
+  if (elements.stageSkillWarmupSecInput) {
+    const sec = round2(clamp(
+      toFinite(
+        mapJson.stage && mapJson.stage.skillWarmupSec,
+        toFinite(mapJson.stage && mapJson.stage.skillWarmupMs, DEFAULT_SKILL_WARMUP_SEC * 1000) / 1000,
+      ),
+      0,
+      60,
+    ));
+    elements.stageSkillWarmupSecInput.value = String(sec);
+  }
+  setSkillPolicyPanelOpen(!!(elements.stageSkillPolicyExpandInput && elements.stageSkillPolicyExpandInput.checked));
 }
 
 function upsertStageBoundaryWall(oid, x) {
@@ -1658,9 +1713,9 @@ function createObjectByTool(tool, x, y) {
       y: py,
       radius: 0.72,
       triggerRadius: 2.1,
-      suctionForce: 0.55,
+      suctionForce: 0.8,
       cooldownMs: 900,
-      launchImpulse: 2.9,
+      launchImpulse: 3.6,
       color: OBJECT_COLOR_PRESET.blackHole,
     };
   }
@@ -1672,7 +1727,7 @@ function createObjectByTool(tool, x, y) {
       y: py,
       radius: 0.62,
       cooldownMs: 900,
-      launchImpulse: 2.9,
+      launchImpulse: 4.6,
       color: OBJECT_COLOR_PRESET.whiteHole,
     };
   }
@@ -2930,6 +2985,11 @@ function applyStageInputsToDraft() {
   const mapJson = getMutableMap();
   mapJson.stage.zoomY = Math.max(10, toFinite(elements.stageZoomInput ? elements.stageZoomInput.value : mapJson.stage.zoomY, mapJson.stage.zoomY));
   mapJson.stage.disableSkills = !!(elements.stageDisableSkillsInput && elements.stageDisableSkillsInput.checked);
+  mapJson.stage.disableSkillsInSlowMotion = !!(elements.stageDisableSkillsSlowInput && elements.stageDisableSkillsSlowInput.checked);
+  const warmupSec = readSkillWarmupSecondsFromInput();
+  mapJson.stage.skillWarmupSec = warmupSec;
+  mapJson.stage.skillWarmupMs = Math.round(warmupSec * 1000);
+  setSkillPolicyPanelOpen(!!(elements.stageSkillPolicyExpandInput && elements.stageSkillPolicyExpandInput.checked));
   applyStageWallBoundsToMap();
   syncStageInputsFromMap();
   refreshCurrentJsonViewer();
@@ -6724,7 +6784,29 @@ function setupEvents() {
   bindEvent(elements.stageZoomInput, 'change', () => {
     scheduleAutoStageApply('스테이지 자동 반영');
   });
+  bindEvent(elements.stageSkillPolicyExpandInput, 'change', () => {
+    const open = !!(elements.stageSkillPolicyExpandInput && elements.stageSkillPolicyExpandInput.checked);
+    setSkillPolicyPanelOpen(open);
+    drawMakerCanvas();
+  });
   bindEvent(elements.stageDisableSkillsInput, 'change', () => {
+    scheduleAutoStageApply('스테이지 자동 반영');
+  });
+  bindEvent(elements.stageDisableSkillsSlowInput, 'change', () => {
+    scheduleAutoStageApply('스테이지 자동 반영');
+  });
+  bindEvent(elements.stageSkillWarmupSecInput, 'input', () => {
+    try {
+      runApplyStageValuesAction({
+        trackUndo: false,
+        liveReason: '스테이지 실시간 반영',
+        silentStatus: true,
+      });
+    } catch (error) {
+      setStatus(String(error && error.message ? error.message : error), 'error');
+    }
+  });
+  bindEvent(elements.stageSkillWarmupSecInput, 'change', () => {
     scheduleAutoStageApply('스테이지 자동 반영');
   });
   bindEvent(elements.viewZoomInput, 'input', () => {

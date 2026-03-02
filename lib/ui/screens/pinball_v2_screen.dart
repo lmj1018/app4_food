@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+import '../../core/food_image_catalog.dart';
+
 class PinballV2ScreenArgs {
   const PinballV2ScreenArgs({
     required this.candidates,
@@ -92,6 +94,9 @@ SOFTWARE.
   Timer? _slowMotionBannerTimer;
 
   List<String>? _cachedCandidates;
+  String? _candidateImageKey;
+  Map<String, String>? _candidateImageDataUrls;
+  String? _goalLineImageDataUrl;
 
   List<String> get _candidates => _cachedCandidates ??= () {
     final seen = <String>{};
@@ -555,6 +560,102 @@ SOFTWARE.
     await _controller.loadRequest(uri);
   }
 
+  Future<Map<String, String>> _resolveCandidateImageDataUrls() async {
+    final key = _candidates.join('\n');
+    if (_candidateImageDataUrls != null && _candidateImageKey == key) {
+      return _candidateImageDataUrls!;
+    }
+
+    final candidateToAsset = <String, String>{};
+    for (final candidate in _candidates) {
+      String? asset = FoodImageCatalog.assetForKeyword(candidate);
+      if (asset == null) {
+        final assets = FoodImageCatalog.assetsFromTexts(<String>[candidate], limit: 1);
+        if (assets.isNotEmpty) {
+          asset = assets.first;
+        }
+      }
+      if (asset == null) {
+        final fallback = FoodImageCatalog.fallbackAssetsForSeed(candidate, count: 1);
+        if (fallback.isNotEmpty) {
+          asset = fallback.first;
+        }
+      }
+      asset ??= 'assets/foodimages/other.jpg';
+      if (asset.startsWith('assets/foodimages/')) {
+        asset = asset.replaceFirst('assets/foodimages/', 'assets/ballimages/');
+      }
+      candidateToAsset[candidate] = asset;
+    }
+
+    final uniqueAssets = candidateToAsset.values.toSet();
+    final assetDataUrl = <String, String>{};
+    for (final assetPath in uniqueAssets) {
+      var dataUrl = await _loadAssetAsDataUrl(assetPath);
+      if (dataUrl.isEmpty && assetPath.startsWith('assets/ballimages/')) {
+        final fallbackAsset = assetPath.replaceFirst('assets/ballimages/', 'assets/foodimages/');
+        dataUrl = await _loadAssetAsDataUrl(fallbackAsset);
+      }
+      assetDataUrl[assetPath] = dataUrl;
+    }
+
+    final result = <String, String>{};
+    for (final entry in candidateToAsset.entries) {
+      final dataUrl = assetDataUrl[entry.value];
+      if (dataUrl != null && dataUrl.isNotEmpty) {
+        result[entry.key] = dataUrl;
+      }
+    }
+
+    _candidateImageKey = key;
+    _candidateImageDataUrls = result;
+    return result;
+  }
+
+  Future<String> _resolveGoalLineImageDataUrl() async {
+    if (_goalLineImageDataUrl != null) {
+      return _goalLineImageDataUrl!;
+    }
+    var dataUrl = await _loadAssetAsDataUrl('assets/background/finish.png');
+    if (dataUrl.isEmpty) {
+      dataUrl = await _loadAssetAsDataUrl('assets/ui/pinball/goal_line_tab1.png');
+    }
+    if (dataUrl.isEmpty) {
+      dataUrl = await _loadAssetAsDataUrl('assets/ui/pinball/goal_line_tab1.svg');
+    }
+    _goalLineImageDataUrl = dataUrl;
+    return dataUrl;
+  }
+
+  Future<String> _loadAssetAsDataUrl(String assetPath) async {
+    try {
+      final byteData = await rootBundle.load(assetPath);
+      final bytes = byteData.buffer.asUint8List();
+      final base64Data = base64Encode(bytes);
+      final mimeType = _mimeTypeForAsset(assetPath);
+      return 'data:$mimeType;base64,$base64Data';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  String _mimeTypeForAsset(String assetPath) {
+    final lower = assetPath.toLowerCase();
+    if (lower.endsWith('.svg')) {
+      return 'image/svg+xml';
+    }
+    if (lower.endsWith('.png')) {
+      return 'image/png';
+    }
+    if (lower.endsWith('.webp')) {
+      return 'image/webp';
+    }
+    if (lower.endsWith('.gif')) {
+      return 'image/gif';
+    }
+    return 'image/jpeg';
+  }
+
   String _decodeJsString(Object? raw) {
     dynamic current = raw;
     for (var i = 0; i < 3; i++) {
@@ -617,6 +718,13 @@ SOFTWARE.
     _startStartupTimer();
     _setStatus('V2 초기화 중...');
 
+    final imageDataUrls = await _resolveCandidateImageDataUrls();
+    final goalLineImageDataUrl = await _resolveGoalLineImageDataUrl();
+    if (!mounted || _isFinishing) {
+      _isStarting = false;
+      return;
+    }
+
     final payload = <String, Object>{
       'mapId': widget.args.mapId.trim().isEmpty
           ? 'v2_default'
@@ -626,6 +734,8 @@ SOFTWARE.
       'autoStart': widget.args.autoStart,
       'fromApp': true,
       'isPinballApp': true,
+      'imageDataUrls': imageDataUrls,
+      'goalLineImageDataUrl': goalLineImageDataUrl,
     };
     final encodedPayload = jsonEncode(payload);
 
@@ -849,6 +959,8 @@ SOFTWARE.
       }
       unawaited(_warmUpSlowMotionBannerAssets());
     });
+    unawaited(_resolveCandidateImageDataUrls());
+    unawaited(_resolveGoalLineImageDataUrl());
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..addJavaScriptChannel(
