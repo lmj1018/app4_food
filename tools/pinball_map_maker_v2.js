@@ -9,7 +9,7 @@ const LIVE_APPLY_DEBOUNCE_MS = 120;
 const LIVE_MARBLE_COUNT_DEBOUNCE_MS = 120;
 const AUTO_SAVE_DEBOUNCE_MS = 900;
 const CANVAS_MIN_ZOOM = 0.18;
-const CANVAS_MAX_ZOOM = 14;
+const CANVAS_MAX_ZOOM = 32;
 const MAX_UNDO_HISTORY = 50;
 const ENABLE_COORDINATE_OVERLAY = false;
 const GOAL_MARKER_IMAGE_DEFAULT_SRC = '../../background/finish.png';
@@ -146,6 +146,7 @@ const elements = {
   objHitDistanceInput: document.getElementById('objHitDistanceInput'),
   objRestitutionInput: document.getElementById('objRestitutionInput'),
   objFrictionInput: document.getElementById('objFrictionInput'),
+  objNoCollisionInput: document.getElementById('objNoCollisionInput'),
   applyObjectButton: document.getElementById('applyObjectButton'),
   duplicateObjectButton: document.getElementById('duplicateObjectButton'),
   deleteObjectButton: document.getElementById('deleteObjectButton'),
@@ -234,13 +235,9 @@ function isTypingTarget(target) {
 }
 
 function getCurrentMarbleCount() {
-  const raw = elements.marbleCountInput ? elements.marbleCountInput.value : DEFAULT_MARBLE_COUNT;
+  const raw = elements.marbleCountInput ? String(elements.marbleCountInput.value ?? '').trim() : String(DEFAULT_MARBLE_COUNT);
   const parsed = Math.floor(toFinite(raw, DEFAULT_MARBLE_COUNT));
-  const safe = clamp(parsed, MIN_MARBLE_COUNT, MAX_MARBLE_COUNT);
-  if (elements.marbleCountInput) {
-    elements.marbleCountInput.value = String(safe);
-  }
-  return safe;
+  return clamp(parsed, MIN_MARBLE_COUNT, MAX_MARBLE_COUNT);
 }
 
 function setMarbleCountInput(count) {
@@ -449,6 +446,7 @@ function setBusy(isBusy) {
     elements.objHitDistanceInput,
     elements.objRestitutionInput,
     elements.objFrictionInput,
+    elements.objNoCollisionInput,
     elements.applyObjectButton,
     elements.duplicateObjectButton,
     elements.deleteObjectButton,
@@ -1136,13 +1134,52 @@ function applyMarbleSizeScaleToFrame(frameWindow, scale) {
   }
   const roulette = frameWindow.roulette;
   const marbles = Array.isArray(roulette._marbles) ? roulette._marbles : [];
-  const nextSize = round2(0.5 * clamp(toFinite(scale, DEFAULT_MARBLE_SIZE_SCALE), MIN_MARBLE_SIZE_SCALE, MAX_MARBLE_SIZE_SCALE));
+  const safeScale = clamp(toFinite(scale, DEFAULT_MARBLE_SIZE_SCALE), MIN_MARBLE_SIZE_SCALE, MAX_MARBLE_SIZE_SCALE);
+  const nextSize = round2(0.5 * safeScale);
+  const nextPhysicsRadius = Math.max(0.02, round2(0.25 * safeScale));
   for (let index = 0; index < marbles.length; index += 1) {
     const marble = marbles[index];
     if (!marble) {
       continue;
     }
     marble.size = nextSize;
+  }
+  const physics = roulette.physics && typeof roulette.physics === 'object' ? roulette.physics : null;
+  const marbleMap = physics && physics.marbleMap && typeof physics.marbleMap === 'object'
+    ? physics.marbleMap
+    : null;
+  if (marbleMap) {
+    const bodies = Object.values(marbleMap);
+    for (let bodyIndex = 0; bodyIndex < bodies.length; bodyIndex += 1) {
+      const body = bodies[bodyIndex];
+      if (!body || typeof body.GetFixtureList !== 'function') {
+        continue;
+      }
+      try {
+        let guard = 0;
+        let fixture = body.GetFixtureList();
+        while (fixture && guard < 64) {
+          if (typeof fixture.GetShape === 'function') {
+            const shape = fixture.GetShape();
+            if (shape && typeof shape.set_m_radius === 'function') {
+              shape.set_m_radius(nextPhysicsRadius);
+            } else if (shape && typeof shape.SetRadius === 'function') {
+              shape.SetRadius(nextPhysicsRadius);
+            }
+          }
+          const next = typeof fixture.GetNext === 'function' ? fixture.GetNext() : null;
+          if (next === fixture) {
+            break;
+          }
+          fixture = next;
+          guard += 1;
+        }
+        if (typeof body.ResetMassData === 'function') {
+          body.ResetMassData();
+        }
+      } catch (_) {
+      }
+    }
   }
   return true;
 }
@@ -1204,7 +1241,10 @@ async function applyLiveMarbleCountNow(statusPrefix = '') {
 }
 
 function scheduleLiveMarbleCountApply(statusPrefix = '') {
-  getCurrentMarbleCount();
+  const raw = elements.marbleCountInput ? String(elements.marbleCountInput.value ?? '').trim() : '';
+  if (!raw) {
+    return;
+  }
   if (marbleCountApplyTimer) {
     window.clearTimeout(marbleCountApplyTimer);
     marbleCountApplyTimer = 0;
@@ -1992,6 +2032,10 @@ function clearObjectEditor() {
     elements.objFrictionInput.value = '';
     elements.objFrictionInput.disabled = true;
   }
+  if (elements.objNoCollisionInput) {
+    elements.objNoCollisionInput.checked = false;
+    elements.objNoCollisionInput.disabled = true;
+  }
   if (elements.objHitDistanceLabel) elements.objHitDistanceLabel.textContent = '이동거리';
   if (elements.objRadiusLabel) elements.objRadiusLabel.textContent = '반지름';
   if (elements.reverseRotationButton) elements.reverseRotationButton.disabled = true;
@@ -2048,6 +2092,10 @@ function populateObjectEditor() {
         8,
       )))
       : '';
+  }
+  if (elements.objNoCollisionInput) {
+    elements.objNoCollisionInput.disabled = false;
+    elements.objNoCollisionInput.checked = obj.noCollision === true;
   }
   if (elements.objPairInput) elements.objPairInput.value = String(obj.pair || '');
   if (elements.objDirInput) {
@@ -2349,15 +2397,20 @@ function buildFloatingInspectorFieldDefs(obj) {
     if (source.disabled && options.includeDisabled !== true) {
       return;
     }
+    const isCheckbox = source.type === 'checkbox';
+    const checked = isCheckbox ? source.checked === true : false;
     const value = source.value !== undefined && source.value !== null ? String(source.value) : '';
-    if (!options.force && !shouldShowInlineOption(label, value, options.allowEmpty === true)) {
-      return;
+    if (!isCheckbox) {
+      if (!options.force && !shouldShowInlineOption(label, value, options.allowEmpty === true)) {
+        return;
+      }
     }
     defs.push({
       sourceKey,
       label,
       value,
-      type: source.type === 'number' ? 'number' : 'text',
+      checked,
+      type: isCheckbox ? 'checkbox' : (source.type === 'number' ? 'number' : 'text'),
       step: source.step || '',
       min: source.min || '',
       max: source.max || '',
@@ -2380,6 +2433,7 @@ function buildFloatingInspectorFieldDefs(obj) {
       pushField('objRestitutionInput', '반발력');
       pushField('objFrictionInput', '충격흡수(마찰)');
     }
+    pushField('objNoCollisionInput', '충돌 비활성', { force: true });
     return defs;
   }
 
@@ -2420,6 +2474,7 @@ function buildFloatingInspectorFieldDefs(obj) {
     pushField('objRestitutionInput', '반발력');
     pushField('objFrictionInput', '충격흡수(마찰)');
   }
+  pushField('objNoCollisionInput', '충돌 비활성', { force: true });
 
   return defs;
 }
@@ -2465,8 +2520,13 @@ function renderFloatingObjectInspector() {
     const label = document.createElement('label');
     label.textContent = def.label;
     const input = document.createElement('input');
-    input.type = def.type === 'number' ? 'number' : 'text';
-    input.value = def.value;
+    input.type = def.type;
+    if (def.type === 'checkbox') {
+      input.checked = def.checked === true;
+      input.value = '1';
+    } else {
+      input.value = def.value;
+    }
     input.dataset.sourceKey = def.sourceKey;
     if (def.step) {
       input.step = def.step;
@@ -2613,8 +2673,20 @@ function applyImpactTuningFromInputs(obj) {
   }
 }
 
+function applyNoCollisionFromInput(obj) {
+  if (!obj || !elements.objNoCollisionInput || elements.objNoCollisionInput.disabled) {
+    return;
+  }
+  if (elements.objNoCollisionInput.checked) {
+    obj.noCollision = true;
+  } else {
+    delete obj.noCollision;
+  }
+}
+
 function finalizeObjectEditorValues(obj) {
   applyImpactTuningFromInputs(obj);
+  applyNoCollisionFromInput(obj);
   refreshCurrentJsonViewer();
 }
 
@@ -2675,6 +2747,9 @@ function syncPrimaryValuesToSelectedPeers(primaryIndex) {
   }
   const type = String(primary.type || '');
   const sharedKeys = sharedSyncKeysForType(type);
+  if (!sharedKeys.includes('noCollision')) {
+    sharedKeys.push('noCollision');
+  }
   if (sharedKeys.length <= 0) {
     return;
   }
@@ -3225,7 +3300,11 @@ function applyFloatingInspectorField(sourceKey, value, options = {}) {
   if (!source) {
     return;
   }
-  source.value = String(value ?? '');
+  if (source.type === 'checkbox') {
+    source.checked = value === true || String(value ?? '') === '1' || String(value ?? '').toLowerCase() === 'true';
+  } else {
+    source.value = String(value ?? '');
+  }
   runApplySelectedObjectValuesAction({
     trackUndo: options.trackUndo !== false,
     silentStatus: true,
@@ -3998,6 +4077,66 @@ function drawRingHandle(ctx, x, y, radiusPx, style = {}) {
   ctx.restore();
 }
 
+function isDragHandleActive(kind, options = {}) {
+  const drag = editorState.dragState;
+  if (!drag || typeof drag !== 'object') {
+    return false;
+  }
+  if (kind === 'spawn') {
+    return drag.type === 'spawn_move';
+  }
+  if (kind === 'goal') {
+    return drag.type === 'goal_move';
+  }
+  const selectedIndex = Math.floor(toFinite(editorState.selectedIndex, -1));
+  const dragIndex = Math.floor(toFinite(drag.index, selectedIndex));
+  if (dragIndex !== selectedIndex) {
+    return false;
+  }
+  if (kind === 'move_anchor') {
+    return drag.type === 'move';
+  }
+  if (kind === 'wall_point') {
+    return drag.type === 'wall_point'
+      && Math.floor(toFinite(drag.pointIndex, -1)) === Math.floor(toFinite(options.pointIndex, -2));
+  }
+  if (kind === 'rotor_end') {
+    return drag.type === 'rotor_end'
+      && Math.floor(toFinite(drag.endSign, 0)) === Math.floor(toFinite(options.endSign, -9));
+  }
+  if (kind === 'hammer_dir') {
+    return drag.type === 'hammer_dir' || drag.type === 'hammer_target';
+  }
+  return drag.type === kind;
+}
+
+function drawHandleWithFeedback(ctx, x, y, radiusPx, kind, style = {}, options = {}) {
+  const active = isDragHandleActive(kind, options);
+  if (!active) {
+    drawRingHandle(ctx, x, y, radiusPx, style);
+    return;
+  }
+  ctx.save();
+  ctx.fillStyle = 'rgba(25, 255, 224, 0.22)';
+  ctx.beginPath();
+  ctx.arc(x, y, radiusPx + 4.4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  const activeStyle = {
+    ...style,
+    fill: 'rgba(6, 54, 46, 0.96)',
+    stroke: '#19ffe0',
+    lineWidth: Math.max(2.5, Number.isFinite(style.lineWidth) ? style.lineWidth + 1.1 : 2.7),
+  };
+  drawRingHandle(ctx, x, y, radiusPx + 1.6, activeStyle);
+  ctx.save();
+  ctx.fillStyle = 'rgba(237, 255, 251, 0.96)';
+  ctx.beginPath();
+  ctx.arc(x, y, Math.max(1.8, radiusPx * 0.38), 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 function findSelectedHandle(point, layout) {
   const obj = getSelectedObject();
   if (!obj || !layout) {
@@ -4209,11 +4348,11 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
       if (selected) {
         for (let index = 0; index < points.length; index += 1) {
           const point = worldToCanvas(layout, points[index][0], points[index][1]);
-          drawRingHandle(ctx, point.x, point.y, 5.2, {
+          drawHandleWithFeedback(ctx, point.x, point.y, 5.2, 'wall_point', {
             fill: 'rgba(8, 16, 36, 0.92)',
             stroke: '#ffd44d',
             lineWidth: 1.9,
-          });
+          }, { pointIndex: index });
         }
       }
     }
@@ -4279,7 +4418,7 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
       ctx.restore();
     }
     if (selected) {
-      drawRingHandle(ctx, center.x, center.y, 5.1, {
+      drawHandleWithFeedback(ctx, center.x, center.y, 5.1, 'move_anchor', {
         fill: 'rgba(8,16,36,0.95)',
         stroke: '#ffd44d',
       });
@@ -4287,7 +4426,7 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
       for (let index = 0; index < circleHandles.length; index += 1) {
         const handle = circleHandles[index];
         const p = worldToCanvas(layout, handle.x, handle.y);
-        drawRingHandle(ctx, p.x, p.y, 5.2, {
+        drawHandleWithFeedback(ctx, p.x, p.y, 5.2, handle.kind, {
           fill: handle.kind === 'trigger_radius' ? 'rgba(58,26,78,0.9)' : 'rgba(8,16,36,0.95)',
           stroke: handle.kind === 'trigger_radius' ? '#d8b2ff' : '#ffd44d',
         });
@@ -4329,7 +4468,7 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
     }
     ctx.restore();
     if (selected) {
-      drawRingHandle(ctx, center.x, center.y, 5.1, {
+      drawHandleWithFeedback(ctx, center.x, center.y, 5.1, 'move_anchor', {
         fill: 'rgba(8,16,36,0.95)',
         stroke: '#ffd44d',
       });
@@ -4337,7 +4476,7 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
       for (let index = 0; index < resizeHandles.length; index += 1) {
         const handle = resizeHandles[index];
         const p = worldToCanvas(layout, handle.x, handle.y);
-        drawRingHandle(ctx, p.x, p.y, 5.2, {
+        drawHandleWithFeedback(ctx, p.x, p.y, 5.2, handle.kind, {
           fill: 'rgba(8,16,36,0.95)',
           stroke: '#ffd44d',
         });
@@ -4345,7 +4484,7 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
       const rotationHandle = getRotationHandleWorld(obj);
       if (rotationHandle) {
         const hp = worldToCanvas(layout, rotationHandle.x, rotationHandle.y);
-        drawRingHandle(ctx, hp.x, hp.y, 5.2, {
+        drawHandleWithFeedback(ctx, hp.x, hp.y, 5.2, 'rotation', {
           fill: 'rgba(8,16,36,0.95)',
           stroke: '#ffd44d',
         });
@@ -4397,7 +4536,7 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
       ctx.stroke();
       ctx.setLineDash([]);
       if (selected) {
-        drawRingHandle(ctx, end.x, end.y, 5.2, {
+        drawHandleWithFeedback(ctx, end.x, end.y, 5.2, 'sticky_target', {
           fill: 'rgba(8,16,36,0.95)',
           stroke: '#ffaad9',
         });
@@ -4425,7 +4564,7 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
   }
   ctx.restore();
   if (selected) {
-    drawRingHandle(ctx, center.x, center.y, 5.1, {
+    drawHandleWithFeedback(ctx, center.x, center.y, 5.1, 'move_anchor', {
       fill: 'rgba(8,16,36,0.95)',
       stroke: '#ffd44d',
     });
@@ -4435,7 +4574,7 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
     for (let index = 0; index < resizeHandles.length; index += 1) {
       const handle = resizeHandles[index];
       const p = worldToCanvas(layout, handle.x, handle.y);
-      drawRingHandle(ctx, p.x, p.y, 5.2, {
+      drawHandleWithFeedback(ctx, p.x, p.y, 5.2, handle.kind, {
         fill: 'rgba(8,16,36,0.95)',
         stroke: '#ffd44d',
       });
@@ -4456,7 +4595,7 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
       ctx.lineTo(hp.x, hp.y);
       ctx.stroke();
       ctx.setLineDash([]);
-      drawRingHandle(ctx, hp.x, hp.y, 5.2, {
+      drawHandleWithFeedback(ctx, hp.x, hp.y, 5.2, 'hammer_dir', {
         fill: 'rgba(8,16,36,0.95)',
         stroke: lineColor,
       });
@@ -4504,7 +4643,7 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
       ctx.lineTo(end.x, end.y);
       ctx.stroke();
       ctx.setLineDash([]);
-      drawRingHandle(ctx, end.x, end.y, 5.2, {
+      drawHandleWithFeedback(ctx, end.x, end.y, 5.2, 'sticky_target', {
         fill: 'rgba(8,16,36,0.95)',
         stroke: '#ffaad9',
       });
@@ -4528,10 +4667,10 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
     ctx.save();
     for (let index = 0; index < endHandles.length; index += 1) {
       const p = worldToCanvas(layout, endHandles[index].x, endHandles[index].y);
-      drawRingHandle(ctx, p.x, p.y, 5.2, {
+      drawHandleWithFeedback(ctx, p.x, p.y, 5.2, 'rotor_end', {
         fill: 'rgba(8,16,36,0.95)',
         stroke: '#ffd44d',
-      });
+      }, { endSign: endHandles[index].endSign });
     }
     ctx.restore();
   }
@@ -4768,7 +4907,7 @@ function drawMakerCanvas() {
   ctx.fillStyle = '#ff8686';
   ctx.font = `${Math.max(11, Math.round(12 * layout.dpr))}px Segoe UI`;
   ctx.fillText('GOAL', goalP2.x - (40 * layout.dpr), goalP2.y - (6 * layout.dpr));
-  drawRingHandle(ctx, goalP2.x, goalP2.y, 5.2 * layout.dpr, {
+  drawHandleWithFeedback(ctx, goalP2.x, goalP2.y, 5.2 * layout.dpr, 'goal', {
     fill: 'rgba(32, 9, 14, 0.95)',
     stroke: '#ff8686',
     lineWidth: 2 * layout.dpr,
@@ -4788,7 +4927,7 @@ function drawMakerCanvas() {
   ctx.beginPath();
   ctx.arc(spawnCanvas.x, spawnCanvas.y, 7, 0, Math.PI * 2);
   ctx.fill();
-  drawRingHandle(ctx, spawnCanvas.x, spawnCanvas.y, 5.2, {
+  drawHandleWithFeedback(ctx, spawnCanvas.x, spawnCanvas.y, 5.2, 'spawn', {
     fill: 'rgba(8, 20, 16, 0.95)',
     stroke: '#7ff8be',
     lineWidth: 1.8,
@@ -4900,7 +5039,7 @@ function drawMakerCanvas() {
       ctx.lineTo(target.x, target.y);
       ctx.stroke();
       ctx.setLineDash([]);
-      drawRingHandle(ctx, target.x, target.y, 5.2, {
+      drawHandleWithFeedback(ctx, target.x, target.y, 5.2, isSticky ? 'sticky_target' : 'hammer_dir', {
         fill: 'rgba(8,16,36,0.94)',
         stroke: isSticky ? '#ffaad9' : (isFan ? '#8fe6ff' : '#9fd7ff'),
         lineWidth: 1.6,
@@ -5007,7 +5146,7 @@ function handleMakerCanvasWheel(event) {
   const worldPoint = canvasToWorld(oldLayout, px, py);
 
   const direction = event.deltaY < 0 ? 1 : -1;
-  const zoomFactor = direction > 0 ? 1.36 : 1 / 1.36;
+  const zoomFactor = direction > 0 ? 1.55 : 1 / 1.55;
   const previousZoom = clamp(toFinite(editorState.canvasZoom, 1), CANVAS_MIN_ZOOM, CANVAS_MAX_ZOOM);
   const nextZoom = clamp(previousZoom * zoomFactor, CANVAS_MIN_ZOOM, CANVAS_MAX_ZOOM);
   if (Math.abs(nextZoom - previousZoom) < 0.0001) {
@@ -7303,6 +7442,7 @@ function setupEvents() {
     elements.objHitDistanceInput,
     elements.objRestitutionInput,
     elements.objFrictionInput,
+    elements.objNoCollisionInput,
   ];
   for (let index = 0; index < autoObjectInputs.length; index += 1) {
     const field = autoObjectInputs[index];
@@ -7447,7 +7587,10 @@ function setupEvents() {
       return;
     }
     try {
-      applyFloatingInspectorField(sourceKey, target.value);
+      applyFloatingInspectorField(
+        sourceKey,
+        target.type === 'checkbox' ? target.checked : target.value,
+      );
     } catch (error) {
       setStatus(String(error && error.message ? error.message : error), 'error');
     }
@@ -7466,7 +7609,11 @@ function setupEvents() {
     if (!source || !getSelectedObject()) {
       return;
     }
-    source.value = String(target.value ?? '');
+    if (target.type === 'checkbox') {
+      source.checked = target.checked;
+    } else {
+      source.value = String(target.value ?? '');
+    }
     try {
       runApplySelectedObjectValuesAction({
         trackUndo: false,

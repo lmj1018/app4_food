@@ -166,16 +166,21 @@ function compileWallPolyline(raw, entityId) {
   const color = typeof raw.color === 'string' ? raw.color : DEFAULT_OBJECT_COLORS.wall;
   const restitution = clamp(toFiniteNumber(raw && raw.restitution, 0), 0, 8);
   const friction = clamp(toFiniteNumber(raw && raw.friction, 0.35), 0, 8);
+  const sensor = toBoolean(raw && raw.sensor, false) || toBoolean(raw && raw.noCollision, false);
+  const props = {
+    density: 1,
+    angularVelocity: 0,
+    restitution,
+    friction,
+  };
+  if (sensor) {
+    props.sensor = true;
+  }
   return withEntityId(
     {
       position: { x: 0, y: 0 },
       type: 'static',
-      props: {
-        density: 1,
-        angularVelocity: 0,
-        restitution,
-        friction,
-      },
+      props,
       shape: {
         type: 'polyline',
         rotation: 0,
@@ -233,11 +238,25 @@ function compileCorridorPolyline(raw, entityId) {
   const sides = buildCorridorSides(points, gap);
   const color = typeof (raw && raw.color) === 'string' ? raw.color : DEFAULT_OBJECT_COLORS.wall;
   const entities = [];
-  const leftEntity = compileWallPolyline({ points: sides.left, color }, entityId);
+  const leftEntity = compileWallPolyline({
+    points: sides.left,
+    color,
+    restitution: raw && raw.restitution,
+    friction: raw && raw.friction,
+    sensor: raw && raw.sensor,
+    noCollision: raw && raw.noCollision,
+  }, entityId);
   if (leftEntity) {
     entities.push(leftEntity);
   }
-  const rightEntity = compileWallPolyline({ points: sides.right, color }, entityId + (leftEntity ? 1 : 0));
+  const rightEntity = compileWallPolyline({
+    points: sides.right,
+    color,
+    restitution: raw && raw.restitution,
+    friction: raw && raw.friction,
+    sensor: raw && raw.sensor,
+    noCollision: raw && raw.noCollision,
+  }, entityId + (leftEntity ? 1 : 0));
   if (rightEntity) {
     entities.push(rightEntity);
   }
@@ -262,7 +281,7 @@ function compileBox(raw, entityId, forceKinematic = false) {
   const angularDamping = Math.max(0, toFiniteNumber(raw.angularDamping, 0));
   const fixedRotation = toBoolean(raw.fixedRotation, false);
   const gravityScale = Math.max(0, toFiniteNumber(raw.gravityScale, 1));
-  const sensor = toBoolean(raw.sensor, false);
+  const sensor = toBoolean(raw.sensor, false) || toBoolean(raw.noCollision, false);
   const life = Number.isFinite(Number(raw.life)) ? Math.max(-1, Math.floor(Number(raw.life))) : null;
   const color = typeof raw.color === 'string' ? raw.color : DEFAULT_OBJECT_COLORS.box;
   const rawBodyType = typeof raw === 'object' && raw
@@ -331,7 +350,8 @@ function compileCircle(raw, entityId, defaults) {
   const angularDamping = Math.max(0, toFiniteNumber(raw.angularDamping, 0));
   const fixedRotation = toBoolean(raw.fixedRotation, toBoolean(defaults && defaults.fixedRotation, false));
   const gravityScale = Math.max(0, toFiniteNumber(raw.gravityScale, toFiniteNumber(defaults && defaults.gravityScale, 1)));
-  const sensor = toBoolean(raw.sensor, toBoolean(defaults && defaults.sensor, false));
+  const sensor = toBoolean(raw.sensor, toBoolean(defaults && defaults.sensor, false))
+    || toBoolean(raw.noCollision, false);
   const life = Number.isFinite(Number(raw.life)) ? Math.max(-1, Math.floor(Number(raw.life))) : defaults.life;
   const color = typeof raw.color === 'string' ? raw.color : defaults.color;
   const rawBodyType = typeof raw === 'object' && raw
@@ -1201,7 +1221,7 @@ function createBlackHoleNetworkBehavior(blackHoleDefs, whiteHoleDefs, env) {
     const radius = Math.max(0.12, toFiniteNumber(def && def.radius, 0.62));
     const shortPulse = boosted || whitePulseToggle;
     whitePulseToggle = !whitePulseToggle;
-    const duration = shortPulse ? 220 : 420;
+    const duration = shortPulse ? 180 : 320;
     roulette._effects.push({
       elapsed: 0,
       duration,
@@ -1217,22 +1237,22 @@ function createBlackHoleNetworkBehavior(blackHoleDefs, whiteHoleDefs, env) {
           return;
         }
         const ratio = clamp(this.elapsed / Math.max(1, this.duration), 0, 1);
-        const lineWidth = Math.max(0.65 / Math.max(1, toFiniteNumber(zoomScale, 1)), 0.45);
-        const pulseRadius = radius * (0.92 + ratio * (shortPulse ? 1.4 : 2.1));
-        const coreAlpha = shortPulse ? 0.72 : 0.56;
+        const lineWidth = Math.max(0.58 / Math.max(1, toFiniteNumber(zoomScale, 1)), 0.36);
+        const pulseRadius = radius * (0.88 + ratio * (shortPulse ? 1.02 : 1.46));
+        const coreAlpha = shortPulse ? 0.38 : 0.3;
         ctx.save();
         ctx.translate(cx, cy);
-        ctx.globalAlpha = Math.max(0, 1 - ratio * 0.85);
+        ctx.globalAlpha = Math.max(0, 1 - ratio * 0.9);
         ctx.fillStyle = `rgba(244, 251, 255, ${coreAlpha})`;
         ctx.beginPath();
         ctx.arc(0, 0, radius * (0.82 + (1 - ratio) * 0.22), 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = `rgba(255, 255, 255, ${0.88 * (1 - ratio)})`;
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.46 * (1 - ratio)})`;
         ctx.lineWidth = lineWidth;
         ctx.beginPath();
         ctx.arc(0, 0, pulseRadius, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.strokeStyle = `rgba(188, 235, 255, ${0.58 * (1 - ratio)})`;
+        ctx.strokeStyle = `rgba(188, 235, 255, ${0.26 * (1 - ratio)})`;
         ctx.lineWidth = lineWidth * 0.82;
         ctx.beginPath();
         ctx.arc(0, 0, pulseRadius * 1.25, 0, Math.PI * 2);
@@ -1240,7 +1260,7 @@ function createBlackHoleNetworkBehavior(blackHoleDefs, whiteHoleDefs, env) {
         ctx.restore();
       },
     });
-    nextWhiteVisualAtByOid[String(def && def.oid ? def.oid : '__white')] = now + (shortPulse ? 150 : 270);
+    nextWhiteVisualAtByOid[String(def && def.oid ? def.oid : '__white')] = now + (shortPulse ? 240 : 420);
   }
 
   function teleportToWhiteHole(marble, body, sourceDef, targetDef, now) {

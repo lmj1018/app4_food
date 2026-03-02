@@ -122,12 +122,15 @@ SOFTWARE.
     return out;
   }
 
-  void _setStatus(String text, {bool error = false}) {
+  void _setStatus(String text, {bool error = false, bool clearError = false}) {
     if (!mounted) {
       return;
     }
     setState(() {
       _statusText = text;
+      if (clearError) {
+        _hasError = false;
+      }
       if (error) {
         _hasError = true;
       }
@@ -570,13 +573,18 @@ SOFTWARE.
     for (final candidate in _candidates) {
       String? asset = FoodImageCatalog.assetForKeyword(candidate);
       if (asset == null) {
-        final assets = FoodImageCatalog.assetsFromTexts(<String>[candidate], limit: 1);
+        final assets = FoodImageCatalog.assetsFromTexts(<String>[
+          candidate,
+        ], limit: 1);
         if (assets.isNotEmpty) {
           asset = assets.first;
         }
       }
       if (asset == null) {
-        final fallback = FoodImageCatalog.fallbackAssetsForSeed(candidate, count: 1);
+        final fallback = FoodImageCatalog.fallbackAssetsForSeed(
+          candidate,
+          count: 1,
+        );
         if (fallback.isNotEmpty) {
           asset = fallback.first;
         }
@@ -593,7 +601,10 @@ SOFTWARE.
     for (final assetPath in uniqueAssets) {
       var dataUrl = await _loadAssetAsDataUrl(assetPath);
       if (dataUrl.isEmpty && assetPath.startsWith('assets/ballimages/')) {
-        final fallbackAsset = assetPath.replaceFirst('assets/ballimages/', 'assets/foodimages/');
+        final fallbackAsset = assetPath.replaceFirst(
+          'assets/ballimages/',
+          'assets/foodimages/',
+        );
         dataUrl = await _loadAssetAsDataUrl(fallbackAsset);
       }
       assetDataUrl[assetPath] = dataUrl;
@@ -618,10 +629,14 @@ SOFTWARE.
     }
     var dataUrl = await _loadAssetAsDataUrl('assets/background/finish.png');
     if (dataUrl.isEmpty) {
-      dataUrl = await _loadAssetAsDataUrl('assets/ui/pinball/goal_line_tab1.png');
+      dataUrl = await _loadAssetAsDataUrl(
+        'assets/ui/pinball/goal_line_tab1.png',
+      );
     }
     if (dataUrl.isEmpty) {
-      dataUrl = await _loadAssetAsDataUrl('assets/ui/pinball/goal_line_tab1.svg');
+      dataUrl = await _loadAssetAsDataUrl(
+        'assets/ui/pinball/goal_line_tab1.svg',
+      );
     }
     _goalLineImageDataUrl = dataUrl;
     return dataUrl;
@@ -716,7 +731,7 @@ SOFTWARE.
     _isStarting = true;
     _resetSlowMotionBannerState();
     _startStartupTimer();
-    _setStatus('V2 초기화 중...');
+    _setStatus('V2 초기화 중...', clearError: true);
 
     final imageDataUrls = await _resolveCandidateImageDataUrls();
     final goalLineImageDataUrl = await _resolveGoalLineImageDataUrl();
@@ -805,7 +820,7 @@ SOFTWARE.
       }
       _didStart = true;
       _clearStartupTimer();
-      _setStatus('게임 진행 중...');
+      _setStatus('게임 진행 중...', clearError: true);
       _startWinnerMonitor();
     } catch (error) {
       _setStatus('V2 초기화 오류: $error', error: true);
@@ -932,7 +947,7 @@ SOFTWARE.
     if (event == 'spinStarted') {
       _didStart = true;
       _clearStartupTimer();
-      _setStatus('게임 진행 중...');
+      _setStatus('게임 진행 중...', clearError: true);
     }
   }
 
@@ -991,7 +1006,10 @@ SOFTWARE.
             });
             await _startPinball();
           },
-          onWebResourceError: (_) {
+          onWebResourceError: (error) {
+            if (error.isForMainFrame != true) {
+              return;
+            }
             _setStatus('V2 페이지 로드 실패', error: true);
           },
         ),

@@ -469,6 +469,13 @@
       font-size: 12px;
       min-width: 0;
     }
+    .floating-object-row input[type="checkbox"] {
+      width: auto;
+      margin: 0;
+      justify-self: start;
+      transform: scale(1.08);
+      accent-color: #1cf2d7;
+    }
     .tool-palette {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1216,6 +1223,10 @@
                 <div class="maker-row">
                   <label for="objFrictionInput">충격흡수(마찰)</label>
                   <input id="objFrictionInput" type="number" step="0.05" min="0" max="8">
+                </div>
+                <div class="maker-row">
+                  <label for="objNoCollisionInput">충돌 비활성(센서)</label>
+                  <input id="objNoCollisionInput" type="checkbox">
                 </div>
               </div>
               <div class="maker-toolbar">
