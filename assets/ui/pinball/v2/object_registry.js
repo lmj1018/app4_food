@@ -19,6 +19,9 @@ const DEFAULT_OBJECT_COLORS = {
   hammer: '#ffa557',
   diamond: '#6affea',
   fan: '#7fd9ff',
+  sticky: '#ff8fc9',
+  domino: '#ff67be',
+  physicsBall: '#ff79cb',
 };
 
 function toFiniteNumber(value, fallback) {
@@ -75,8 +78,8 @@ function withEntityId(entity, entityId) {
   };
 }
 
-function compileWallPolyline(raw, entityId) {
-  const pointsFromArray = Array.isArray(raw.points)
+function extractPolylinePoints(raw) {
+  const pointsFromArray = Array.isArray(raw && raw.points)
     ? raw.points
         .map((point) => {
           if (!Array.isArray(point) || point.length < 2) {
@@ -91,12 +94,16 @@ function compileWallPolyline(raw, entityId) {
         })
         .filter((point) => !!point)
     : [];
-  const points = pointsFromArray.length >= 2
+  return pointsFromArray.length >= 2
     ? pointsFromArray
     : [
-        [toFiniteNumber(raw.x1, toFiniteNumber(raw.x, NaN)), toFiniteNumber(raw.y1, toFiniteNumber(raw.y, NaN))],
-        [toFiniteNumber(raw.x2, toFiniteNumber(raw.x + 1, NaN)), toFiniteNumber(raw.y2, toFiniteNumber(raw.y + 1, NaN))],
+        [toFiniteNumber(raw && raw.x1, toFiniteNumber(raw && raw.x, NaN)), toFiniteNumber(raw && raw.y1, toFiniteNumber(raw && raw.y, NaN))],
+        [toFiniteNumber(raw && raw.x2, toFiniteNumber(raw && raw.x + 1, NaN)), toFiniteNumber(raw && raw.y2, toFiniteNumber(raw && raw.y + 1, NaN))],
       ].filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]));
+}
+
+function compileWallPolyline(raw, entityId) {
+  const points = extractPolylinePoints(raw);
   if (points.length < 2) {
     return null;
   }
@@ -121,6 +128,63 @@ function compileWallPolyline(raw, entityId) {
   );
 }
 
+function buildCorridorSides(pointsInput, gap) {
+  const points = Array.isArray(pointsInput) ? pointsInput : [];
+  if (points.length < 2) {
+    return { left: [], right: [] };
+  }
+  const halfGap = Math.max(0.1, toFiniteNumber(gap, 1.2) / 2);
+  const normals = [];
+  for (let index = 1; index < points.length; index += 1) {
+    const p0 = points[index - 1];
+    const p1 = points[index];
+    const dx = toFiniteNumber(p1 && p1[0], 0) - toFiniteNumber(p0 && p0[0], 0);
+    const dy = toFiniteNumber(p1 && p1[1], 0) - toFiniteNumber(p0 && p0[1], 0);
+    const length = Math.hypot(dx, dy);
+    if (length <= 0.0001) {
+      normals.push([0, 0]);
+      continue;
+    }
+    normals.push([-dy / length, dx / length]);
+  }
+  const left = [];
+  const right = [];
+  for (let index = 0; index < points.length; index += 1) {
+    const prev = index > 0 ? normals[index - 1] : normals[index];
+    const next = index < normals.length ? normals[index] : normals[index - 1];
+    const nx = toFiniteNumber((toFiniteNumber(prev && prev[0], 0) + toFiniteNumber(next && next[0], 0)) / 2, 0);
+    const ny = toFiniteNumber((toFiniteNumber(prev && prev[1], 0) + toFiniteNumber(next && next[1], 0)) / 2, 0);
+    const nLength = Math.hypot(nx, ny);
+    const ux = nLength > 0.0001 ? nx / nLength : 0;
+    const uy = nLength > 0.0001 ? ny / nLength : 0;
+    const px = toFiniteNumber(points[index] && points[index][0], 0);
+    const py = toFiniteNumber(points[index] && points[index][1], 0);
+    left.push([px + ux * halfGap, py + uy * halfGap]);
+    right.push([px - ux * halfGap, py - uy * halfGap]);
+  }
+  return { left, right };
+}
+
+function compileCorridorPolyline(raw, entityId) {
+  const points = extractPolylinePoints(raw);
+  if (points.length < 2) {
+    return [];
+  }
+  const gap = Math.max(0.2, toFiniteNumber(raw && raw.gap, 1.2));
+  const sides = buildCorridorSides(points, gap);
+  const color = typeof (raw && raw.color) === 'string' ? raw.color : DEFAULT_OBJECT_COLORS.wall;
+  const entities = [];
+  const leftEntity = compileWallPolyline({ points: sides.left, color }, entityId);
+  if (leftEntity) {
+    entities.push(leftEntity);
+  }
+  const rightEntity = compileWallPolyline({ points: sides.right, color }, entityId + (leftEntity ? 1 : 0));
+  if (rightEntity) {
+    entities.push(rightEntity);
+  }
+  return entities;
+}
+
 function compileBox(raw, entityId, forceKinematic = false) {
   const width = Math.max(0.02, toFiniteNumber(raw.width, 0.35));
   const height = Math.max(0.02, toFiniteNumber(raw.height, 0.18));
@@ -135,13 +199,26 @@ function compileBox(raw, entityId, forceKinematic = false) {
     forceKinematic ? toFiniteNumber(raw.angularVelocity, 0) : 0,
   );
   const color = typeof raw.color === 'string' ? raw.color : DEFAULT_OBJECT_COLORS.box;
+  const rawBodyType = typeof raw === 'object' && raw
+    ? (typeof raw.bodyType === 'string' ? raw.bodyType : (typeof raw.physicsType === 'string' ? raw.physicsType : ''))
+    : '';
+  let bodyType = 'static';
+  if (forceKinematic) {
+    bodyType = 'kinematic';
+  } else if (rawBodyType === 'dynamic') {
+    bodyType = 'dynamic';
+  } else if (rawBodyType === 'kinematic' || raw.type === 'kinematic') {
+    bodyType = 'kinematic';
+  } else if (raw.type === 'dynamic') {
+    bodyType = 'dynamic';
+  }
   return withEntityId(
     {
       position: {
         x: toFiniteNumber(raw.x, 11.75),
         y: toFiniteNumber(raw.y, 40),
       },
-      type: forceKinematic ? 'kinematic' : (raw.type === 'kinematic' ? 'kinematic' : 'static'),
+      type: bodyType,
       props: {
         density,
         angularVelocity,
@@ -165,13 +242,22 @@ function compileCircle(raw, entityId, defaults) {
   const density = Math.max(0.01, toFiniteNumber(raw.density, defaults.density));
   const life = Number.isFinite(Number(raw.life)) ? Math.max(-1, Math.floor(Number(raw.life))) : defaults.life;
   const color = typeof raw.color === 'string' ? raw.color : defaults.color;
+  const rawBodyType = typeof raw === 'object' && raw
+    ? (typeof raw.bodyType === 'string' ? raw.bodyType : (typeof raw.physicsType === 'string' ? raw.physicsType : ''))
+    : '';
+  const defaultBodyType = defaults && typeof defaults.bodyType === 'string' ? defaults.bodyType : 'static';
+  const bodyType = rawBodyType === 'dynamic' || raw.type === 'dynamic'
+    ? 'dynamic'
+    : (rawBodyType === 'kinematic' || raw.type === 'kinematic'
+      ? 'kinematic'
+      : defaultBodyType);
   return withEntityId(
     {
       position: {
         x: toFiniteNumber(raw.x, defaults.x),
         y: toFiniteNumber(raw.y, defaults.y),
       },
-      type: 'static',
+      type: bodyType,
       props: {
         density,
         angularVelocity: 0,
@@ -221,9 +307,35 @@ function compileObject(rawObject, entityId) {
         entity: compileWallPolyline(rawObject, entityId),
         behavior: null,
       };
+    case 'wall_corridor_segment':
+    case 'wall_corridor_polyline': {
+      const entities = compileCorridorPolyline(rawObject, entityId);
+      return {
+        entity: entities[0] || null,
+        entities,
+        behavior: null,
+      };
+    }
     case 'box_block':
       return {
         entity: compileBox(rawObject, entityId, false),
+        behavior: null,
+      };
+    case 'domino_block':
+      return {
+        entity: compileBox(
+          {
+            ...rawObject,
+            width: Math.max(0.04, toFiniteNumber(rawObject.width, 0.16)),
+            height: Math.max(0.08, toFiniteNumber(rawObject.height, 0.7)),
+            restitution: toFiniteNumber(rawObject.restitution, 0.08),
+            density: Math.max(0.01, toFiniteNumber(rawObject.density, 1.35)),
+            bodyType: 'dynamic',
+            color: typeof rawObject.color === 'string' ? rawObject.color : DEFAULT_OBJECT_COLORS.domino,
+          },
+          entityId,
+          false,
+        ),
         behavior: null,
       };
     case 'diamond_block':
@@ -241,6 +353,21 @@ function compileObject(rawObject, entityId) {
           x: 11.75,
           y: 40,
           color: DEFAULT_OBJECT_COLORS.circle,
+          bodyType: 'static',
+        }),
+        behavior: null,
+      };
+    case 'physics_ball':
+      return {
+        entity: compileCircle(rawObject, entityId, {
+          radius: 0.62,
+          restitution: 0.26,
+          density: 0.95,
+          life: -1,
+          x: 11.75,
+          y: 40,
+          color: DEFAULT_OBJECT_COLORS.physicsBall,
+          bodyType: 'dynamic',
         }),
         behavior: null,
       };
@@ -346,6 +473,7 @@ function compileObject(rawObject, entityId) {
           x: 11.75,
           y: 50,
           color: DEFAULT_OBJECT_COLORS.portal,
+          bodyType: 'static',
         }),
         behavior: {
           kind: 'portal',
@@ -429,6 +557,44 @@ function compileObject(rawObject, entityId) {
               ),
             ),
           ),
+        },
+      };
+    case 'sticky_pad':
+      return {
+        entity: compileBox(
+          {
+            ...rawObject,
+            width: Math.max(0.08, toFiniteNumber(rawObject.width, 1.1)),
+            height: Math.max(0.04, toFiniteNumber(rawObject.height, 0.24)),
+            restitution: toFiniteNumber(rawObject.restitution, 0.02),
+            rotation: toFiniteNumber(rawObject.rotation, 0),
+            bodyType: 'kinematic',
+            color: typeof rawObject.color === 'string' ? rawObject.color : DEFAULT_OBJECT_COLORS.sticky,
+          },
+          entityId,
+          true,
+        ),
+        behavior: {
+          kind: 'sticky_pad',
+          oid: toId(rawObject.oid, `sticky_${entityId}`),
+          entityId,
+          x: toFiniteNumber(rawObject.x, 11.75),
+          y: toFiniteNumber(rawObject.y, 70),
+          rotation: toFiniteNumber(rawObject.rotation, 0),
+          width: Math.max(0.08, toFiniteNumber(rawObject.width, 1.1)),
+          height: Math.max(0.04, toFiniteNumber(rawObject.height, 0.24)),
+          speed: Math.max(0.05, toFiniteNumber(rawObject.speed, 1.1)),
+          pauseMs: Math.max(0, toFiniteNumber(rawObject.pauseMs, 220)),
+          stickyTopOnly: toBoolean(rawObject.stickyTopOnly, true),
+          pathA: Array.isArray(rawObject.pathA) && rawObject.pathA.length >= 2
+            ? [toFiniteNumber(rawObject.pathA[0], toFiniteNumber(rawObject.x, 11.75)), toFiniteNumber(rawObject.pathA[1], toFiniteNumber(rawObject.y, 70))]
+            : [toFiniteNumber(rawObject.x, 11.75), toFiniteNumber(rawObject.y, 70)],
+          pathB: Array.isArray(rawObject.pathB) && rawObject.pathB.length >= 2
+            ? [toFiniteNumber(rawObject.pathB[0], toFiniteNumber(rawObject.x, 11.75) + 2.4), toFiniteNumber(rawObject.pathB[1], toFiniteNumber(rawObject.y, 70))]
+            : [
+                toFiniteNumber(rawObject.pathTargetX, toFiniteNumber(rawObject.x, 11.75) + 2.4),
+                toFiniteNumber(rawObject.pathTargetY, toFiniteNumber(rawObject.y, 70)),
+              ],
         },
       };
     default:
@@ -527,7 +693,21 @@ function createPortalBehavior(def, portalByOid, env) {
   const cooldownByMarble = {};
 
   const getPortal = () => portalByOid.get(def.oid) || def;
-  const getPairPortal = () => portalByOid.get(def.pair) || null;
+  const getPairPortal = () => {
+    const explicitPair = portalByOid.get(def.pair);
+    if (explicitPair && explicitPair.oid && explicitPair.oid !== def.oid) {
+      return explicitPair;
+    }
+    for (const portal of portalByOid.values()) {
+      if (!portal || !portal.oid || portal.oid === def.oid) {
+        continue;
+      }
+      if (toId(portal.pair, '') === def.oid) {
+        return portal;
+      }
+    }
+    return null;
+  };
 
   function getKey(marbleId) {
     return `${def.oid}:${marbleId}`;
@@ -567,11 +747,9 @@ function createPortalBehavior(def, portalByOid, env) {
     const angle = typeof body.GetAngle === 'function' ? body.GetAngle() : 0;
     const targetX = toFiniteNumber(target.x, source.x);
     const targetY = toFiniteNumber(target.y, source.y);
-    const sourceX = toFiniteNumber(source.x, targetX);
-    const sourceY = toFiniteNumber(source.y, targetY);
     const hasExitDir = Number.isFinite(toFiniteNumber(target.exitDirDeg, NaN));
-    const sourceToTargetDx = targetX - sourceX;
-    const sourceToTargetDy = targetY - sourceY;
+    const sourceToTargetDx = targetX - toFiniteNumber(source.x, targetX);
+    const sourceToTargetDy = targetY - toFiniteNumber(source.y, targetY);
     const sourceToTargetDist = Math.hypot(sourceToTargetDx, sourceToTargetDy);
     const fallbackDirRad = sourceToTargetDist > 0.0001
       ? Math.atan2(sourceToTargetDy, sourceToTargetDx)
@@ -579,15 +757,8 @@ function createPortalBehavior(def, portalByOid, env) {
     const exitDirRad = hasExitDir
       ? degToRad(toFiniteNumber(target.exitDirDeg, 0))
       : fallbackDirRad;
-    const exitOffset = Math.max(
-      0.25,
-      Math.max(
-        toFiniteNumber(target.radius, 0.45) + 0.38,
-        toFiniteNumber(target.triggerRadius, toFiniteNumber(target.radius, 0.45) + 0.45) * 0.35,
-      ),
-    );
-    const spawnX = targetX + Math.cos(exitDirRad) * exitOffset;
-    const spawnY = targetY + Math.sin(exitDirRad) * exitOffset;
+    const spawnX = targetX;
+    const spawnY = targetY;
 
     try {
       if (typeof body.SetEnabled === 'function') {
@@ -1233,6 +1404,7 @@ function createHammerBehavior(def, env) {
 
 function createFanBehavior(def, env) {
   let lastTickAt = 0;
+  let nextVisualAt = 0;
 
   function getFanEntry() {
     const roulette = env.getRoulette();
@@ -1284,6 +1456,65 @@ function createFanBehavior(def, env) {
     }
   }
 
+  function emitFanVisualEffect(now, dirRad, zoneLength, zoneHalfWidth) {
+    const roulette = env.getRoulette();
+    if (!roulette || !Array.isArray(roulette._effects)) {
+      return;
+    }
+    const originX = toFiniteNumber(def.x, 0);
+    const originY = toFiniteNumber(def.y, 0);
+    const duration = 200;
+    roulette._effects.push({
+      elapsed: 0,
+      duration,
+      isDestroy: false,
+      update(deltaMs) {
+        this.elapsed += toFiniteNumber(deltaMs, 0);
+        if (this.elapsed >= this.duration) {
+          this.isDestroy = true;
+        }
+      },
+      render(ctx, zoomScale) {
+        if (!ctx) {
+          return;
+        }
+        const ratio = Math.max(0, Math.min(1, this.elapsed / this.duration));
+        const alpha = Math.max(0, 0.28 * (1 - ratio));
+        const length = Math.max(0.25, zoneLength * (0.78 + ratio * 0.42));
+        const halfWidth = Math.max(0.2, zoneHalfWidth);
+        const waveCount = Math.max(3, Math.floor(length * 2.4));
+        const lineWidth = Math.max(0.8 / Math.max(1, toFiniteNumber(zoomScale, 1)), 0.55);
+        ctx.save();
+        ctx.translate(originX, originY);
+        ctx.rotate(dirRad);
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = 'rgba(127,217,255,0.2)';
+        ctx.strokeStyle = 'rgba(143,230,255,0.95)';
+        ctx.lineWidth = lineWidth;
+        ctx.beginPath();
+        ctx.rect(0, -halfWidth, length, halfWidth * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.beginPath();
+        for (let lane = -1; lane <= 1; lane += 1) {
+          const laneY = lane * (halfWidth * 0.52);
+          const step = length / waveCount;
+          const amp = Math.max(0.06, halfWidth * 0.18);
+          ctx.moveTo(0, laneY);
+          for (let i = 0; i <= waveCount; i += 1) {
+            const x = i * step;
+            const waveY = laneY + Math.sin((i / waveCount) * Math.PI * 2.4 + ratio * Math.PI) * amp;
+            ctx.lineTo(x, waveY);
+          }
+        }
+        ctx.strokeStyle = 'rgba(194,245,255,0.95)';
+        ctx.lineWidth = lineWidth * 0.88;
+        ctx.stroke();
+        ctx.restore();
+      },
+    });
+  }
+
   return {
     kind: 'fan',
     oid: def.oid,
@@ -1317,6 +1548,11 @@ function createFanBehavior(def, env) {
       const baseForce = Math.max(0.01, toFiniteNumber(def.force, 0.32));
       const originX = toFiniteNumber(def.x, 0);
       const originY = toFiniteNumber(def.y, 0);
+
+      if (now >= nextVisualAt) {
+        emitFanVisualEffect(now, dirRad, zoneLength, zoneHalfWidth);
+        nextVisualAt = now + 110;
+      }
 
       for (let index = 0; index < marbles.length; index += 1) {
         const marble = marbles[index];
@@ -1368,12 +1604,229 @@ function createFanBehavior(def, env) {
     serializeState() {
       return {
         lastTickAt: toFiniteNumber(lastTickAt, 0),
+        nextVisualAt: toFiniteNumber(nextVisualAt, 0),
       };
     },
     restoreState(rawState) {
       const safeState = rawState && typeof rawState === 'object' ? rawState : {};
       lastTickAt = toFiniteNumber(safeState.lastTickAt, 0);
+      nextVisualAt = toFiniteNumber(safeState.nextVisualAt, 0);
       syncFanVisual();
+    },
+  };
+}
+
+function createStickyPadBehavior(def, env) {
+  let progress = 0;
+  let direction = 1;
+  let holdUntil = 0;
+  let lastTickAt = 0;
+  let currentX = toFiniteNumber(def.x, 0);
+  let currentY = toFiniteNumber(def.y, 0);
+  let lastX = currentX;
+  let lastY = currentY;
+
+  function readPathPoint(raw, fallbackX, fallbackY) {
+    if (!Array.isArray(raw) || raw.length < 2) {
+      return { x: fallbackX, y: fallbackY };
+    }
+    return {
+      x: toFiniteNumber(raw[0], fallbackX),
+      y: toFiniteNumber(raw[1], fallbackY),
+    };
+  }
+
+  function getPadEntry() {
+    const roulette = env.getRoulette();
+    const physics = roulette && roulette.physics ? roulette.physics : null;
+    const entities = physics && Array.isArray(physics.entities) ? physics.entities : [];
+    for (let index = 0; index < entities.length; index += 1) {
+      const entry = entities[index];
+      const entityId = toFiniteNumber(entry && entry.shape && entry.shape.__v2eid, NaN);
+      if (Number.isFinite(entityId) && entityId === toFiniteNumber(def.entityId, -1)) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  function updatePadTransform(x, y, vx, vy) {
+    const entry = getPadEntry();
+    const box2d = env.getBox2D();
+    if (!entry || !entry.body || !box2d || typeof box2d.b2Vec2 !== 'function') {
+      return;
+    }
+    const body = entry.body;
+    const angle = degToRad(toFiniteNumber(def.rotation, 0));
+    try {
+      if (typeof body.SetEnabled === 'function') {
+        body.SetEnabled(true);
+      }
+      if (typeof body.SetAwake === 'function') {
+        body.SetAwake(true);
+      }
+      if (typeof body.SetTransform === 'function') {
+        body.SetTransform(new box2d.b2Vec2(x, y), angle);
+      }
+      if (typeof body.SetLinearVelocity === 'function') {
+        body.SetLinearVelocity(new box2d.b2Vec2(vx, vy));
+      }
+      if (typeof body.SetAngularVelocity === 'function') {
+        body.SetAngularVelocity(0);
+      }
+    } catch (_) {
+    }
+    entry.x = x;
+    entry.y = y;
+    if (entry.position && typeof entry.position === 'object') {
+      entry.position.x = x;
+      entry.position.y = y;
+    }
+  }
+
+  function stickMarblesToTop(vx, vy) {
+    const roulette = env.getRoulette();
+    const physics = roulette && roulette.physics ? roulette.physics : null;
+    const box2d = env.getBox2D();
+    if (!roulette || !physics || !physics.marbleMap || !box2d || typeof box2d.b2Vec2 !== 'function') {
+      return;
+    }
+    const marbles = Array.isArray(roulette._marbles) ? roulette._marbles : [];
+    if (marbles.length === 0) {
+      return;
+    }
+    const stickyTopOnly = def.stickyTopOnly !== false;
+    const halfWidth = Math.max(0.08, toFiniteNumber(def.width, 1.1));
+    const halfHeight = Math.max(0.04, toFiniteNumber(def.height, 0.24));
+    const rotationRad = degToRad(toFiniteNumber(def.rotation, 0));
+    const cos = Math.cos(rotationRad);
+    const sin = Math.sin(rotationRad);
+    const captureHalfWidth = halfWidth + 0.26;
+    const captureMinY = stickyTopOnly ? (-halfHeight - 0.48) : (-halfHeight - 0.55);
+    const captureMaxY = stickyTopOnly ? (-halfHeight + 0.34) : (halfHeight + 0.4);
+    const targetLocalY = -halfHeight - 0.08;
+
+    for (let index = 0; index < marbles.length; index += 1) {
+      const marble = marbles[index];
+      if (!marble || typeof marble.id !== 'number') {
+        continue;
+      }
+      const body = physics.marbleMap[marble.id];
+      if (!body || typeof body.GetPosition !== 'function') {
+        continue;
+      }
+      const bodyPos = body.GetPosition();
+      const px = toFiniteNumber(bodyPos && bodyPos.x, NaN);
+      const py = toFiniteNumber(bodyPos && bodyPos.y, NaN);
+      if (!Number.isFinite(px) || !Number.isFinite(py)) {
+        continue;
+      }
+      const relX = px - currentX;
+      const relY = py - currentY;
+      const localX = relX * cos + relY * sin;
+      const localY = -relX * sin + relY * cos;
+      if (Math.abs(localX) > captureHalfWidth || localY < captureMinY || localY > captureMaxY) {
+        continue;
+      }
+      const targetX = currentX + (localX * cos - targetLocalY * sin);
+      const targetY = currentY + (localX * sin + targetLocalY * cos);
+      const angle = typeof body.GetAngle === 'function' ? body.GetAngle() : 0;
+      try {
+        if (typeof body.SetEnabled === 'function') {
+          body.SetEnabled(true);
+        }
+        if (typeof body.SetAwake === 'function') {
+          body.SetAwake(true);
+        }
+        if (typeof body.SetTransform === 'function') {
+          body.SetTransform(new box2d.b2Vec2(targetX, targetY), angle);
+        }
+        if (typeof body.SetLinearVelocity === 'function') {
+          body.SetLinearVelocity(new box2d.b2Vec2(vx, vy));
+        }
+        if (typeof body.SetAngularVelocity === 'function') {
+          body.SetAngularVelocity(0);
+        }
+      } catch (_) {
+        continue;
+      }
+      marble.x = targetX;
+      marble.y = targetY;
+      if (marble.lastPosition && typeof marble.lastPosition === 'object') {
+        marble.lastPosition.x = targetX;
+        marble.lastPosition.y = targetY;
+      }
+    }
+  }
+
+  return {
+    kind: 'sticky_pad',
+    oid: def.oid,
+    tick(now) {
+      if (env.isPaused()) {
+        return;
+      }
+      const pointA = readPathPoint(def.pathA, toFiniteNumber(def.x, 0), toFiniteNumber(def.y, 0));
+      const pointB = readPathPoint(def.pathB, pointA.x + 2.4, pointA.y);
+      const dx = pointB.x - pointA.x;
+      const dy = pointB.y - pointA.y;
+      const pathLength = Math.hypot(dx, dy);
+      const dtSec = Math.max(0.004, Math.min(0.08, toFiniteNumber(now - lastTickAt, 16) / 1000));
+      lastTickAt = now;
+
+      if (pathLength <= 0.0001) {
+        progress = 0;
+        currentX = pointA.x;
+        currentY = pointA.y;
+      } else {
+        if (now >= holdUntil) {
+          const speed = Math.max(0.05, toFiniteNumber(def.speed, 1.1));
+          const deltaProgress = (speed * dtSec) / pathLength;
+          progress += direction * deltaProgress;
+          if (progress >= 1) {
+            progress = 1;
+            direction = -1;
+            holdUntil = now + Math.max(0, toFiniteNumber(def.pauseMs, 220));
+          } else if (progress <= 0) {
+            progress = 0;
+            direction = 1;
+            holdUntil = now + Math.max(0, toFiniteNumber(def.pauseMs, 220));
+          }
+        }
+        currentX = pointA.x + dx * progress;
+        currentY = pointA.y + dy * progress;
+      }
+
+      const vx = (currentX - lastX) / Math.max(0.0001, dtSec);
+      const vy = (currentY - lastY) / Math.max(0.0001, dtSec);
+      lastX = currentX;
+      lastY = currentY;
+      updatePadTransform(currentX, currentY, vx, vy);
+      stickMarblesToTop(vx, vy);
+    },
+    serializeState() {
+      return {
+        progress: toFiniteNumber(progress, 0),
+        direction: direction < 0 ? -1 : 1,
+        holdUntil: toFiniteNumber(holdUntil, 0),
+        lastTickAt: toFiniteNumber(lastTickAt, 0),
+        currentX: toFiniteNumber(currentX, toFiniteNumber(def.x, 0)),
+        currentY: toFiniteNumber(currentY, toFiniteNumber(def.y, 0)),
+        lastX: toFiniteNumber(lastX, toFiniteNumber(def.x, 0)),
+        lastY: toFiniteNumber(lastY, toFiniteNumber(def.y, 0)),
+      };
+    },
+    restoreState(rawState) {
+      const safeState = rawState && typeof rawState === 'object' ? rawState : {};
+      progress = clamp(toFiniteNumber(safeState.progress, 0), 0, 1);
+      direction = toFiniteNumber(safeState.direction, 1) < 0 ? -1 : 1;
+      holdUntil = Math.max(0, toFiniteNumber(safeState.holdUntil, 0));
+      lastTickAt = Math.max(0, toFiniteNumber(safeState.lastTickAt, 0));
+      currentX = toFiniteNumber(safeState.currentX, toFiniteNumber(def.x, 0));
+      currentY = toFiniteNumber(safeState.currentY, toFiniteNumber(def.y, 0));
+      lastX = toFiniteNumber(safeState.lastX, currentX);
+      lastY = toFiniteNumber(safeState.lastY, currentY);
+      updatePadTransform(currentX, currentY, 0, 0);
     },
   };
 }
@@ -1391,6 +1844,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
     .map((item) => ({ ...item }));
   const fanDefs = defs
     .filter((item) => item && item.kind === 'fan')
+    .map((item) => ({ ...item }));
+  const stickyDefs = defs
+    .filter((item) => item && item.kind === 'sticky_pad')
     .map((item) => ({ ...item }));
 
   const portalByOid = new Map();
@@ -1411,6 +1867,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
   for (const fanDef of fanDefs) {
     behaviors.push(createFanBehavior(fanDef, env));
   }
+  for (const stickyDef of stickyDefs) {
+    behaviors.push(createStickyPadBehavior(stickyDef, env));
+  }
 
   return {
     tick(now) {
@@ -1427,6 +1886,7 @@ export function createBehaviorRuntime(env, behaviorDefs) {
       const burst = {};
       const hammer = {};
       const fan = {};
+      const sticky = {};
       for (let index = 0; index < behaviors.length; index += 1) {
         const behavior = behaviors[index];
         const state = behavior && typeof behavior.serializeState === 'function'
@@ -1443,9 +1903,11 @@ export function createBehaviorRuntime(env, behaviorDefs) {
           hammer[behavior.oid] = state;
         } else if (behavior.kind === 'fan') {
           fan[behavior.oid] = state;
+        } else if (behavior.kind === 'sticky_pad') {
+          sticky[behavior.oid] = state;
         }
       }
-      return { portal, burst, hammer, fan };
+      return { portal, burst, hammer, fan, sticky };
     },
     restoreState(rawState) {
       const safeState = rawState && typeof rawState === 'object' ? rawState : {};
@@ -1453,6 +1915,7 @@ export function createBehaviorRuntime(env, behaviorDefs) {
       const burstState = safeState.burst && typeof safeState.burst === 'object' ? safeState.burst : {};
       const hammerState = safeState.hammer && typeof safeState.hammer === 'object' ? safeState.hammer : {};
       const fanState = safeState.fan && typeof safeState.fan === 'object' ? safeState.fan : {};
+      const stickyState = safeState.sticky && typeof safeState.sticky === 'object' ? safeState.sticky : {};
       for (let index = 0; index < behaviors.length; index += 1) {
         const behavior = behaviors[index];
         if (!behavior || typeof behavior.restoreState !== 'function') {
@@ -1466,6 +1929,8 @@ export function createBehaviorRuntime(env, behaviorDefs) {
           behavior.restoreState(hammerState[behavior.oid]);
         } else if (behavior.kind === 'fan') {
           behavior.restoreState(fanState[behavior.oid]);
+        } else if (behavior.kind === 'sticky_pad') {
+          behavior.restoreState(stickyState[behavior.oid]);
         }
       }
     },

@@ -420,6 +420,29 @@
       top: 10px;
       transform: rotate(-18deg);
     }
+    .tool-shape.wall-corridor {
+      width: 18px;
+      height: 10px;
+      left: 6px;
+      top: 6px;
+    }
+    .tool-shape.wall-corridor::before,
+    .tool-shape.wall-corridor::after {
+      content: "";
+      position: absolute;
+      width: 18px;
+      height: 0;
+      border-top: 2px solid #ff7cc8;
+      left: 0;
+      transform: rotate(-18deg);
+      transform-origin: left center;
+    }
+    .tool-shape.wall-corridor::before {
+      top: 2px;
+    }
+    .tool-shape.wall-corridor::after {
+      top: 8px;
+    }
     .tool-shape.peg {
       width: 11px;
       height: 11px;
@@ -503,6 +526,26 @@
       box-shadow: 0 4px 0 rgba(127, 217, 255, 0.65), 0 -4px 0 rgba(127, 217, 255, 0.65);
       border-radius: 2px;
     }
+    .tool-shape.sticky {
+      width: 19px;
+      height: 9px;
+      background: #ff8fc9;
+      border: 1px solid rgba(255, 208, 233, 0.94);
+      left: 6px;
+      top: 6px;
+      border-radius: 4px;
+    }
+    .tool-shape.sticky::after {
+      content: "";
+      position: absolute;
+      width: 10px;
+      height: 2px;
+      background: rgba(255, 208, 233, 0.9);
+      left: 19px;
+      top: 3px;
+      box-shadow: 0 4px 0 rgba(255, 208, 233, 0.68), 0 -4px 0 rgba(255, 208, 233, 0.68);
+      border-radius: 2px;
+    }
     .tool-shape.burst {
       width: 12px;
       height: 12px;
@@ -511,6 +554,26 @@
       left: 10px;
       top: 5px;
       box-shadow: 0 0 0 3px rgba(93, 255, 122, 0.4);
+    }
+    .tool-shape.domino {
+      width: 8px;
+      height: 15px;
+      border-radius: 2px;
+      background: #ff67be;
+      border: 1px solid rgba(255, 185, 224, 0.92);
+      left: 12px;
+      top: 3px;
+      box-shadow: -8px 2px 0 rgba(255, 103, 190, 0.45);
+    }
+    .tool-shape.physics-ball {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #ff79cb;
+      border: 1px solid rgba(255, 204, 231, 0.92);
+      left: 10px;
+      top: 5px;
+      box-shadow: 0 0 0 2px rgba(255, 121, 203, 0.3);
     }
     .tool-shape.spawn {
       width: 16px;
@@ -835,6 +898,8 @@
                 <button type="button" class="maker-tool-button" data-maker-tool="spawn_point"><span class="tool-icon"><span class="tool-shape spawn"></span></span><span class="tool-label">공 시작점</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="wall_segment"><span class="tool-icon"><span class="tool-shape wall"></span></span><span class="tool-label">일반 벽선</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="wall_polyline"><span class="tool-icon"><span class="tool-shape wall"></span></span><span class="tool-label">다점 벽선</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="wall_corridor_segment"><span class="tool-icon"><span class="tool-shape wall-corridor"></span></span><span class="tool-label">통로형 일반벽선</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="wall_corridor_polyline"><span class="tool-icon"><span class="tool-shape wall-corridor"></span></span><span class="tool-label">통로형 다절벽선</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="peg_circle"><span class="tool-icon"><span class="tool-shape peg"></span></span><span class="tool-label">원형 핀</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="diamond_block"><span class="tool-icon"><span class="tool-shape diamond"></span></span><span class="tool-label">마름모</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="box_block"><span class="tool-icon"><span class="tool-shape box"></span></span><span class="tool-label">박스</span></button>
@@ -842,13 +907,22 @@
                 <button type="button" class="maker-tool-button" data-maker-tool="portal"><span class="tool-icon"><span class="tool-shape portal"></span></span><span class="tool-label">포털 A/B</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="hammer"><span class="tool-icon"><span class="tool-shape hammer"></span></span><span class="tool-label">해머</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="fan"><span class="tool-icon"><span class="tool-shape fan"></span></span><span class="tool-label">선풍기</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="sticky_pad"><span class="tool-icon"><span class="tool-shape sticky"></span></span><span class="tool-label">이동 점착패드</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="burst_bumper"><span class="tool-icon"><span class="tool-shape burst"></span></span><span class="tool-label">버스트 범퍼</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="domino_block"><span class="tool-icon"><span class="tool-shape domino"></span></span><span class="tool-label">도미노 블럭</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="physics_ball"><span class="tool-icon"><span class="tool-shape physics-ball"></span></span><span class="tool-label">물리 공</span></button>
+              </div>
+              <div class="maker-row" style="margin-top:6px;">
+                <label for="corridorGapInput">통로 간격</label>
+                <input id="corridorGapInput" type="number" min="0.2" max="8" step="0.1" value="1.2">
               </div>
               <select id="makerToolSelect" class="hidden-tool-select" aria-hidden="true" tabindex="-1">
                 <option value="select">선택</option>
                 <option value="spawn_point">공 시작점</option>
                 <option value="wall_segment">일반 벽선</option>
                 <option value="wall_polyline">다점 벽선</option>
+                <option value="wall_corridor_segment">통로형 일반벽선</option>
+                <option value="wall_corridor_polyline">통로형 다절벽선</option>
                 <option value="peg_circle">원형 핀</option>
                 <option value="diamond_block">마름모</option>
                 <option value="box_block">박스</option>
@@ -856,7 +930,10 @@
                 <option value="portal">포털 A/B</option>
                 <option value="hammer">해머</option>
                 <option value="fan">선풍기</option>
+                <option value="sticky_pad">이동 점착패드</option>
                 <option value="burst_bumper">버스트 범퍼</option>
+                <option value="domino_block">도미노 블럭</option>
+                <option value="physics_ball">물리 공</option>
               </select>
             </div>
 

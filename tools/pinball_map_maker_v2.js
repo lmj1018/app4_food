@@ -20,6 +20,9 @@ const OBJECT_COLOR_PRESET = {
   hammer: '#ffa557',
   fan: '#7fd9ff',
   burst: '#5dff7a',
+  sticky: '#ff8fc9',
+  domino: '#ff67be',
+  physicsBall: '#ff79cb',
 };
 const DEFAULT_MARBLE_SIZE_SCALE = 1;
 const MIN_MARBLE_SIZE_SCALE = 0.4;
@@ -38,6 +41,7 @@ const editorState = {
   selectedIndex: -1,
   pendingWallStart: null,
   pendingWallOid: '',
+  pendingWallType: '',
   pendingPortalOid: '',
   pendingHammerOid: '',
   canvasZoom: 1,
@@ -87,6 +91,7 @@ const elements = {
   applyStageButton: document.getElementById('applyStageButton'),
   makerToolSelect: document.getElementById('makerToolSelect'),
   makerToolButtons: Array.from(document.querySelectorAll('.maker-tool-button')),
+  corridorGapInput: document.getElementById('corridorGapInput'),
   miniMapCanvas: document.getElementById('miniMapCanvas'),
   makerCanvas: document.getElementById('makerCanvas'),
   applyDraftButton: document.getElementById('applyDraftButton'),
@@ -347,6 +352,7 @@ function setBusy(isBusy) {
     elements.fitStageButton,
     elements.applyStageButton,
     elements.makerToolSelect,
+    elements.corridorGapInput,
     elements.applyDraftButton,
     elements.clearObjectsButton,
     elements.objectList,
@@ -1128,6 +1134,10 @@ function toolDisplayName(tool) {
       return '일반 벽선';
     case 'wall_polyline':
       return '다점 벽선';
+    case 'wall_corridor_segment':
+      return '통로형 일반벽선';
+    case 'wall_corridor_polyline':
+      return '통로형 다절벽선';
     case 'peg_circle':
       return '원형 핀';
     case 'diamond_block':
@@ -1142,8 +1152,14 @@ function toolDisplayName(tool) {
       return '해머';
     case 'fan':
       return '선풍기';
+    case 'sticky_pad':
+      return '이동 점착패드';
     case 'burst_bumper':
       return '버스트 범퍼';
+    case 'domino_block':
+      return '도미노 블럭';
+    case 'physics_ball':
+      return '물리 공';
     default:
       return String(tool || '툴');
   }
@@ -1156,6 +1172,7 @@ function objectTypeDisplayName(type) {
 function defaultColorForObjectType(type) {
   switch (String(type || '')) {
     case 'wall_polyline':
+    case 'wall_corridor_polyline':
       return OBJECT_COLOR_PRESET.wall;
     case 'box_block':
       return OBJECT_COLOR_PRESET.box;
@@ -1171,11 +1188,55 @@ function defaultColorForObjectType(type) {
       return OBJECT_COLOR_PRESET.hammer;
     case 'fan':
       return OBJECT_COLOR_PRESET.fan;
+    case 'sticky_pad':
+      return OBJECT_COLOR_PRESET.sticky;
     case 'burst_bumper':
       return OBJECT_COLOR_PRESET.burst;
+    case 'domino_block':
+      return OBJECT_COLOR_PRESET.domino;
+    case 'physics_ball':
+      return OBJECT_COLOR_PRESET.physicsBall;
     default:
       return '#7ab4ff';
   }
+}
+
+function isPolylineObject(obj) {
+  if (!obj || typeof obj !== 'object') {
+    return false;
+  }
+  const type = String(obj.type || '');
+  return type === 'wall_polyline' || type === 'wall_corridor_polyline' || type === 'wall_corridor_segment';
+}
+
+function isDirectionalTargetObject(obj) {
+  if (!obj || typeof obj !== 'object') {
+    return false;
+  }
+  const type = String(obj.type || '');
+  return type === 'hammer' || type === 'fan' || type === 'sticky_pad';
+}
+
+function isPolylineTool(tool) {
+  const safe = String(tool || '');
+  return safe === 'wall_polyline' || safe === 'wall_corridor_polyline';
+}
+
+function corridorGapForObject(obj, fallback = 1.2) {
+  const base = Math.max(0.2, toFinite(fallback, 1.2));
+  if (!obj || typeof obj !== 'object') {
+    return base;
+  }
+  return round1(clamp(toFinite(obj.gap, base), 0.2, 8));
+}
+
+function getCorridorGapInput() {
+  const raw = elements.corridorGapInput ? elements.corridorGapInput.value : 1.2;
+  const gap = round1(clamp(toFinite(raw, 1.2), 0.2, 8));
+  if (elements.corridorGapInput) {
+    elements.corridorGapInput.value = String(gap);
+  }
+  return gap;
 }
 
 function syncToolButtons() {
@@ -1199,6 +1260,8 @@ function setSelectedTool(tool) {
     'spawn_point',
     'wall_segment',
     'wall_polyline',
+    'wall_corridor_segment',
+    'wall_corridor_polyline',
     'peg_circle',
     'diamond_block',
     'box_block',
@@ -1206,7 +1269,10 @@ function setSelectedTool(tool) {
     'portal',
     'hammer',
     'fan',
+    'sticky_pad',
     'burst_bumper',
+    'domino_block',
+    'physics_ball',
   ]);
   const nextTool = allowed.has(String(tool || '')) ? String(tool) : fallback;
   if (elements.makerToolSelect) {
@@ -1218,6 +1284,7 @@ function setSelectedTool(tool) {
 function resetPendingWall() {
   editorState.pendingWallStart = null;
   editorState.pendingWallOid = '';
+  editorState.pendingWallType = '';
 }
 
 function resetPendingPortal() {
@@ -1378,6 +1445,23 @@ function createObjectByTool(tool, x, y) {
       color: OBJECT_COLOR_PRESET.fan,
     };
   }
+  if (tool === 'sticky_pad') {
+    return {
+      oid: nextOid('sticky'),
+      type: 'sticky_pad',
+      x: px,
+      y: py,
+      width: 1.1,
+      height: 0.24,
+      rotation: 0,
+      speed: 1.1,
+      pauseMs: 220,
+      stickyTopOnly: true,
+      pathA: [px, py],
+      pathB: [round1(clamp(px + 2.4, 0.1, WORLD_WIDTH - 0.1)), py],
+      color: OBJECT_COLOR_PRESET.sticky,
+    };
+  }
   if (tool === 'burst_bumper') {
     return {
       oid: nextOid('burst'),
@@ -1393,6 +1477,34 @@ function createObjectByTool(tool, x, y) {
       layers: 3,
       hpPerLayer: 1,
       color: OBJECT_COLOR_PRESET.burst,
+    };
+  }
+  if (tool === 'domino_block') {
+    return {
+      oid: nextOid('domino'),
+      type: 'domino_block',
+      x: px,
+      y: py,
+      width: 0.16,
+      height: 0.7,
+      rotation: 0,
+      restitution: 0.08,
+      density: 1.35,
+      color: OBJECT_COLOR_PRESET.domino,
+      bodyType: 'dynamic',
+    };
+  }
+  if (tool === 'physics_ball') {
+    return {
+      oid: nextOid('ball'),
+      type: 'physics_ball',
+      x: px,
+      y: py,
+      radius: 0.62,
+      restitution: 0.26,
+      density: 0.95,
+      color: OBJECT_COLOR_PRESET.physicsBall,
+      bodyType: 'dynamic',
     };
   }
   return null;
@@ -1456,6 +1568,8 @@ function populateObjectEditor() {
       elements.objDirInput.value = String(Math.round(toFinite(obj.exitDirDeg, 0)));
     } else if (obj.type === 'burst_bumper') {
       elements.objDirInput.value = String(Math.max(1, Math.floor(toFinite(obj.layers, 3))));
+    } else if (obj.type === 'sticky_pad') {
+      elements.objDirInput.value = String(round2(toFinite(obj.speed, 1.1)));
     } else {
       elements.objDirInput.value = String(Math.round(toFinite(obj.dirDeg, 90)));
     }
@@ -1465,6 +1579,8 @@ function populateObjectEditor() {
       elements.objForceInput.value = String(round2(toFinite(obj.angularVelocity, 2.2)));
     } else if (obj.type === 'portal') {
       elements.objForceInput.value = String(round1(toFinite(obj.exitImpulse, 0)));
+    } else if (obj.type === 'sticky_pad') {
+      elements.objForceInput.value = String(Math.round(toFinite(obj.pauseMs, 220)));
     } else {
       elements.objForceInput.value = String(round1(toFinite(obj.force, 4.2)));
     }
@@ -1476,6 +1592,8 @@ function populateObjectEditor() {
       elements.objIntervalInput.value = String(Math.round(toFinite(obj.cooldownMs, 900)));
     } else if (obj.type === 'burst_bumper') {
       elements.objIntervalInput.value = String(Math.round(toFinite(obj.intervalMs, 420)));
+    } else if (obj.type === 'sticky_pad') {
+      elements.objIntervalInput.value = '0';
     } else {
       elements.objIntervalInput.value = String(Math.round(toFinite(obj.intervalMs, 1200)));
     }
@@ -1499,6 +1617,17 @@ function populateObjectEditor() {
       if (elements.objHitDistanceLabel) {
         elements.objHitDistanceLabel.textContent = 'hp/층';
       }
+    } else if (obj.type === 'sticky_pad') {
+      const pathB = Array.isArray(obj.pathB) ? obj.pathB : [toFinite(obj.x, 0) + 2.4, toFinite(obj.y, 0)];
+      const dist = Math.hypot(
+        toFinite(pathB[0], toFinite(obj.x, 0)) - toFinite(obj.x, 0),
+        toFinite(pathB[1], toFinite(obj.y, 0)) - toFinite(obj.y, 0),
+      );
+      elements.objHitDistanceInput.value = String(round1(Math.max(0.2, dist)));
+      elements.objHitDistanceInput.disabled = false;
+      if (elements.objHitDistanceLabel) {
+        elements.objHitDistanceLabel.textContent = '이동거리';
+      }
     } else {
       elements.objHitDistanceInput.value = '';
       elements.objHitDistanceInput.disabled = true;
@@ -1515,20 +1644,26 @@ function populateObjectEditor() {
       ? '방향 각도(미사용)'
       : (obj.type === 'portal'
         ? '출구 각도(도)'
-        : (obj.type === 'burst_bumper' ? '레이어 수' : (obj.type === 'fan' ? '바람 방향(도)' : '방향 각도(도)')));
+        : (obj.type === 'burst_bumper'
+          ? '레이어 수'
+          : (obj.type === 'fan' ? '바람 방향(도)' : (obj.type === 'sticky_pad' ? '이동속도' : '방향 각도(도)'))));
   }
   if (elements.objForceLabel) {
     elements.objForceLabel.textContent = obj.type === 'rotor'
       ? '회전 속도'
-      : (obj.type === 'portal' ? '출구 가속(impulse)' : (obj.type === 'fan' ? '풍압' : '힘'));
+      : (obj.type === 'portal'
+        ? '출구 가속(impulse)'
+        : (obj.type === 'fan' ? '풍압' : (obj.type === 'sticky_pad' ? '대기(ms)' : '힘')));
   }
   if (elements.objIntervalLabel) {
     elements.objIntervalLabel.textContent = obj.type === 'rotor'
       ? '간격(미사용)'
-      : (obj.type === 'portal' || obj.type === 'burst_bumper' ? '쿨다운(ms)' : (obj.type === 'fan' ? '간격(미사용)' : '간격(ms)'));
+      : (obj.type === 'portal' || obj.type === 'burst_bumper'
+        ? '쿨다운(ms)'
+        : (obj.type === 'fan' || obj.type === 'sticky_pad' ? '간격(미사용)' : '간격(ms)'));
   }
 
-  if (obj.type === 'wall_polyline') {
+  if (isPolylineObject(obj)) {
     const points = Array.isArray(obj.points) ? obj.points : [];
     const p1 = points[0] || [0, 0];
     const p2 = points[Math.max(1, points.length - 1)] || [0, 0];
@@ -1536,8 +1671,14 @@ function populateObjectEditor() {
     if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(p1[1], 0)));
     if (elements.objExtra1Input) elements.objExtra1Input.value = String(round1(toFinite(p2[0], 0)));
     if (elements.objExtra2Input) elements.objExtra2Input.value = String(round1(toFinite(p2[1], 0)));
-    if (elements.objExtra1Label) elements.objExtra1Label.textContent = '점2 x';
-    if (elements.objExtra2Label) elements.objExtra2Label.textContent = '점2 y';
+    if (obj.type === 'wall_corridor_polyline' || obj.type === 'wall_corridor_segment') {
+      if (elements.objExtra1Label) elements.objExtra1Label.textContent = '끝점 x';
+      if (elements.objExtra2Label) elements.objExtra2Label.textContent = '끝점 y';
+      if (elements.objRadiusInput) elements.objRadiusInput.value = String(corridorGapForObject(obj, getCorridorGapInput()));
+    } else {
+      if (elements.objExtra1Label) elements.objExtra1Label.textContent = '점2 x';
+      if (elements.objExtra2Label) elements.objExtra2Label.textContent = '점2 y';
+    }
   } else if (obj.type === 'burst_bumper') {
     if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
     if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
@@ -1559,6 +1700,21 @@ function populateObjectEditor() {
     if (elements.objExtra2Input) elements.objExtra2Input.value = String('0');
     if (elements.objExtra1Label) elements.objExtra1Label.textContent = '영향폭';
     if (elements.objExtra2Label) elements.objExtra2Label.textContent = '보조(미사용)';
+  } else if (obj.type === 'sticky_pad') {
+    const pathB = Array.isArray(obj.pathB) ? obj.pathB : [toFinite(obj.x, 0) + 2.4, toFinite(obj.y, 0)];
+    if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
+    if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
+    if (elements.objExtra1Input) elements.objExtra1Input.value = String(round1(toFinite(pathB[0], toFinite(obj.x, 0) + 2.4)));
+    if (elements.objExtra2Input) elements.objExtra2Input.value = String(round1(toFinite(pathB[1], toFinite(obj.y, 0))));
+    if (elements.objExtra1Label) elements.objExtra1Label.textContent = '목표점 x';
+    if (elements.objExtra2Label) elements.objExtra2Label.textContent = '목표점 y';
+  } else if (obj.type === 'physics_ball') {
+    if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
+    if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
+    if (elements.objExtra1Input) elements.objExtra1Input.value = String(round1(toFinite(obj.restitution, 0.26)));
+    if (elements.objExtra2Input) elements.objExtra2Input.value = String(round1(toFinite(obj.density, 0.95)));
+    if (elements.objExtra1Label) elements.objExtra1Label.textContent = '탄성';
+    if (elements.objExtra2Label) elements.objExtra2Label.textContent = '밀도';
   } else if (obj.type === 'portal') {
     if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
     if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
@@ -1603,9 +1759,13 @@ function syncObjectList() {
       const oid = String(obj && obj.oid ? obj.oid : `obj_${index + 1}`);
       const type = String(obj && obj.type ? obj.type : 'unknown');
       let suffix = '';
-      if (type === 'wall_polyline') {
+      if (type === 'wall_polyline' || type === 'wall_corridor_polyline' || type === 'wall_corridor_segment') {
         const points = Array.isArray(obj.points) ? obj.points.length : 0;
-        suffix = ` (${points}pt)`;
+        if (type === 'wall_corridor_polyline' || type === 'wall_corridor_segment') {
+          suffix = ` (${points}pt, gap=${corridorGapForObject(obj, getCorridorGapInput())})`;
+        } else {
+          suffix = ` (${points}pt)`;
+        }
       } else if (type === 'portal' && obj && obj.pair) {
         suffix = ` (→ ${obj.pair})`;
       }
@@ -1640,7 +1800,7 @@ function applyObjectEditorValues() {
   } else {
     delete obj.color;
   }
-  if (obj.type === 'wall_polyline') {
+  if (isPolylineObject(obj)) {
     const x1 = round1(toFinite(elements.objXInput ? elements.objXInput.value : 0, 0));
     const y1 = round1(toFinite(elements.objYInput ? elements.objYInput.value : 0, 0));
     const x2 = round1(toFinite(elements.objExtra1Input ? elements.objExtra1Input.value : x1 + 1, x1 + 1));
@@ -1654,6 +1814,14 @@ function applyObjectEditorValues() {
       points[points.length - 1][0] = x2;
       points[points.length - 1][1] = y2;
       obj.points = points;
+    }
+    if (obj.type === 'wall_corridor_polyline' || obj.type === 'wall_corridor_segment') {
+      obj.gap = corridorGapForObject(
+        {
+          gap: elements.objRadiusInput ? elements.objRadiusInput.value : obj.gap,
+        },
+        getCorridorGapInput(),
+      );
     }
     refreshCurrentJsonViewer();
     return;
@@ -1757,6 +1925,70 @@ function applyObjectEditorValues() {
     refreshCurrentJsonViewer();
     return;
   }
+  if (obj.type === 'sticky_pad') {
+    obj.x = round1(toFinite(elements.objXInput ? elements.objXInput.value : obj.x, toFinite(obj.x, 0)));
+    obj.y = round1(toFinite(elements.objYInput ? elements.objYInput.value : obj.y, toFinite(obj.y, 0)));
+    obj.speed = round2(Math.max(0.05, toFinite(
+      elements.objDirInput ? elements.objDirInput.value : obj.speed,
+      toFinite(obj.speed, 1.1),
+    )));
+    obj.pauseMs = Math.round(Math.max(0, toFinite(
+      elements.objForceInput ? elements.objForceInput.value : obj.pauseMs,
+      toFinite(obj.pauseMs, 220),
+    )));
+    const rawTargetX = toFinite(
+      elements.objExtra1Input ? elements.objExtra1Input.value : (Array.isArray(obj.pathB) ? obj.pathB[0] : obj.x + 2.4),
+      toFinite(obj.x, 0) + 2.4,
+    );
+    const rawTargetY = toFinite(
+      elements.objExtra2Input ? elements.objExtra2Input.value : (Array.isArray(obj.pathB) ? obj.pathB[1] : obj.y),
+      toFinite(obj.y, 0),
+    );
+    let target = {
+      x: round1(clamp(rawTargetX, 0.1, WORLD_WIDTH - 0.1)),
+      y: round1(clamp(rawTargetY, 0.1, Math.max(25, getGoalYWorld() + 4))),
+    };
+    const hitDistance = toFinite(
+      elements.objHitDistanceInput ? elements.objHitDistanceInput.value : NaN,
+      NaN,
+    );
+    if (Number.isFinite(hitDistance) && hitDistance > 0.2) {
+      const dx = target.x - obj.x;
+      const dy = target.y - obj.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist <= 0.0001) {
+        target.x = round1(clamp(obj.x + hitDistance, 0.1, WORLD_WIDTH - 0.1));
+        target.y = obj.y;
+      } else {
+        const scale = hitDistance / dist;
+        target.x = round1(clamp(obj.x + dx * scale, 0.1, WORLD_WIDTH - 0.1));
+        target.y = round1(clamp(obj.y + dy * scale, 0.1, Math.max(25, getGoalYWorld() + 4)));
+      }
+    }
+    obj.pathA = [obj.x, obj.y];
+    obj.pathB = [target.x, target.y];
+    refreshCurrentJsonViewer();
+    return;
+  }
+  if (obj.type === 'physics_ball') {
+    obj.x = round1(toFinite(elements.objXInput ? elements.objXInput.value : obj.x, toFinite(obj.x, 0)));
+    obj.y = round1(toFinite(elements.objYInput ? elements.objYInput.value : obj.y, toFinite(obj.y, 0)));
+    obj.radius = round1(Math.max(0.08, toFinite(
+      elements.objRadiusInput ? elements.objRadiusInput.value : obj.radius,
+      toFinite(obj.radius, 0.62),
+    )));
+    obj.restitution = round2(toFinite(
+      elements.objExtra1Input ? elements.objExtra1Input.value : obj.restitution,
+      toFinite(obj.restitution, 0.26),
+    ));
+    obj.density = round2(Math.max(0.01, toFinite(
+      elements.objExtra2Input ? elements.objExtra2Input.value : obj.density,
+      toFinite(obj.density, 0.95),
+    )));
+    obj.bodyType = 'dynamic';
+    refreshCurrentJsonViewer();
+    return;
+  }
   obj.x = round1(toFinite(elements.objXInput ? elements.objXInput.value : obj.x, toFinite(obj.x, 0)));
   obj.y = round1(toFinite(elements.objYInput ? elements.objYInput.value : obj.y, toFinite(obj.y, 0)));
   obj.width = round1(toFinite(elements.objExtra1Input ? elements.objExtra1Input.value : obj.width, toFinite(obj.width, 1.2)));
@@ -1809,14 +2041,23 @@ function duplicateSelectedObject() {
   }
   const copy = deepClone(obj);
   copy.oid = nextOid(copy.type || 'obj');
-  if (copy.type === 'wall_polyline') {
+  if (copy.type === 'wall_polyline' || copy.type === 'wall_corridor_polyline') {
     const points = Array.isArray(copy.points) ? copy.points : [];
     for (let index = 0; index < points.length; index += 1) {
       points[index][1] = round1(toFinite(points[index][1], 0) + 2);
     }
+    if (copy.type === 'wall_corridor_polyline' || copy.type === 'wall_corridor_segment') {
+      copy.gap = corridorGapForObject(copy, getCorridorGapInput());
+    }
   } else if (copy.type === 'portal') {
     copy.y = round1(toFinite(copy.y, 0) + 2);
     copy.pair = '';
+  } else if (copy.type === 'sticky_pad') {
+    copy.y = round1(toFinite(copy.y, 0) + 2);
+    const pathA = Array.isArray(copy.pathA) ? copy.pathA : [copy.x, copy.y];
+    const pathB = Array.isArray(copy.pathB) ? copy.pathB : [toFinite(copy.x, 0) + 2, toFinite(copy.y, 0)];
+    copy.pathA = [round1(toFinite(pathA[0], copy.x)), round1(toFinite(pathA[1], copy.y) + 2)];
+    copy.pathB = [round1(toFinite(pathB[0], copy.x)), round1(toFinite(pathB[1], copy.y) + 2)];
   } else {
     copy.y = round1(toFinite(copy.y, 0) + 2);
   }
@@ -1832,7 +2073,7 @@ function deleteSelectedObject() {
     throw new Error('삭제할 오브젝트를 먼저 선택하세요');
   }
   const removed = objects.splice(editorState.selectedIndex, 1)[0];
-  if (removed && removed.type === 'wall_polyline' && String(removed.oid || '') === editorState.pendingWallOid) {
+  if (removed && isPolylineObject(removed) && String(removed.oid || '') === editorState.pendingWallOid) {
     resetPendingWall();
   }
   if (removed && removed.type === 'portal') {
@@ -1887,7 +2128,7 @@ function autoFitStageFromObjects() {
     if (!obj || typeof obj !== 'object') {
       continue;
     }
-    if (obj.type === 'wall_polyline') {
+    if (isPolylineObject(obj)) {
       const points = Array.isArray(obj.points) ? obj.points : [];
       for (let pointIndex = 0; pointIndex < points.length; pointIndex += 1) {
         maxY = Math.max(maxY, toFinite(points[pointIndex] && points[pointIndex][1], 0));
@@ -2112,22 +2353,36 @@ function drawMiniMap(mainLayout = null) {
     const color = selected ? '#ffd44d' : String(obj.color || defaultColorForObjectType(obj.type));
     ctx.strokeStyle = color;
     ctx.fillStyle = selected ? 'rgba(255,212,77,0.28)' : 'rgba(123,180,255,0.22)';
-    if (obj.type === 'wall_polyline') {
+    if (isPolylineObject(obj)) {
       const points = Array.isArray(obj.points) ? obj.points : [];
       if (points.length < 2) {
         continue;
       }
-      const first = worldToMiniMap(layout, points[0][0], points[0][1]);
-      ctx.beginPath();
-      ctx.moveTo(first.x, first.y);
-      for (let p = 1; p < points.length; p += 1) {
-        const next = worldToMiniMap(layout, points[p][0], points[p][1]);
-        ctx.lineTo(next.x, next.y);
+      const drawPath = (pathPoints) => {
+        const first = worldToMiniMap(layout, pathPoints[0][0], pathPoints[0][1]);
+        ctx.beginPath();
+        ctx.moveTo(first.x, first.y);
+        for (let p = 1; p < pathPoints.length; p += 1) {
+          const next = worldToMiniMap(layout, pathPoints[p][0], pathPoints[p][1]);
+          ctx.lineTo(next.x, next.y);
+        }
+        ctx.stroke();
+      };
+      if (obj.type === 'wall_corridor_polyline' || obj.type === 'wall_corridor_segment') {
+        const gap = corridorGapForObject(obj, getCorridorGapInput());
+        const sides = buildCorridorSides(points, gap);
+        if (sides.left.length >= 2) {
+          drawPath(sides.left);
+        }
+        if (sides.right.length >= 2) {
+          drawPath(sides.right);
+        }
+      } else {
+        drawPath(points);
       }
-      ctx.stroke();
       continue;
     }
-    if (obj.type === 'peg_circle' || obj.type === 'portal' || obj.type === 'burst_bumper') {
+    if (obj.type === 'peg_circle' || obj.type === 'portal' || obj.type === 'burst_bumper' || obj.type === 'physics_ball') {
       const center = worldToMiniMap(layout, obj.x, obj.y);
       const radius = Math.max(1.8, toFinite(obj.radius, 0.6) * layout.scale);
       ctx.beginPath();
@@ -2178,11 +2433,65 @@ function distancePointToSegment(px, py, ax, ay, bx, by) {
   return Math.hypot(px - cx, py - cy);
 }
 
+function normalizeEditorPolylinePoints(rawPoints) {
+  if (!Array.isArray(rawPoints)) {
+    return [];
+  }
+  const points = [];
+  for (let index = 0; index < rawPoints.length; index += 1) {
+    const point = rawPoints[index];
+    const x = toFinite(point && point[0], NaN);
+    const y = toFinite(point && point[1], NaN);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      continue;
+    }
+    points.push([x, y]);
+  }
+  return points;
+}
+
+function buildCorridorSides(pointsInput, gap) {
+  const points = normalizeEditorPolylinePoints(pointsInput);
+  if (points.length < 2) {
+    return { left: [], right: [] };
+  }
+  const halfGap = Math.max(0.1, toFinite(gap, 1.2) / 2);
+  const segmentNormals = [];
+  for (let index = 1; index < points.length; index += 1) {
+    const p0 = points[index - 1];
+    const p1 = points[index];
+    const dx = p1[0] - p0[0];
+    const dy = p1[1] - p0[1];
+    const length = Math.hypot(dx, dy);
+    if (length <= 0.0001) {
+      segmentNormals.push([0, 0]);
+      continue;
+    }
+    segmentNormals.push([-dy / length, dx / length]);
+  }
+  const left = [];
+  const right = [];
+  for (let index = 0; index < points.length; index += 1) {
+    const prevNormal = index > 0 ? segmentNormals[index - 1] : segmentNormals[index];
+    const nextNormal = index < segmentNormals.length ? segmentNormals[index] : segmentNormals[index - 1];
+    const normalX = toFinite((toFinite(prevNormal && prevNormal[0], 0) + toFinite(nextNormal && nextNormal[0], 0)) / 2, 0);
+    const normalY = toFinite((toFinite(prevNormal && prevNormal[1], 0) + toFinite(nextNormal && nextNormal[1], 0)) / 2, 0);
+    const normalLength = Math.hypot(normalX, normalY);
+    const unitX = normalLength > 0.0001 ? normalX / normalLength : 0;
+    const unitY = normalLength > 0.0001 ? normalY / normalLength : 0;
+    const px = points[index][0];
+    const py = points[index][1];
+    left.push([round1(px + unitX * halfGap), round1(py + unitY * halfGap)]);
+    right.push([round1(px - unitX * halfGap), round1(py - unitY * halfGap)]);
+  }
+  return { left, right };
+}
+
 function objectDistanceWorld(obj, x, y) {
   if (!obj || typeof obj !== 'object') {
     return Number.POSITIVE_INFINITY;
   }
-  if (obj.type === 'wall_polyline') {
+  if (isPolylineObject(obj)) {
     const points = Array.isArray(obj.points) ? obj.points : [];
     if (points.length < 2) {
       return Number.POSITIVE_INFINITY;
@@ -2276,7 +2585,7 @@ function getObjectAnchorWorld(obj) {
   if (!obj || typeof obj !== 'object') {
     return { x: 0, y: 0 };
   }
-  if (obj.type === 'wall_polyline') {
+  if (isPolylineObject(obj)) {
     const points = Array.isArray(obj.points) ? obj.points : [];
     if (points.length >= 2) {
       const p1 = points[0];
@@ -2297,7 +2606,7 @@ function moveObjectToWorld(obj, targetX, targetY) {
   if (!obj || typeof obj !== 'object') {
     return;
   }
-  if (obj.type === 'wall_polyline') {
+  if (isPolylineObject(obj)) {
     const points = Array.isArray(obj.points) ? obj.points : [];
     if (points.length < 2) {
       return;
@@ -2319,13 +2628,27 @@ function moveObjectToWorld(obj, targetX, targetY) {
     }
     return;
   }
+  if (obj.type === 'sticky_pad') {
+    const prevX = toFinite(obj.x, targetX);
+    const prevY = toFinite(obj.y, targetY);
+    const dx = round1(targetX - prevX);
+    const dy = round1(targetY - prevY);
+    const pathA = Array.isArray(obj.pathA) ? obj.pathA : [prevX, prevY];
+    const pathB = Array.isArray(obj.pathB) ? obj.pathB : [prevX + 2.4, prevY];
+    obj.pathA = [round1(toFinite(pathA[0], prevX) + dx), round1(toFinite(pathA[1], prevY) + dy)];
+    obj.pathB = [round1(toFinite(pathB[0], prevX) + dx), round1(toFinite(pathB[1], prevY) + dy)];
+  }
   obj.x = round1(targetX);
   obj.y = round1(targetY);
 }
 
 function supportsRotationHandle(obj) {
   const type = String(obj && obj.type ? obj.type : '');
-  return type === 'box_block' || type === 'diamond_block' || type === 'rotor';
+  return type === 'box_block'
+    || type === 'diamond_block'
+    || type === 'rotor'
+    || type === 'domino_block'
+    || type === 'sticky_pad';
 }
 
 function getRotorEndHandlesWorld(obj) {
@@ -2367,7 +2690,12 @@ function getBoxResizeHandlesWorld(obj) {
     return [];
   }
   const type = String(obj.type || '');
-  if (type !== 'box_block' && type !== 'diamond_block' && type !== 'hammer' && type !== 'fan') {
+  if (type !== 'box_block'
+    && type !== 'diamond_block'
+    && type !== 'hammer'
+    && type !== 'fan'
+    && type !== 'sticky_pad'
+    && type !== 'domino_block') {
     return [];
   }
   const cx = toFinite(obj.x, 0);
@@ -2399,7 +2727,7 @@ function getCircleHandlesWorld(obj) {
     return [];
   }
   const type = String(obj.type || '');
-  if (type !== 'peg_circle' && type !== 'portal' && type !== 'burst_bumper') {
+  if (type !== 'peg_circle' && type !== 'portal' && type !== 'burst_bumper' && type !== 'physics_ball') {
     return [];
   }
   const cx = toFinite(obj.x, 0);
@@ -2430,6 +2758,21 @@ function getHammerDirectionHandleWorld(obj) {
   };
 }
 
+function getStickyPathHandleWorld(obj) {
+  if (!obj || obj.type !== 'sticky_pad') {
+    return null;
+  }
+  const pathB = Array.isArray(obj.pathB) ? obj.pathB : null;
+  const bx = pathB ? toFinite(pathB[0], NaN) : NaN;
+  const by = pathB ? toFinite(pathB[1], NaN) : NaN;
+  if (!Number.isFinite(bx) || !Number.isFinite(by)) {
+    const fallbackX = toFinite(obj.x, 0) + 2.4;
+    const fallbackY = toFinite(obj.y, 0);
+    return { kind: 'sticky_target', x: round1(fallbackX), y: round1(fallbackY) };
+  }
+  return { kind: 'sticky_target', x: round1(bx), y: round1(by) };
+}
+
 function drawRingHandle(ctx, x, y, radiusPx, style = {}) {
   const fill = style.fill || '#0b1530';
   const stroke = style.stroke || '#ffd44d';
@@ -2453,10 +2796,10 @@ function findSelectedHandle(point, layout) {
   const thresholdWorld = Math.max(0.08, 9 / Math.max(0.001, layout.scale));
   const type = String(obj.type || '');
   const centerDist = Math.hypot(point.x - toFinite(obj.x, 0), point.y - toFinite(obj.y, 0));
-  if (type !== 'wall_polyline' && centerDist <= thresholdWorld * 0.9) {
+  if (type !== 'wall_polyline' && type !== 'wall_corridor_polyline' && type !== 'wall_corridor_segment' && centerDist <= thresholdWorld * 0.9) {
     return { kind: 'move_anchor' };
   }
-  if (type === 'wall_polyline') {
+  if (type === 'wall_polyline' || type === 'wall_corridor_polyline' || type === 'wall_corridor_segment') {
     const points = Array.isArray(obj.points) ? obj.points : [];
     for (let index = 0; index < points.length; index += 1) {
       const px = toFinite(points[index] && points[index][0], NaN);
@@ -2492,6 +2835,15 @@ function findSelectedHandle(point, layout) {
       const dist = Math.hypot(point.x - hammerHandle.x, point.y - hammerHandle.y);
       if (dist <= thresholdWorld) {
         return { kind: 'hammer_dir' };
+      }
+    }
+  }
+  if (type === 'sticky_pad') {
+    const stickyHandle = getStickyPathHandleWorld(obj);
+    if (stickyHandle) {
+      const dist = Math.hypot(point.x - stickyHandle.x, point.y - stickyHandle.y);
+      if (dist <= thresholdWorld) {
+        return { kind: 'sticky_target' };
       }
     }
   }
@@ -2534,6 +2886,64 @@ function findStageHandle(point, layout) {
   return null;
 }
 
+function fanZoneConfig(obj) {
+  if (!obj || obj.type !== 'fan') {
+    return null;
+  }
+  const originX = toFinite(obj.x, 0);
+  const originY = toFinite(obj.y, 0);
+  const dirRad = (Math.PI / 180) * normalizeDeg(toFinite(obj.dirDeg, 0));
+  const length = Math.max(0.2, toFinite(obj.hitDistance, 2.8));
+  const halfWidth = Math.max(
+    0.2,
+    Math.max(
+      toFinite(obj.triggerRadius, 0.9),
+      toFinite(obj.width, 0.95) * 1.2,
+    ),
+  );
+  return { originX, originY, dirRad, length, halfWidth };
+}
+
+function drawFanWaveZone(ctx, layout, zone, options = {}) {
+  if (!ctx || !layout || !zone) {
+    return;
+  }
+  const origin = worldToCanvas(layout, zone.originX, zone.originY);
+  const lengthPx = Math.max(6, zone.length * layout.scale);
+  const halfWidthPx = Math.max(4, zone.halfWidth * layout.scale);
+  const alpha = Number.isFinite(options.alpha) ? options.alpha : 1;
+  const fillStyle = options.fillStyle || `rgba(127, 217, 255, ${0.13 * alpha})`;
+  const strokeStyle = options.strokeStyle || `rgba(143, 230, 255, ${0.9 * alpha})`;
+  const waveStroke = options.waveStroke || `rgba(176, 240, 255, ${0.58 * alpha})`;
+  const waveCount = Math.max(2, Math.floor(lengthPx / 22));
+  ctx.save();
+  ctx.translate(origin.x, origin.y);
+  ctx.rotate(zone.dirRad);
+  ctx.fillStyle = fillStyle;
+  ctx.strokeStyle = strokeStyle;
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.rect(0, -halfWidthPx, lengthPx, halfWidthPx * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  for (let lane = -1; lane <= 1; lane += 1) {
+    const laneY = lane * (halfWidthPx * 0.55);
+    const waveAmp = Math.max(2, halfWidthPx * 0.14);
+    const step = lengthPx / waveCount;
+    ctx.moveTo(0, laneY);
+    for (let i = 0; i <= waveCount; i += 1) {
+      const x = i * step;
+      const wave = Math.sin((i / waveCount) * Math.PI * 2.6) * waveAmp;
+      ctx.lineTo(x, laneY + wave);
+    }
+  }
+  ctx.strokeStyle = waveStroke;
+  ctx.lineWidth = 1.05;
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawObjectOnCanvas(ctx, layout, obj, selected) {
   if (!selected && isBoundaryWallObject(obj)) {
     return;
@@ -2544,17 +2954,31 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
   ctx.fillStyle = selected ? 'rgba(255, 212, 77, 0.25)' : 'rgba(110, 180, 255, 0.22)';
   ctx.lineWidth = selected ? 3 : 2;
 
-  if (obj.type === 'wall_polyline') {
+  if (isPolylineObject(obj)) {
     const points = Array.isArray(obj.points) ? obj.points : [];
     if (points.length >= 2) {
-      const first = worldToCanvas(layout, points[0][0], points[0][1]);
-      ctx.beginPath();
-      ctx.moveTo(first.x, first.y);
-      for (let index = 1; index < points.length; index += 1) {
-        const next = worldToCanvas(layout, points[index][0], points[index][1]);
-        ctx.lineTo(next.x, next.y);
+      const drawPath = (pathPoints) => {
+        const first = worldToCanvas(layout, pathPoints[0][0], pathPoints[0][1]);
+        ctx.beginPath();
+        ctx.moveTo(first.x, first.y);
+        for (let index = 1; index < pathPoints.length; index += 1) {
+          const next = worldToCanvas(layout, pathPoints[index][0], pathPoints[index][1]);
+          ctx.lineTo(next.x, next.y);
+        }
+        ctx.stroke();
+      };
+      if (obj.type === 'wall_corridor_polyline' || obj.type === 'wall_corridor_segment') {
+        const gap = corridorGapForObject(obj, getCorridorGapInput());
+        const sides = buildCorridorSides(points, gap);
+        if (sides.left.length >= 2) {
+          drawPath(sides.left);
+        }
+        if (sides.right.length >= 2) {
+          drawPath(sides.right);
+        }
+      } else {
+        drawPath(points);
       }
-      ctx.stroke();
       if (selected) {
         for (let index = 0; index < points.length; index += 1) {
           const point = worldToCanvas(layout, points[index][0], points[index][1]);
@@ -2571,7 +2995,7 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
   }
 
   const center = worldToCanvas(layout, obj.x, obj.y);
-  if (obj.type === 'peg_circle' || obj.type === 'portal' || obj.type === 'burst_bumper') {
+  if (obj.type === 'peg_circle' || obj.type === 'portal' || obj.type === 'burst_bumper' || obj.type === 'physics_ball') {
     const radius = Math.max(0.08, toFinite(obj.radius, 0.6)) * layout.scale;
     if (obj.type === 'burst_bumper') {
       const layers = Math.max(1, Math.floor(toFinite(obj.layers, 3)));
@@ -2637,6 +3061,45 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
   ctx.rect(-drawWidth, -drawHeight, drawWidth * 2, drawHeight * 2);
   ctx.fill();
   ctx.stroke();
+  if (obj.type === 'fan') {
+    const zone = fanZoneConfig(obj);
+    if (zone) {
+      ctx.restore();
+      drawFanWaveZone(ctx, layout, zone, {
+        alpha: selected ? 1 : 0.72,
+      });
+      ctx.save();
+      ctx.translate(center.x, center.y);
+      ctx.rotate(rad);
+    }
+  }
+  if (obj.type === 'sticky_pad') {
+    const target = getStickyPathHandleWorld(obj);
+    if (target) {
+      const start = worldToCanvas(layout, toFinite(obj.x, 0), toFinite(obj.y, 0));
+      const end = worldToCanvas(layout, target.x, target.y);
+      ctx.restore();
+      ctx.save();
+      ctx.strokeStyle = selected ? '#ffaad9' : 'rgba(255, 170, 217, 0.6)';
+      ctx.lineWidth = selected ? 1.5 : 1.2;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      if (selected) {
+        drawRingHandle(ctx, end.x, end.y, 5.2, {
+          fill: 'rgba(8,16,36,0.95)',
+          stroke: '#ffaad9',
+        });
+      }
+      ctx.restore();
+      ctx.save();
+      ctx.translate(center.x, center.y);
+      ctx.rotate(rad);
+    }
+  }
 
   if (selected && supportsRotationHandle(obj)) {
     const handleLength = (Math.max(width, height) + 0.65) * layout.scale;
@@ -2694,26 +3157,14 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
       const targetX = toFinite(obj.x, 0) + Math.cos(dir) * distWorld;
       const targetY = toFinite(obj.y, 0) + Math.sin(dir) * distWorld;
       if (isFan) {
-        const halfW = Math.max(
-          0.2,
-          Math.max(
-            toFinite(obj.triggerRadius, 0.9),
-            toFinite(obj.width, 0.95) * 1.2,
-          ),
-        );
-        const pStart = worldToCanvas(layout, toFinite(obj.x, 0), toFinite(obj.y, 0));
-        const pEnd = worldToCanvas(layout, targetX, targetY);
-        const zoneLength = Math.max(8, Math.hypot(pEnd.x - pStart.x, pEnd.y - pStart.y));
-        const halfWPx = Math.max(4, halfW * layout.scale);
-        ctx.translate(pStart.x, pStart.y);
-        ctx.rotate(dir);
-        ctx.fillStyle = 'rgba(127, 217, 255, 0.13)';
-        ctx.strokeStyle = 'rgba(143, 230, 255, 0.88)';
-        ctx.lineWidth = 1.4;
-        ctx.beginPath();
-        ctx.rect(0, -halfWPx, zoneLength, halfWPx * 2);
-        ctx.fill();
-        ctx.stroke();
+        const zone = fanZoneConfig(obj);
+        if (zone) {
+          drawFanWaveZone(ctx, layout, zone, {
+            alpha: 1,
+            strokeStyle: 'rgba(143, 230, 255, 0.98)',
+            waveStroke: 'rgba(189, 246, 255, 0.74)',
+          });
+        }
       } else {
         const ghost = worldToCanvas(layout, targetX, targetY);
         const halfW = Math.max(0.08, toFinite(obj.width, 0.9)) * layout.scale;
@@ -2728,6 +3179,39 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
         ctx.fill();
         ctx.stroke();
       }
+      ctx.restore();
+    }
+  }
+  if (selected && obj.type === 'sticky_pad') {
+    const target = getStickyPathHandleWorld(obj);
+    if (target) {
+      const start = worldToCanvas(layout, toFinite(obj.x, 0), toFinite(obj.y, 0));
+      const end = worldToCanvas(layout, target.x, target.y);
+      ctx.save();
+      ctx.strokeStyle = '#ffaad9';
+      ctx.lineWidth = 1.7;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      drawRingHandle(ctx, end.x, end.y, 5.2, {
+        fill: 'rgba(8,16,36,0.95)',
+        stroke: '#ffaad9',
+      });
+      const halfW = Math.max(0.08, toFinite(obj.width, 1.1)) * layout.scale;
+      const halfH = Math.max(0.05, toFinite(obj.height, 0.24)) * layout.scale;
+      const rotation = (Math.PI / 180) * normalizeDeg(toFinite(obj.rotation, 0));
+      ctx.translate(end.x, end.y);
+      ctx.rotate(rotation);
+      ctx.fillStyle = 'rgba(255, 143, 201, 0.18)';
+      ctx.strokeStyle = '#ffaad9';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.rect(-halfW, -halfH, halfW * 2, halfH * 2);
+      ctx.fill();
+      ctx.stroke();
       ctx.restore();
     }
   }
@@ -2770,7 +3254,7 @@ function drawCreateDragPreview(ctx, layout, drag) {
     return;
   }
   ctx.save();
-  if (tool === 'peg_circle' || tool === 'portal' || tool === 'burst_bumper') {
+  if (tool === 'peg_circle' || tool === 'portal' || tool === 'burst_bumper' || tool === 'physics_ball') {
     const center = worldToCanvas(layout, start.x, start.y);
     const radiusWorld = Math.max(0.08, Math.hypot(current.x - start.x, current.y - start.y));
     const radius = radiusWorld * layout.scale;
@@ -2819,7 +3303,7 @@ function drawCreateDragPreview(ctx, layout, drag) {
     ctx.restore();
     return;
   }
-  if (tool === 'wall_segment') {
+  if (tool === 'wall_segment' || tool === 'wall_corridor_segment') {
     let target = { x: current.x, y: current.y };
     if (drag.shiftKey) {
       target = snapPointBy45(start, target);
@@ -2829,10 +3313,31 @@ function drawCreateDragPreview(ctx, layout, drag) {
     ctx.strokeStyle = OBJECT_COLOR_PRESET.wall;
     ctx.lineWidth = 2.6;
     ctx.setLineDash([8, 5]);
-    ctx.beginPath();
-    ctx.moveTo(p1.x, p1.y);
-    ctx.lineTo(p2.x, p2.y);
-    ctx.stroke();
+    if (tool === 'wall_corridor_segment') {
+      const gap = getCorridorGapInput();
+      const dx = target.x - start.x;
+      const dy = target.y - start.y;
+      const length = Math.hypot(dx, dy);
+      if (length > 0.0001) {
+        const nx = (-dy / length) * (gap / 2);
+        const ny = (dx / length) * (gap / 2);
+        const left1 = worldToCanvas(layout, start.x + nx, start.y + ny);
+        const left2 = worldToCanvas(layout, target.x + nx, target.y + ny);
+        const right1 = worldToCanvas(layout, start.x - nx, start.y - ny);
+        const right2 = worldToCanvas(layout, target.x - nx, target.y - ny);
+        ctx.beginPath();
+        ctx.moveTo(left1.x, left1.y);
+        ctx.lineTo(left2.x, left2.y);
+        ctx.moveTo(right1.x, right1.y);
+        ctx.lineTo(right2.x, right2.y);
+        ctx.stroke();
+      }
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+    }
     ctx.setLineDash([]);
     drawRingHandle(ctx, p1.x, p1.y, 4.8, { fill: 'rgba(8,16,36,0.95)', stroke: '#ffd44d' });
     drawRingHandle(ctx, p2.x, p2.y, 4.8, { fill: 'rgba(8,16,36,0.95)', stroke: '#ffd44d' });
@@ -2864,8 +3369,16 @@ function drawCreateDragPreview(ctx, layout, drag) {
   const top = Math.min(p1.y, p2.y);
   const width = Math.abs(p2.x - p1.x);
   const height = Math.abs(p2.y - p1.y);
-  ctx.fillStyle = tool === 'hammer' ? 'rgba(255, 165, 87, 0.22)' : 'rgba(126, 208, 255, 0.2)';
-  ctx.strokeStyle = tool === 'hammer' ? '#ffa557' : '#8dd6ff';
+  if (tool === 'sticky_pad') {
+    ctx.fillStyle = 'rgba(255, 143, 201, 0.22)';
+    ctx.strokeStyle = '#ff8fc9';
+  } else if (tool === 'domino_block') {
+    ctx.fillStyle = 'rgba(255, 103, 190, 0.2)';
+    ctx.strokeStyle = '#ff67be';
+  } else {
+    ctx.fillStyle = tool === 'hammer' ? 'rgba(255, 165, 87, 0.22)' : 'rgba(126, 208, 255, 0.2)';
+    ctx.strokeStyle = tool === 'hammer' ? '#ffa557' : '#8dd6ff';
+  }
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.rect(left, top, width, height);
@@ -2974,14 +3487,37 @@ function drawMakerCanvas() {
   if (editorState.pendingWallStart) {
     const p = worldToCanvas(layout, editorState.pendingWallStart.x, editorState.pendingWallStart.y);
     if (editorState.canvasHoverWorld) {
-      const hover = worldToCanvas(layout, editorState.canvasHoverWorld.x, editorState.canvasHoverWorld.y);
+      const hoverWorld = { x: editorState.canvasHoverWorld.x, y: editorState.canvasHoverWorld.y };
+      const hover = worldToCanvas(layout, hoverWorld.x, hoverWorld.y);
       ctx.strokeStyle = '#ffd44d';
       ctx.lineWidth = 1.4;
       ctx.setLineDash([6, 4]);
-      ctx.beginPath();
-      ctx.moveTo(p.x, p.y);
-      ctx.lineTo(hover.x, hover.y);
-      ctx.stroke();
+      if (editorState.pendingWallType === 'wall_corridor_polyline') {
+        const start = editorState.pendingWallStart;
+        const dx = hoverWorld.x - toFinite(start.x, 0);
+        const dy = hoverWorld.y - toFinite(start.y, 0);
+        const length = Math.hypot(dx, dy);
+        if (length > 0.0001) {
+          const gap = getCorridorGapInput();
+          const nx = (-dy / length) * (gap / 2);
+          const ny = (dx / length) * (gap / 2);
+          const leftStart = worldToCanvas(layout, toFinite(start.x, 0) + nx, toFinite(start.y, 0) + ny);
+          const leftEnd = worldToCanvas(layout, hoverWorld.x + nx, hoverWorld.y + ny);
+          const rightStart = worldToCanvas(layout, toFinite(start.x, 0) - nx, toFinite(start.y, 0) - ny);
+          const rightEnd = worldToCanvas(layout, hoverWorld.x - nx, hoverWorld.y - ny);
+          ctx.beginPath();
+          ctx.moveTo(leftStart.x, leftStart.y);
+          ctx.lineTo(leftEnd.x, leftEnd.y);
+          ctx.moveTo(rightStart.x, rightStart.y);
+          ctx.lineTo(rightEnd.x, rightEnd.y);
+          ctx.stroke();
+        }
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(hover.x, hover.y);
+        ctx.stroke();
+      }
       ctx.setLineDash([]);
     }
     ctx.fillStyle = '#ffd44d';
@@ -3018,22 +3554,28 @@ function drawMakerCanvas() {
       (item) =>
         item &&
         item.oid === editorState.pendingHammerOid &&
-        (item.type === 'hammer' || item.type === 'fan'),
+        (item.type === 'hammer' || item.type === 'fan' || item.type === 'sticky_pad'),
     );
     if (directional) {
       const isFan = directional.type === 'fan';
+      const isSticky = directional.type === 'sticky_pad';
       const center = worldToCanvas(layout, directional.x, directional.y);
       const hoverWorld = editorState.canvasHoverWorld;
+      const pathB = Array.isArray(directional.pathB) ? directional.pathB : null;
+      const stickyTargetX = pathB ? toFinite(pathB[0], toFinite(directional.x, 0) + 2.4) : toFinite(directional.x, 0) + 2.4;
+      const stickyTargetY = pathB ? toFinite(pathB[1], toFinite(directional.y, 0)) : toFinite(directional.y, 0);
       const baseRad = (Math.PI / 180) * toFinite(directional.dirDeg, isFan ? 0 : 90);
       const targetWorld = hoverWorld
         ? { x: hoverWorld.x, y: hoverWorld.y }
-        : {
+        : (isSticky
+          ? { x: stickyTargetX, y: stickyTargetY }
+          : {
             x: toFinite(directional.x, 0) + Math.cos(baseRad) * Math.max(0.2, toFinite(directional.hitDistance, isFan ? 2.8 : 1)),
             y: toFinite(directional.y, 0) + Math.sin(baseRad) * Math.max(0.2, toFinite(directional.hitDistance, isFan ? 2.8 : 1)),
-          };
+          });
       const target = worldToCanvas(layout, targetWorld.x, targetWorld.y);
       ctx.save();
-      ctx.strokeStyle = isFan ? '#8fe6ff' : '#9fd7ff';
+      ctx.strokeStyle = isSticky ? '#ffaad9' : (isFan ? '#8fe6ff' : '#9fd7ff');
       ctx.lineWidth = 1.8;
       ctx.setLineDash([6, 4]);
       ctx.beginPath();
@@ -3043,7 +3585,7 @@ function drawMakerCanvas() {
       ctx.setLineDash([]);
       drawRingHandle(ctx, target.x, target.y, 5.2, {
         fill: 'rgba(8,16,36,0.94)',
-        stroke: isFan ? '#8fe6ff' : '#9fd7ff',
+        stroke: isSticky ? '#ffaad9' : (isFan ? '#8fe6ff' : '#9fd7ff'),
         lineWidth: 1.6,
       });
       const dir = Math.atan2(target.y - center.y, target.x - center.x);
@@ -3057,21 +3599,26 @@ function drawMakerCanvas() {
       const hitX = toFinite(directional.x, 0) + Math.cos(dir) * distWorld;
       const hitY = toFinite(directional.y, 0) + Math.sin(dir) * distWorld;
       if (isFan) {
-        const halfW = Math.max(
-          0.2,
-          Math.max(
-            toFinite(directional.triggerRadius, 0.9),
-            toFinite(directional.width, 0.95) * 1.2,
-          ),
-        ) * layout.scale;
-        const zoneLength = Math.max(6, distWorld * layout.scale);
-        ctx.translate(center.x, center.y);
-        ctx.rotate(dir);
-        ctx.fillStyle = 'rgba(127, 217, 255, 0.13)';
-        ctx.strokeStyle = 'rgba(143, 230, 255, 0.88)';
-        ctx.lineWidth = 1.5;
+        const zone = fanZoneConfig(directional);
+        if (zone) {
+          drawFanWaveZone(ctx, layout, zone, {
+            alpha: 1,
+            strokeStyle: 'rgba(143, 230, 255, 0.98)',
+            waveStroke: 'rgba(189, 246, 255, 0.74)',
+          });
+        }
+      } else if (isSticky) {
+        const ghost = worldToCanvas(layout, targetWorld.x, targetWorld.y);
+        const halfW = Math.max(0.08, toFinite(directional.width, 1.1)) * layout.scale;
+        const halfH = Math.max(0.05, toFinite(directional.height, 0.24)) * layout.scale;
+        const rotation = (Math.PI / 180) * normalizeDeg(toFinite(directional.rotation, 0));
+        ctx.translate(ghost.x, ghost.y);
+        ctx.rotate(rotation);
+        ctx.fillStyle = 'rgba(255, 143, 201, 0.2)';
+        ctx.strokeStyle = '#ffaad9';
+        ctx.lineWidth = 1.45;
         ctx.beginPath();
-        ctx.rect(0, -halfW, zoneLength, halfW * 2);
+        ctx.rect(-halfW, -halfH, halfW * 2, halfH * 2);
         ctx.fill();
         ctx.stroke();
       } else {
@@ -3216,7 +3763,7 @@ function updateCanvasHoverPoint(event) {
   if (!point) {
     return;
   }
-  if (selectedTool() === 'wall_polyline' && editorState.pendingWallStart && event.shiftKey) {
+  if (isPolylineTool(selectedTool()) && editorState.pendingWallStart && event.shiftKey) {
     editorState.canvasHoverWorld = snapPointBy45(editorState.pendingWallStart, point);
     return;
   }
@@ -3298,6 +3845,14 @@ function beginHandleDrag(index, handle) {
   if (handle.kind === 'hammer_dir') {
     editorState.dragState = {
       type: 'hammer_dir',
+      index,
+      moved: false,
+    };
+    return true;
+  }
+  if (handle.kind === 'sticky_target') {
+    editorState.dragState = {
+      type: 'sticky_target',
       index,
       moved: false,
     };
@@ -3416,6 +3971,36 @@ function createFanFromDrag(startWorld, endWorld) {
   };
 }
 
+function createStickyPadFromDrag(startWorld, endWorld) {
+  const mapJson = getMutableMap();
+  const goalY = Math.max(25, toFinite(mapJson.stage && mapJson.stage.goalY, 210) + 4);
+  const start = clampWorldPoint(startWorld, goalY);
+  const end = clampWorldPoint(endWorld, goalY);
+  const minSize = 0.08;
+  const fullWidth = Math.max(minSize, Math.abs(end.x - start.x));
+  const fullHeight = Math.max(minSize, Math.abs(end.y - start.y));
+  const centerX = round1((start.x + end.x) / 2);
+  const centerY = round1((start.y + end.y) / 2);
+  const halfWidth = round1(Math.max(0.12, fullWidth / 2));
+  const halfHeight = round1(Math.max(0.06, fullHeight / 2));
+  const pathB = [round1(clamp(centerX + Math.max(1.2, halfWidth * 2), 0.1, WORLD_WIDTH - 0.1)), centerY];
+  return {
+    oid: nextOid('sticky'),
+    type: 'sticky_pad',
+    x: centerX,
+    y: centerY,
+    width: halfWidth,
+    height: halfHeight,
+    rotation: 0,
+    speed: 1.1,
+    pauseMs: 220,
+    stickyTopOnly: true,
+    pathA: [centerX, centerY],
+    pathB,
+    color: OBJECT_COLOR_PRESET.sticky,
+  };
+}
+
 function setHammerDirectionAndDistance(obj, point, shiftKey = false) {
   if (!obj || (obj.type !== 'hammer' && obj.type !== 'fan')) {
     return false;
@@ -3443,6 +4028,26 @@ function setHammerDirectionAndDistance(obj, point, shiftKey = false) {
   return true;
 }
 
+function setStickyPathTarget(obj, point, shiftKey = false) {
+  if (!obj || obj.type !== 'sticky_pad') {
+    return false;
+  }
+  const ax = toFinite(obj.x, 0);
+  const ay = toFinite(obj.y, 0);
+  let target = {
+    x: toFinite(point && point.x, ax),
+    y: toFinite(point && point.y, ay),
+  };
+  if (shiftKey) {
+    target = snapPointBy45({ x: ax, y: ay }, target);
+  }
+  target.x = round1(clamp(target.x, 0.1, WORLD_WIDTH - 0.1));
+  target.y = round1(clamp(target.y, 0.1, Math.max(25, getGoalYWorld() + 4)));
+  obj.pathA = [round1(ax), round1(ay)];
+  obj.pathB = [target.x, target.y];
+  return true;
+}
+
 function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
   const mapJson = getMutableMap();
   const goalY = Math.max(25, toFinite(mapJson.stage && mapJson.stage.goalY, 210) + 4);
@@ -3466,11 +4071,30 @@ function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
       color: OBJECT_COLOR_PRESET.wall,
     };
   }
+  if (tool === 'wall_corridor_segment') {
+    if (distance < 0.06) {
+      return null;
+    }
+    let target = { x: end.x, y: end.y };
+    if (options.shiftKey === true) {
+      target = snapPointBy45(start, target);
+    }
+    return {
+      oid: nextOid('corridor'),
+      type: 'wall_corridor_polyline',
+      points: [[round1(start.x), round1(start.y)], [round1(target.x), round1(target.y)]],
+      gap: getCorridorGapInput(),
+      color: OBJECT_COLOR_PRESET.wall,
+    };
+  }
   if (tool === 'hammer') {
     return createHammerFromDrag(start, end);
   }
   if (tool === 'fan') {
     return createFanFromDrag(start, end);
+  }
+  if (tool === 'sticky_pad') {
+    return createStickyPadFromDrag(start, end);
   }
   if (tool === 'box_block' || tool === 'diamond_block') {
     const created = createObjectByTool(tool, (start.x + end.x) / 2, (start.y + end.y) / 2);
@@ -3505,7 +4129,18 @@ function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
     created.rotation = round1(normalizeDeg(angleDeg));
     return created;
   }
-  if (tool === 'peg_circle' || tool === 'portal' || tool === 'burst_bumper') {
+  if (tool === 'domino_block') {
+    const created = createObjectByTool(tool, (start.x + end.x) / 2, (start.y + end.y) / 2);
+    if (!created) {
+      return null;
+    }
+    created.x = round1((start.x + end.x) / 2);
+    created.y = round1((start.y + end.y) / 2);
+    created.width = round1(Math.max(0.05, Math.abs(dx) / 2));
+    created.height = round1(Math.max(0.08, Math.abs(dy) / 2));
+    return created;
+  }
+  if (tool === 'peg_circle' || tool === 'portal' || tool === 'burst_bumper' || tool === 'physics_ball') {
     const created = createObjectByTool(tool, start.x, start.y);
     if (!created) {
       return null;
@@ -3541,10 +4176,12 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
       return false;
     }
     const obj = objects[index];
-    if (!obj || (obj.type !== 'hammer' && obj.type !== 'fan')) {
+    if (!obj || !isDirectionalTargetObject(obj)) {
       return false;
     }
-    const updated = setHammerDirectionAndDistance(obj, point, !!(event && event.shiftKey));
+    const updated = obj.type === 'sticky_pad'
+      ? setStickyPathTarget(obj, point, !!(event && event.shiftKey))
+      : setHammerDirectionAndDistance(obj, point, !!(event && event.shiftKey));
     if (!updated) {
       return false;
     }
@@ -3611,7 +4248,7 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
     return false;
   }
   if (drag.type === 'radius') {
-    if (obj.type === 'peg_circle' || obj.type === 'portal' || obj.type === 'burst_bumper') {
+    if (obj.type === 'peg_circle' || obj.type === 'portal' || obj.type === 'burst_bumper' || obj.type === 'physics_ball') {
       const cx = toFinite(obj.x, 0);
       const cy = toFinite(obj.y, 0);
       const nextRadius = Math.max(0.08, Math.hypot(point.x - cx, point.y - cy));
@@ -3638,7 +4275,12 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
   }
   if (drag.type === 'size_x' || drag.type === 'size_y') {
     const type = String(obj.type || '');
-    if (type === 'box_block' || type === 'diamond_block' || type === 'hammer' || type === 'fan') {
+    if (type === 'box_block'
+      || type === 'diamond_block'
+      || type === 'hammer'
+      || type === 'fan'
+      || type === 'sticky_pad'
+      || type === 'domino_block') {
       const cx = toFinite(obj.x, 0);
       const cy = toFinite(obj.y, 0);
       const angleDeg = type === 'hammer' || type === 'fan'
@@ -3671,6 +4313,17 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
       return false;
     }
     const updated = setHammerDirectionAndDistance(obj, point, !!(event && event.shiftKey));
+    if (!updated) {
+      return false;
+    }
+    drag.moved = true;
+    return true;
+  }
+  if (drag.type === 'sticky_target') {
+    if (obj.type !== 'sticky_pad') {
+      return false;
+    }
+    const updated = setStickyPathTarget(obj, point, !!(event && event.shiftKey));
     if (!updated) {
       return false;
     }
@@ -3756,11 +4409,13 @@ function finishDrag() {
       } else {
         resetPendingPortal();
       }
-      if (tool === 'hammer' || tool === 'fan') {
+      if (tool === 'hammer' || tool === 'fan' || tool === 'sticky_pad') {
         editorState.pendingHammerOid = String(created.oid || '');
         updateMakerHint(tool === 'fan'
           ? '선풍기 생성 완료: 드래그/클릭으로 바람 방향·거리 설정'
-          : '해머 생성 완료: 드래그/클릭으로 타격 방향·이동거리 설정');
+          : (tool === 'sticky_pad'
+            ? '점착패드 생성 완료: 드래그/클릭으로 이동 목표점(B) 지정'
+            : '해머 생성 완료: 드래그/클릭으로 타격 방향·이동거리 설정'));
       } else {
         resetPendingHammer();
       }
@@ -3792,9 +4447,20 @@ function finishDrag() {
     } else if (dragType === 'spawn_move') {
       queueLiveDraftApply('공 시작점 이동');
     } else if (dragType === 'hammer_target') {
-      const isFan = draggedObject && draggedObject.type === 'fan';
-      queueLiveDraftApply(isFan ? '선풍기 방향/거리 설정' : '해머 타격 방향/거리 설정');
-      updateMakerHint(isFan ? '선풍기 바람 방향 설정 완료' : '해머 타격 방향 설정 완료');
+      const type = draggedObject && draggedObject.type;
+      if (type === 'fan') {
+        queueLiveDraftApply('선풍기 방향/거리 설정');
+        updateMakerHint('선풍기 바람 방향 설정 완료');
+      } else if (type === 'sticky_pad') {
+        queueLiveDraftApply('점착패드 이동 경로 설정');
+        updateMakerHint('점착패드 A↔B 이동 경로 설정 완료');
+      } else {
+        queueLiveDraftApply('해머 타격 방향/거리 설정');
+        updateMakerHint('해머 타격 방향 설정 완료');
+      }
+    } else if (dragType === 'sticky_target') {
+      queueLiveDraftApply('점착패드 이동 경로 설정');
+      updateMakerHint('점착패드 이동 목표점 수정 완료');
     } else {
       queueLiveDraftApply('오브젝트 드래그 수정');
     }
@@ -3836,16 +4502,21 @@ function handleMakerCanvasPointerDown(event) {
     drawMakerCanvas();
     return;
   }
-  if ((tool === 'hammer' || tool === 'fan') && editorState.pendingHammerOid) {
+  if ((tool === 'hammer' || tool === 'fan' || tool === 'sticky_pad') && editorState.pendingHammerOid) {
     const objects = getObjects();
     const index = objects.findIndex(
       (item) =>
         item &&
         item.oid === editorState.pendingHammerOid &&
-        (item.type === 'hammer' || item.type === 'fan'),
+        (item.type === 'hammer' || item.type === 'fan' || item.type === 'sticky_pad'),
     );
     if (index >= 0) {
-      rememberUndoState(objects[index] && objects[index].type === 'fan' ? '선풍기 방향 설정 시작' : '해머 타격 설정 시작');
+      const directionalType = objects[index] && objects[index].type;
+      rememberUndoState(
+        directionalType === 'fan'
+          ? '선풍기 방향 설정 시작'
+          : (directionalType === 'sticky_pad' ? '점착패드 경로 설정 시작' : '해머 타격 설정 시작'),
+      );
       editorState.selectedIndex = index;
       editorState.dragState = {
         type: 'hammer_target',
@@ -3855,9 +4526,13 @@ function handleMakerCanvasPointerDown(event) {
       updateObjectByDrag(point, event);
       editorState.suppressClickOnce = true;
       syncObjectList();
-      updateMakerHint(objects[index] && objects[index].type === 'fan'
-        ? '선풍기 바람 방향/거리 설정중'
-        : '해머 타격 방향/이동거리 설정중');
+      updateMakerHint(
+        directionalType === 'fan'
+          ? '선풍기 바람 방향/거리 설정중'
+          : (directionalType === 'sticky_pad'
+            ? '점착패드 이동 목표점 설정중'
+            : '해머 타격 방향/이동거리 설정중'),
+      );
       drawMakerCanvas();
       return;
     }
@@ -3878,6 +4553,8 @@ function handleMakerCanvasPointerDown(event) {
       updateMakerHint(selectedObj && selectedObj.type === 'fan'
         ? '선풍기 바람 방향/거리 드래그 편집중'
         : '해머 타격 방향/거리 드래그 편집중');
+    } else if (selectedHandle.kind === 'sticky_target') {
+      updateMakerHint('점착패드 이동 목표점 드래그 편집중');
     } else if (selectedHandle.kind === 'radius') {
       updateMakerHint('반지름 핸들 드래그 편집중');
     } else if (selectedHandle.kind === 'trigger_radius') {
@@ -3905,8 +4582,8 @@ function handleMakerCanvasPointerDown(event) {
     drawMakerCanvas();
     return;
   }
-  if (tool === 'wall_polyline') {
-    rememberUndoState('다점 벽선 추가');
+  if (isPolylineTool(tool)) {
+    rememberUndoState(`${toolDisplayName(tool)} 추가`);
     addObjectAt(tool, point.x, point.y, { snap45: event.shiftKey === true });
     editorState.suppressClickOnce = true;
     return;
@@ -3992,12 +4669,14 @@ function addObjectAt(tool, x, y, options = {}) {
     updateMakerHint('공 시작점 위치가 변경되었습니다.');
     return;
   }
-  if (tool === 'wall_polyline') {
+  if (isPolylineTool(tool)) {
+    const wallType = String(tool || 'wall_polyline');
     const useSnap45 = options.snap45 === true;
-    if (!editorState.pendingWallStart) {
+    if (!editorState.pendingWallStart || !editorState.pendingWallType || editorState.pendingWallType !== wallType) {
       editorState.pendingWallStart = { x, y };
       editorState.pendingWallOid = '';
-      updateMakerHint(`다점 벽선 시작점 설정됨 (${x}, ${y}) → 다음 클릭으로 점 연결`);
+      editorState.pendingWallType = wallType;
+      updateMakerHint(`${toolDisplayName(wallType)} 시작점 설정됨 (${x}, ${y}) → 다음 클릭으로 점 연결`);
       drawMakerCanvas();
       return;
     }
@@ -4014,9 +4693,10 @@ function addObjectAt(tool, x, y, options = {}) {
     }
     if (!editorState.pendingWallOid) {
       const created = {
-        oid: nextOid('wall'),
-        type: 'wall_polyline',
+        oid: wallType === 'wall_corridor_polyline' ? nextOid('corridor') : nextOid('wall'),
+        type: wallType === 'wall_corridor_polyline' ? 'wall_corridor_polyline' : 'wall_polyline',
         points: [[start.x, start.y], [endPoint.x, endPoint.y]],
+        gap: wallType === 'wall_corridor_polyline' ? getCorridorGapInput() : undefined,
         color: OBJECT_COLOR_PRESET.wall,
       };
       objects.push(created);
@@ -4024,18 +4704,22 @@ function addObjectAt(tool, x, y, options = {}) {
       editorState.selectedIndex = objects.length - 1;
     } else {
       const target = objects.find((item) => item && item.oid === editorState.pendingWallOid);
-      if (!target || target.type !== 'wall_polyline') {
+      if (!target || !isPolylineObject(target)) {
         editorState.pendingWallOid = '';
       }
       const targetWall = objects.find((item) => item && item.oid === editorState.pendingWallOid);
-      if (targetWall && Array.isArray(targetWall.points)) {
+      if (targetWall && isPolylineObject(targetWall) && Array.isArray(targetWall.points)) {
         targetWall.points.push([endPoint.x, endPoint.y]);
+        if (targetWall.type === 'wall_corridor_polyline' || targetWall.type === 'wall_corridor_segment') {
+          targetWall.gap = corridorGapForObject(targetWall, getCorridorGapInput());
+        }
         editorState.selectedIndex = objects.findIndex((item) => item === targetWall);
       } else {
         const created = {
-          oid: nextOid('wall'),
-          type: 'wall_polyline',
+          oid: wallType === 'wall_corridor_polyline' ? nextOid('corridor') : nextOid('wall'),
+          type: wallType === 'wall_corridor_polyline' ? 'wall_corridor_polyline' : 'wall_polyline',
           points: [[start.x, start.y], [endPoint.x, endPoint.y]],
+          gap: wallType === 'wall_corridor_polyline' ? getCorridorGapInput() : undefined,
           color: OBJECT_COLOR_PRESET.wall,
         };
         objects.push(created);
@@ -4044,7 +4728,7 @@ function addObjectAt(tool, x, y, options = {}) {
       }
     }
     editorState.pendingWallStart = { x: endPoint.x, y: endPoint.y };
-    updateMakerHint('다점 벽선 입력중: 클릭한 점을 계속 이어 그립니다. 우클릭 종료');
+    updateMakerHint(`${toolDisplayName(wallType)} 입력중: 클릭한 점을 계속 이어 그립니다. 우클릭 종료`);
   } else if (tool === 'portal') {
     const created = createObjectByTool(tool, x, y);
     if (!created) {
@@ -4074,16 +4758,20 @@ function addObjectAt(tool, x, y, options = {}) {
     if (tool !== 'portal') {
       resetPendingPortal();
     }
-    if (tool === 'hammer' || tool === 'fan') {
+    if (tool === 'hammer' || tool === 'fan' || tool === 'sticky_pad') {
       editorState.pendingHammerOid = String(created.oid || '');
-      updateMakerHint(tool === 'fan'
-        ? '선풍기 생성 완료: 드래그/클릭으로 바람 방향·거리 설정'
-        : '해머 생성 완료: 드래그/클릭으로 타격 방향·이동거리 설정');
+      updateMakerHint(
+        tool === 'fan'
+          ? '선풍기 생성 완료: 드래그/클릭으로 바람 방향·거리 설정'
+          : (tool === 'sticky_pad'
+            ? '점착패드 생성 완료: 드래그/클릭으로 이동 목표점(B) 지정'
+            : '해머 생성 완료: 드래그/클릭으로 타격 방향·이동거리 설정'),
+      );
     } else {
       resetPendingHammer();
     }
   }
-  if (tool !== 'wall_polyline') {
+  if (!isPolylineTool(tool)) {
     editorState.selectedIndex = objects.length - 1;
   }
   syncObjectList();
@@ -4621,7 +5309,7 @@ function setupEvents() {
     syncToolButtons();
     resetPendingWall();
     resetPendingPortal();
-    if (selectedTool() !== 'hammer' && selectedTool() !== 'fan') {
+    if (selectedTool() !== 'hammer' && selectedTool() !== 'fan' && selectedTool() !== 'sticky_pad') {
       resetPendingHammer();
     }
     cancelDrag();
@@ -4632,8 +5320,12 @@ function setupEvents() {
       updateMakerHint('공 시작점 모드: 클릭/드래그로 시작 위치를 지정');
     } else if (tool === 'wall_segment') {
       updateMakerHint('일반 벽선 모드: 드래그로 2점 벽 생성, Shift는 45도 스냅');
+    } else if (tool === 'wall_corridor_segment') {
+      updateMakerHint(`통로형 일반벽선 모드: 드래그 2점 생성, 간격=${getCorridorGapInput()}, Shift는 45도 스냅`);
     } else if (tool === 'wall_polyline') {
       updateMakerHint('다점 벽선 모드: 1,2,3... 클릭한 점을 이어 벽 생성, 우클릭 종료');
+    } else if (tool === 'wall_corridor_polyline') {
+      updateMakerHint(`통로형 다절벽선 모드: 1,2,3... 점 연결, 간격=${getCorridorGapInput()}, 우클릭 종료`);
     } else if (tool === 'portal') {
       updateMakerHint('포털 모드: 드래그로 반경 지정, 두 번 배치하면 A/B 자동 연결');
     } else if (tool === 'hammer') {
@@ -4644,12 +5336,29 @@ function setupEvents() {
       updateMakerHint(editorState.pendingHammerOid
         ? '선풍기 방향 설정 대기: 드래그/클릭으로 바람 방향·거리 지정'
         : '선풍기 모드: 드래그로 크기 생성 후, 점선 단계에서 방향·거리 지정');
+    } else if (tool === 'sticky_pad') {
+      updateMakerHint(editorState.pendingHammerOid
+        ? '점착패드 이동 경로 설정 대기: 드래그/클릭으로 목표점(B) 지정'
+        : '점착패드 모드: 드래그로 크기 생성 후, 점선 단계에서 목표점(B) 지정');
+    } else if (tool === 'domino_block') {
+      updateMakerHint('도미노 블럭 모드: 드래그로 크기 생성 (동적 물리)');
+    } else if (tool === 'physics_ball') {
+      updateMakerHint('물리 공 모드: 드래그로 반지름 생성 (동적 물리)');
     } else if (tool === 'rotor') {
       updateMakerHint('회전 바 모드: 드래그로 길이/방향 지정 생성');
     } else {
       updateMakerHint(`${toolDisplayName(tool)} 모드: 드래그로 크기를 지정해 생성`);
     }
     drawMakerCanvas();
+  });
+
+  bindEvent(elements.corridorGapInput, 'input', () => {
+    const gap = getCorridorGapInput();
+    const tool = selectedTool();
+    if (tool === 'wall_corridor_segment' || tool === 'wall_corridor_polyline') {
+      updateMakerHint(`${toolDisplayName(tool)} 간격: ${gap}`);
+      drawMakerCanvas();
+    }
   });
 
   if (Array.isArray(elements.makerToolButtons)) {
@@ -4709,11 +5418,11 @@ function setupEvents() {
   bindEvent(elements.makerCanvas, 'contextmenu', (event) => {
     event.preventDefault();
     const tool = selectedTool();
-    if (tool === 'wall_polyline' && editorState.pendingWallStart) {
+    if (isPolylineTool(tool) && editorState.pendingWallStart) {
       resetPendingWall();
-      updateMakerHint('다점 벽선 입력 종료');
+      updateMakerHint(`${toolDisplayName(tool)} 입력 종료`);
       drawMakerCanvas();
-      setStatus('다점 벽선 입력을 종료했습니다.');
+      setStatus(`${toolDisplayName(tool)} 입력을 종료했습니다.`);
       return;
     }
     if (tool === 'portal' && editorState.pendingPortalOid) {
@@ -4723,11 +5432,15 @@ function setupEvents() {
       setStatus('포털 연결 대기를 취소했습니다.');
       return;
     }
-    if ((tool === 'hammer' || tool === 'fan') && editorState.pendingHammerOid) {
+    if ((tool === 'hammer' || tool === 'fan' || tool === 'sticky_pad') && editorState.pendingHammerOid) {
       resetPendingHammer();
-      updateMakerHint(tool === 'fan' ? '선풍기 방향 설정 입력 취소' : '해머 방향 설정 입력 취소');
+      updateMakerHint(tool === 'fan'
+        ? '선풍기 방향 설정 입력 취소'
+        : (tool === 'sticky_pad' ? '점착패드 목표점 설정 입력 취소' : '해머 방향 설정 입력 취소'));
       drawMakerCanvas();
-      setStatus(tool === 'fan' ? '선풍기 방향 설정 대기를 취소했습니다.' : '해머 방향 설정 대기를 취소했습니다.');
+      setStatus(tool === 'fan'
+        ? '선풍기 방향 설정 대기를 취소했습니다.'
+        : (tool === 'sticky_pad' ? '점착패드 목표점 설정 대기를 취소했습니다.' : '해머 방향 설정 대기를 취소했습니다.'));
       return;
     }
     setSelectedTool('select');
