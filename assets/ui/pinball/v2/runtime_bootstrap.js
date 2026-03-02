@@ -1566,7 +1566,16 @@ async function start() {
   patchPhysicsStep();
   patchPhysicsCreateEntities();
   patchPhysicsGetEntities();
-  if (!Array.isArray(roulette._marbles) || roulette._marbles.length === 0) {
+  let marbles = Array.isArray(roulette._marbles) ? roulette._marbles : [];
+  if (marbles.length === 0 && control.candidates.length > 0) {
+    roulette.setMarbles(control.candidates.slice());
+    suppressMarbleCooldownIndicator();
+    alignSpawnToStage();
+    patchRendererMarbleImages();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    marbles = Array.isArray(roulette._marbles) ? roulette._marbles : [];
+  }
+  if (marbles.length === 0) {
     return { ok: false, reason: 'No marbles to start' };
   }
   setWinningRank(control.winningRank);
@@ -1578,7 +1587,7 @@ async function start() {
   roulette.start();
   postBridge('spinStarted', {
     mapId: control.mapId,
-    count: roulette._marbles.length,
+    count: marbles.length,
   });
   setStatus('running');
   return { ok: true };
@@ -1698,10 +1707,20 @@ async function init(payload = {}) {
     return mapResult;
   }
   if (control.candidates.length > 0) {
-    await setCandidates(control.candidates);
+    const candidateResult = await setCandidates(control.candidates);
+    if (!candidateResult || candidateResult.ok !== true) {
+      const reason = candidateResult && candidateResult.reason ? candidateResult.reason : 'set candidates failed';
+      setStatus(reason);
+      return { ok: false, reason };
+    }
   }
   if (payload.autoStart === true) {
-    await start();
+    const startResult = await start();
+    if (!startResult || startResult.ok !== true) {
+      const reason = startResult && startResult.reason ? startResult.reason : 'start failed';
+      setStatus(reason);
+      return { ok: false, reason };
+    }
   } else {
     await pause();
     setSkillsEnabled(false);

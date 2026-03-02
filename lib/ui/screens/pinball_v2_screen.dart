@@ -957,6 +957,7 @@ SOFTWARE.
       _didStart = true;
       _clearStartupTimer();
       _setStatus('게임 진행 중...', clearError: true);
+      _startWinnerMonitor();
     }
   }
 
@@ -1013,7 +1014,17 @@ SOFTWARE.
               _pageLoaded = true;
               _statusText = '엔진 연결 대기 중...';
             });
-            await _startPinball();
+            Future<void>.delayed(const Duration(milliseconds: 450), () async {
+              if (!mounted ||
+                  _isFinishing ||
+                  _didStart ||
+                  _isStarting ||
+                  _hasError ||
+                  !_pageLoaded) {
+                return;
+              }
+              await _startPinball();
+            });
           },
           onWebResourceError: (error) {
             if (error.isForMainFrame != true) {
