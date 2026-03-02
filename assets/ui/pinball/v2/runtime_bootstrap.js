@@ -91,6 +91,7 @@ const control = {
 const marbleImageState = {
   dataUrls: {},
   images: new Map(),
+  roundedImages: new Map(),
   revision: 0,
 };
 
@@ -259,6 +260,7 @@ function setPayloadMarbleImages(raw) {
   const normalized = normalizeImageDataUrlMap(raw);
   marbleImageState.dataUrls = normalized;
   marbleImageState.images.clear();
+  marbleImageState.roundedImages.clear();
   const names = Object.keys(normalized);
   for (let index = 0; index < names.length; index += 1) {
     const name = names[index];
@@ -286,6 +288,43 @@ function setPayloadMarbleImages(raw) {
     }
   }
   marbleImageState.revision += 1;
+}
+
+function buildRoundedMarbleImage(name, image) {
+  if (!image || image.complete !== true || Number(image.naturalWidth) <= 0 || Number(image.naturalHeight) <= 0) {
+    return null;
+  }
+  const key = typeof name === 'string' ? name.trim() : '';
+  if (key && marbleImageState.roundedImages.has(key)) {
+    return marbleImageState.roundedImages.get(key);
+  }
+  const sourceWidth = Math.max(1, Number(image.naturalWidth) || 1);
+  const sourceHeight = Math.max(1, Number(image.naturalHeight) || 1);
+  const size = Math.max(24, Math.min(sourceWidth, sourceHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    return image;
+  }
+  const scale = Math.max(size / sourceWidth, size / sourceHeight);
+  const drawWidth = sourceWidth * scale;
+  const drawHeight = sourceHeight * scale;
+  const dx = (size - drawWidth) / 2;
+  const dy = (size - drawHeight) / 2;
+  ctx.clearRect(0, 0, size, size);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+  ctx.closePath();
+  ctx.clip();
+  ctx.drawImage(image, dx, dy, drawWidth, drawHeight);
+  ctx.restore();
+  if (key) {
+    marbleImageState.roundedImages.set(key, canvas);
+  }
+  return canvas;
 }
 
 function setPayloadGoalMarkerImage(raw) {
@@ -325,11 +364,14 @@ function patchRendererMarbleImages() {
         }
         if (image.complete === true) {
           if (image.naturalWidth > 0) {
-            return image;
+            const rounded = buildRoundedMarbleImage(marbleName, image);
+            if (rounded) {
+              return rounded;
+            }
           }
           return renderer.__v2OriginalGetMarbleImage(name);
         }
-        return image;
+        return renderer.__v2OriginalGetMarbleImage(name);
       }
     }
     return renderer.__v2OriginalGetMarbleImage(name);
