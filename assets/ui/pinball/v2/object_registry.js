@@ -68,10 +68,30 @@ function toId(value, fallback) {
 
 function normalizeGoalMarkerImageSrc(value) {
   const raw = toId(value, '../../background/finish.png');
-  if (raw.includes('goal_line_tab1.svg')) {
-    return '../../background/finish.png';
+  const normalized = raw.includes('goal_line_tab1.svg')
+    ? '../../background/finish.png'
+    : raw;
+  let override = '';
+  try {
+    const candidate = typeof window !== 'undefined'
+      ? String(window.__v2GoalMarkerImageDataUrl || '').trim()
+      : '';
+    if (candidate.startsWith('data:image/')) {
+      override = candidate;
+    }
+  } catch (_) {
+    override = '';
   }
-  return raw;
+  if (override) {
+    const lower = normalized.toLowerCase();
+    const useOverride = lower.includes('goal_line_tab1')
+      || lower.includes('finish.png')
+      || lower.includes('/background/');
+    if (useOverride) {
+      return override;
+    }
+  }
+  return normalized;
 }
 
 function isTransparentColorString(value) {

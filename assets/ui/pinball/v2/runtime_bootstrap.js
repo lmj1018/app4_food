@@ -269,6 +269,19 @@ function setPayloadMarbleImages(raw) {
   marbleImageState.revision += 1;
 }
 
+function setPayloadGoalMarkerImage(raw) {
+  const src = typeof raw === 'string' ? raw.trim() : '';
+  if (src.startsWith('data:image/')) {
+    window.__v2GoalMarkerImageDataUrl = src;
+    return;
+  }
+  try {
+    delete window.__v2GoalMarkerImageDataUrl;
+  } catch (_) {
+    window.__v2GoalMarkerImageDataUrl = '';
+  }
+}
+
 function patchRendererMarbleImages() {
   const roulette = getRoulette();
   const renderer = roulette && roulette._renderer && typeof roulette._renderer === 'object'
@@ -1610,6 +1623,7 @@ async function init(payload = {}) {
     control.rng.setSeed(control.rngSeed);
   }
   setPayloadMarbleImages(payload.imageDataUrls);
+  setPayloadGoalMarkerImage(payload.goalLineImageDataUrl);
 
   const mapResult = await loadMapById(selectedMapId);
   if (!mapResult.ok) {

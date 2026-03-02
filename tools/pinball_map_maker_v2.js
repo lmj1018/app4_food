@@ -7638,6 +7638,10 @@ function setupEvents() {
   });
 
   bindEvent(elements.clearObjectsButton, 'click', () => {
+    const confirmed = window.confirm('맵의 오브젝트를 모두 삭제할까요? 이 작업은 되돌릴 수 있습니다(Ctrl+Z).');
+    if (!confirmed) {
+      return;
+    }
     rememberUndoState('오브젝트 전체삭제');
     clearAllObjects();
     syncObjectList();
