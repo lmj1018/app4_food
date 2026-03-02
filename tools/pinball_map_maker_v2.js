@@ -4440,6 +4440,42 @@ function drawFanWaveZone(ctx, layout, zone, options = {}) {
   ctx.restore();
 }
 
+function drawBottomBumperShapePath(ctx, halfWidth, halfHeight) {
+  const safeHalfWidth = Math.max(2.2, toFinite(halfWidth, 18));
+  const safeHalfHeight = Math.max(1.8, toFinite(halfHeight, 6));
+  const tailX = -safeHalfWidth;
+  const tipX = safeHalfWidth;
+  const midX = safeHalfWidth * 0.4;
+  ctx.beginPath();
+  ctx.moveTo(tailX, -safeHalfHeight * 0.7);
+  ctx.quadraticCurveTo(tailX - safeHalfWidth * 0.3, 0, tailX, safeHalfHeight * 0.7);
+  ctx.lineTo(midX, safeHalfHeight * 0.84);
+  ctx.quadraticCurveTo(tipX * 0.94, safeHalfHeight * 0.42, tipX, 0);
+  ctx.quadraticCurveTo(tipX * 0.94, -safeHalfHeight * 0.42, midX, -safeHalfHeight * 0.84);
+  ctx.closePath();
+}
+
+function drawBottomBumperPivotDetail(ctx, halfWidth, halfHeight) {
+  const safeHalfWidth = Math.max(2.2, toFinite(halfWidth, 18));
+  const safeHalfHeight = Math.max(1.8, toFinite(halfHeight, 6));
+  const pivotRadius = Math.max(2.2, safeHalfHeight * 0.36);
+  const innerRadius = Math.max(1.2, pivotRadius * 0.46);
+  const pivotX = -safeHalfWidth;
+  ctx.save();
+  ctx.fillStyle = 'rgba(8, 16, 36, 0.96)';
+  ctx.strokeStyle = 'rgba(205, 238, 255, 0.96)';
+  ctx.lineWidth = Math.max(1, Math.min(1.8, safeHalfHeight * 0.24));
+  ctx.beginPath();
+  ctx.arc(pivotX, 0, pivotRadius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(137, 209, 255, 0.97)';
+  ctx.beginPath();
+  ctx.arc(pivotX, 0, innerRadius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 function getGoalMarkerPreviewImage() {
   if (goalMarkerPreviewImage) {
     return goalMarkerPreviewImage;
@@ -4652,18 +4688,13 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
   ctx.translate(center.x, center.y);
   ctx.rotate(rad);
   if (obj.type === 'bottom_bumper') {
-    const tailX = -drawWidth;
-    const tipX = drawWidth;
-    const midX = drawWidth * 0.4;
-    ctx.beginPath();
-    ctx.moveTo(tailX, -drawHeight * 0.7);
-    ctx.quadraticCurveTo(tailX - drawWidth * 0.3, 0, tailX, drawHeight * 0.7);
-    ctx.lineTo(midX, drawHeight * 0.84);
-    ctx.quadraticCurveTo(tipX * 0.94, drawHeight * 0.42, tipX, 0);
-    ctx.quadraticCurveTo(tipX * 0.94, -drawHeight * 0.42, midX, -drawHeight * 0.84);
-    ctx.closePath();
+    if (obj.mirror === true) {
+      ctx.scale(-1, 1);
+    }
+    drawBottomBumperShapePath(ctx, drawWidth, drawHeight);
     ctx.fill();
     ctx.stroke();
+    drawBottomBumperPivotDetail(ctx, drawWidth, drawHeight);
   } else {
     ctx.beginPath();
     ctx.rect(-drawWidth, -drawHeight, drawWidth * 2, drawHeight * 2);
@@ -5006,10 +5037,22 @@ function drawCreateDragPreview(ctx, layout, drag) {
       : (tool === 'bottom_bumper' ? '#8fd5ff' : '#8dd6ff');
   }
   ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.rect(left, top, width, height);
-  ctx.fill();
-  ctx.stroke();
+  if (tool === 'bottom_bumper') {
+    const centerX = (left + left + width) / 2;
+    const centerY = (top + top + height) / 2;
+    ctx.save();
+    ctx.translate(centerX, centerY);
+    drawBottomBumperShapePath(ctx, width / 2, height / 2);
+    ctx.fill();
+    ctx.stroke();
+    drawBottomBumperPivotDetail(ctx, width / 2, height / 2);
+    ctx.restore();
+  } else {
+    ctx.beginPath();
+    ctx.rect(left, top, width, height);
+    ctx.fill();
+    ctx.stroke();
+  }
   ctx.restore();
 }
 

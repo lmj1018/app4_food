@@ -146,6 +146,21 @@ function normalizeRotationRad(value, fallback = 0) {
   return raw;
 }
 
+function drawBottomBumperPath(ctx, halfLen, halfHeight) {
+  const safeHalfLen = Math.max(0.08, toFiniteNumber(halfLen, 0.98));
+  const safeHalfHeight = Math.max(0.05, toFiniteNumber(halfHeight, 0.34));
+  const tailX = -safeHalfLen;
+  const tipX = safeHalfLen;
+  const midX = safeHalfLen * 0.4;
+  ctx.beginPath();
+  ctx.moveTo(tailX, -safeHalfHeight * 0.7);
+  ctx.quadraticCurveTo(tailX - safeHalfLen * 0.3, 0, tailX, safeHalfHeight * 0.7);
+  ctx.lineTo(midX, safeHalfHeight * 0.84);
+  ctx.quadraticCurveTo(tipX * 0.94, safeHalfHeight * 0.42, tipX, 0);
+  ctx.quadraticCurveTo(tipX * 0.94, -safeHalfHeight * 0.42, midX, -safeHalfHeight * 0.84);
+  ctx.closePath();
+}
+
 function withEntityId(entity, entityId) {
   const shape = entity.shape && typeof entity.shape === 'object'
     ? { ...entity.shape }
@@ -768,6 +783,10 @@ function compileObject(rawObject, entityId) {
         },
       };
     case 'bottom_bumper':
+      {
+        const bumperColor = typeof rawObject.color === 'string'
+          ? rawObject.color
+          : DEFAULT_OBJECT_COLORS.bottomBumper;
       return {
         entity: compileBox(
           {
@@ -776,7 +795,7 @@ function compileObject(rawObject, entityId) {
             height: Math.max(0.05, toFiniteNumber(rawObject.height, 0.34)),
             restitution: toFiniteNumber(rawObject.restitution, 0.16),
             rotation: toFiniteNumber(rawObject.rotation, toFiniteNumber(rawObject.dirDeg, 270)),
-            color: typeof rawObject.color === 'string' ? rawObject.color : DEFAULT_OBJECT_COLORS.bottomBumper,
+            color: 'rgba(0,0,0,0)',
           },
           entityId,
           true,
@@ -792,6 +811,7 @@ function compileObject(rawObject, entityId) {
           rotation: toFiniteNumber(rawObject.rotation, toFiniteNumber(rawObject.dirDeg, 270)),
           dirDeg: toFiniteNumber(rawObject.dirDeg, toFiniteNumber(rawObject.rotation, 270)),
           mirror: toBoolean(rawObject.mirror, false),
+          color: bumperColor,
           force: Math.max(0.1, toFiniteNumber(rawObject.force, 3.8)),
           intervalMs: Math.max(80, toFiniteNumber(rawObject.intervalMs, 780)),
           triggerRadius: Math.max(0.2, toFiniteNumber(rawObject.triggerRadius, 1.25)),
@@ -801,6 +821,7 @@ function compileObject(rawObject, entityId) {
           cooldownMs: Math.max(0, toFiniteNumber(rawObject.cooldownMs, 160)),
         },
       };
+      }
     case 'fan':
       return {
         entity: compileBox(
@@ -2234,6 +2255,7 @@ function createBottomBumperBehavior(def, env) {
   let lastCenterX = NaN;
   let lastCenterY = NaN;
   let nextVisualAt = 0;
+  let visualEffect = null;
 
   function getEntry() {
     const roulette = env.getRoulette();
@@ -2298,6 +2320,82 @@ function createBottomBumperBehavior(def, env) {
     if (entry.shape && typeof entry.shape === 'object') {
       entry.shape.rotation = angleRad;
     }
+  }
+
+  function ensureVisualEffect() {
+    const roulette = env.getRoulette();
+    if (!roulette || !Array.isArray(roulette._effects)) {
+      return;
+    }
+    if (visualEffect && visualEffect.isDestroy !== true) {
+      return;
+    }
+    visualEffect = {
+      elapsed: 0,
+      duration: Number.MAX_SAFE_INTEGER,
+      isDestroy: false,
+      update(deltaMs) {
+        this.elapsed += toFiniteNumber(deltaMs, 0);
+        if (!getEntry()) {
+          this.isDestroy = true;
+        }
+      },
+      render(ctx, zoomScale) {
+        if (!ctx) {
+          return;
+        }
+        const entry = getEntry();
+        if (!entry) {
+          this.isDestroy = true;
+          return;
+        }
+        const centerX = toFiniteNumber(entry.x, toFiniteNumber(def.x, 0));
+        const centerY = toFiniteNumber(entry.y, toFiniteNumber(def.y, 0));
+        const angleRad = toFiniteNumber(entry.angle, toFiniteNumber(entry && entry.shape && entry.shape.rotation, 0));
+        const halfLen = Math.max(0.08, toFiniteNumber(def.width, 0.98));
+        const halfHeight = Math.max(0.05, toFiniteNumber(def.height, 0.34));
+        const mirror = def.mirror === true;
+        const lineWidth = Math.max(0.52, 1.28 / Math.max(1, toFiniteNumber(zoomScale, 1)));
+        const bodyColor = typeof def.color === 'string' && !isTransparentColorString(def.color)
+          ? def.color
+          : DEFAULT_OBJECT_COLORS.bottomBumper;
+        const pivotX = -halfLen;
+        const pivotRadius = Math.max(halfHeight * 0.36, 0.065);
+        const pivotInner = Math.max(0.03, pivotRadius * 0.46);
+
+        ctx.save();
+        ctx.translate(centerX, centerY);
+        ctx.rotate(angleRad);
+        if (mirror) {
+          ctx.scale(-1, 1);
+        }
+
+        ctx.fillStyle = bodyColor;
+        ctx.strokeStyle = 'rgba(198, 236, 255, 0.96)';
+        ctx.lineWidth = lineWidth;
+        ctx.shadowColor = 'rgba(98, 182, 255, 0.28)';
+        ctx.shadowBlur = 0.22;
+        drawBottomBumperPath(ctx, halfLen, halfHeight);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.stroke();
+
+        ctx.fillStyle = 'rgba(12, 22, 44, 0.96)';
+        ctx.strokeStyle = 'rgba(201, 235, 255, 0.96)';
+        ctx.lineWidth = Math.max(0.46, lineWidth * 0.82);
+        ctx.beginPath();
+        ctx.arc(pivotX, 0, pivotRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = 'rgba(135, 207, 255, 0.96)';
+        ctx.beginPath();
+        ctx.arc(pivotX, 0, pivotInner, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      },
+    };
+    roulette._effects.push(visualEffect);
   }
 
   function emitSwingVisual(now, tipX, tipY) {
@@ -2477,6 +2575,7 @@ function createBottomBumperBehavior(def, env) {
     kind: 'bottom_bumper',
     oid: def.oid,
     tick(now) {
+      ensureVisualEffect();
       if (env.isPaused()) {
         return;
       }
@@ -2521,6 +2620,7 @@ function createBottomBumperBehavior(def, env) {
       for (const key of Object.keys(nextCooldown)) {
         cooldownByMarble[key] = toFiniteNumber(nextCooldown[key], 0);
       }
+      ensureVisualEffect();
       updateTransform(Date.now());
     },
   };
