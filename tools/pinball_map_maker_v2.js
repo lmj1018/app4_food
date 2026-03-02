@@ -641,6 +641,23 @@ function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
       } else if (type === 'physics_ball') {
         obj.bodyType = 'dynamic';
         obj.density = Math.max(0.01, toFinite(obj.density, 1.8));
+      } else if (type === 'wall_filled_polyline') {
+        const sourcePoints = Array.isArray(obj.points) ? obj.points : [];
+        const safePoints = sourcePoints
+          .map((point) => [
+            round1(toFinite(point && point[0], NaN)),
+            round1(toFinite(point && point[1], NaN)),
+          ])
+          .filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]));
+        if (safePoints.length >= 3 && isPolylineClosed(safePoints, 0.2)) {
+          const first = safePoints[0];
+          safePoints[safePoints.length - 1] = [first[0], first[1]];
+        }
+        obj.points = safePoints;
+        obj.fillOpacity = round2(clamp(toFinite(obj.fillOpacity, 0.88), 0.35, 1));
+        if (typeof obj.color !== 'string' || !obj.color.trim()) {
+          obj.color = OBJECT_COLOR_PRESET.wall;
+        }
       } else if (type === 'burst_bumper') {
         obj.layers = Math.max(1, Math.floor(toFinite(obj.layers, 3)));
         obj.hpPerLayer = Math.max(1, Math.floor(toFinite(obj.hpPerLayer, 1)));
@@ -1517,6 +1534,8 @@ function toolDisplayName(tool) {
       return '일반 벽선';
     case 'wall_polyline':
       return '다점 벽선';
+    case 'wall_filled_polyline':
+      return '폐합 면벽선';
     case 'wall_corridor_segment':
       return '통로형 일반벽선';
     case 'wall_corridor_polyline':
@@ -1588,6 +1607,7 @@ function defaultRestitutionForType(type) {
     case 'portal':
       return 0.12;
     case 'wall_polyline':
+    case 'wall_filled_polyline':
     case 'wall_corridor_polyline':
     case 'wall_corridor_segment':
     case 'rotor':
@@ -1602,6 +1622,7 @@ function defaultFrictionForType(type) {
     case 'sticky_pad':
       return 1.2;
     case 'wall_polyline':
+    case 'wall_filled_polyline':
     case 'wall_corridor_polyline':
     case 'wall_corridor_segment':
       return 0.35;
@@ -1613,6 +1634,7 @@ function defaultFrictionForType(type) {
 function defaultColorForObjectType(type) {
   switch (String(type || '')) {
     case 'wall_polyline':
+    case 'wall_filled_polyline':
     case 'wall_corridor_polyline':
       return OBJECT_COLOR_PRESET.wall;
     case 'box_block':
@@ -1657,7 +1679,10 @@ function isPolylineObject(obj) {
     return false;
   }
   const type = String(obj.type || '');
-  return type === 'wall_polyline' || type === 'wall_corridor_polyline' || type === 'wall_corridor_segment';
+  return type === 'wall_polyline'
+    || type === 'wall_filled_polyline'
+    || type === 'wall_corridor_polyline'
+    || type === 'wall_corridor_segment';
 }
 
 function isDirectionalTargetObject(obj) {
@@ -1678,7 +1703,34 @@ function isAimDirectionalObject(obj) {
 
 function isPolylineTool(tool) {
   const safe = String(tool || '');
-  return safe === 'wall_polyline' || safe === 'wall_corridor_polyline';
+  return safe === 'wall_polyline'
+    || safe === 'wall_filled_polyline'
+    || safe === 'wall_corridor_polyline';
+}
+
+function isFilledWallObject(obj) {
+  return !!obj && typeof obj === 'object' && String(obj.type || '') === 'wall_filled_polyline';
+}
+
+function isFilledWallTool(tool) {
+  return String(tool || '') === 'wall_filled_polyline';
+}
+
+function isPolylineClosed(points, threshold = 0.001) {
+  if (!Array.isArray(points) || points.length < 3) {
+    return false;
+  }
+  const first = points[0];
+  const last = points[points.length - 1];
+  if (!Array.isArray(first) || !Array.isArray(last)) {
+    return false;
+  }
+  const dx = toFinite(last[0], NaN) - toFinite(first[0], NaN);
+  const dy = toFinite(last[1], NaN) - toFinite(first[1], NaN);
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
+    return false;
+  }
+  return Math.hypot(dx, dy) <= Math.max(0, toFinite(threshold, 0.001));
 }
 
 function corridorGapForObject(obj, fallback = 1.2) {
@@ -1719,6 +1771,7 @@ function setSelectedTool(tool) {
     'spawn_point',
     'wall_segment',
     'wall_polyline',
+    'wall_filled_polyline',
     'wall_corridor_segment',
     'wall_corridor_polyline',
     'peg_circle',
@@ -2699,10 +2752,12 @@ function syncObjectList(options = {}) {
       const oid = String(obj && obj.oid ? obj.oid : `obj_${index + 1}`);
       const type = String(obj && obj.type ? obj.type : 'unknown');
       let suffix = '';
-      if (type === 'wall_polyline' || type === 'wall_corridor_polyline' || type === 'wall_corridor_segment') {
+      if (type === 'wall_polyline' || type === 'wall_filled_polyline' || type === 'wall_corridor_polyline' || type === 'wall_corridor_segment') {
         const points = Array.isArray(obj.points) ? obj.points.length : 0;
         if (type === 'wall_corridor_polyline' || type === 'wall_corridor_segment') {
           suffix = ` (${points}pt, gap=${corridorGapForObject(obj, getCorridorGapInput())})`;
+        } else if (type === 'wall_filled_polyline') {
+          suffix = ` (${points}pt, 폐합면)`;
         } else {
           suffix = ` (${points}pt)`;
         }
@@ -2777,6 +2832,8 @@ function sharedSyncKeysForType(type) {
   switch (String(type || '')) {
     case 'wall_polyline':
       return ['color', 'restitution', 'friction'];
+    case 'wall_filled_polyline':
+      return ['color', 'restitution', 'friction', 'fillOpacity'];
     case 'wall_corridor_polyline':
     case 'wall_corridor_segment':
       return ['color', 'restitution', 'friction', 'gap'];
@@ -3781,6 +3838,24 @@ function drawMiniMap(mainLayout = null) {
         }
         ctx.stroke();
       };
+      const drawFilledPath = (pathPoints) => {
+        if (!Array.isArray(pathPoints) || pathPoints.length < 3 || !isPolylineClosed(pathPoints, 0.0001)) {
+          return;
+        }
+        ctx.save();
+        ctx.globalAlpha = selected ? 0.34 : clamp(toFinite(obj.fillOpacity, 0.88), 0.35, 1);
+        ctx.fillStyle = selected ? '#ffd44d' : color;
+        const first = worldToMiniMap(layout, pathPoints[0][0], pathPoints[0][1]);
+        ctx.beginPath();
+        ctx.moveTo(first.x, first.y);
+        for (let p = 1; p < pathPoints.length; p += 1) {
+          const next = worldToMiniMap(layout, pathPoints[p][0], pathPoints[p][1]);
+          ctx.lineTo(next.x, next.y);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      };
       if (obj.type === 'wall_corridor_polyline' || obj.type === 'wall_corridor_segment') {
         const gap = corridorGapForObject(obj, getCorridorGapInput());
         const sides = buildCorridorSides(points, gap);
@@ -3791,6 +3866,9 @@ function drawMiniMap(mainLayout = null) {
           drawPath(sides.right);
         }
       } else {
+        if (isFilledWallObject(obj)) {
+          drawFilledPath(points);
+        }
         drawPath(points);
       }
       continue;
@@ -4292,10 +4370,10 @@ function findSelectedHandle(point, layout) {
   const thresholdWorld = Math.max(0.08, 9 / Math.max(0.001, layout.scale));
   const type = String(obj.type || '');
   const centerDist = Math.hypot(point.x - toFinite(obj.x, 0), point.y - toFinite(obj.y, 0));
-  if (type !== 'wall_polyline' && type !== 'wall_corridor_polyline' && type !== 'wall_corridor_segment' && centerDist <= thresholdWorld * 0.9) {
+  if (!isPolylineObject(obj) && centerDist <= thresholdWorld * 0.9) {
     return { kind: 'move_anchor' };
   }
-  if (type === 'wall_polyline' || type === 'wall_corridor_polyline' || type === 'wall_corridor_segment') {
+  if (isPolylineObject(obj)) {
     const points = Array.isArray(obj.points) ? obj.points : [];
     for (let index = 0; index < points.length; index += 1) {
       const px = toFinite(points[index] && points[index][0], NaN);
@@ -4516,6 +4594,26 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
         }
         ctx.stroke();
       };
+      const drawFilledPath = (pathPoints) => {
+        if (!Array.isArray(pathPoints) || pathPoints.length < 3 || !isPolylineClosed(pathPoints, 0.0001)) {
+          return;
+        }
+        ctx.save();
+        ctx.globalAlpha = selected
+          ? 0.36
+          : clamp(toFinite(obj.fillOpacity, 0.88), 0.35, 1);
+        ctx.fillStyle = selected ? '#ffd44d' : color;
+        const first = worldToCanvas(layout, pathPoints[0][0], pathPoints[0][1]);
+        ctx.beginPath();
+        ctx.moveTo(first.x, first.y);
+        for (let index = 1; index < pathPoints.length; index += 1) {
+          const next = worldToCanvas(layout, pathPoints[index][0], pathPoints[index][1]);
+          ctx.lineTo(next.x, next.y);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      };
       if (obj.type === 'wall_corridor_polyline' || obj.type === 'wall_corridor_segment') {
         const gap = corridorGapForObject(obj, getCorridorGapInput());
         const sides = buildCorridorSides(points, gap);
@@ -4526,6 +4624,9 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
           drawPath(sides.right);
         }
       } else {
+        if (isFilledWallObject(obj)) {
+          drawFilledPath(points);
+        }
         drawPath(points);
       }
       if (selected) {
@@ -5181,6 +5282,44 @@ function drawMakerCanvas() {
           ctx.lineTo(rightEnd.x, rightEnd.y);
           ctx.stroke();
         }
+      } else if (editorState.pendingWallType === 'wall_filled_polyline') {
+        const pending = getObjects().find((item) => item && item.oid === editorState.pendingWallOid);
+        const points = pending && Array.isArray(pending.points) ? pending.points : [];
+        const first = points.length > 0 ? points[0] : null;
+        let previewTarget = hoverWorld;
+        if (first && points.length >= 2) {
+          const firstX = toFinite(first[0], NaN);
+          const firstY = toFinite(first[1], NaN);
+          if (Number.isFinite(firstX) && Number.isFinite(firstY)) {
+            const distToFirst = Math.hypot(hoverWorld.x - firstX, hoverWorld.y - firstY);
+            if (distToFirst <= 0.45) {
+              previewTarget = { x: firstX, y: firstY };
+            }
+          }
+        }
+        if (points.length >= 2) {
+          const previewPoints = points.concat([[previewTarget.x, previewTarget.y]]);
+          if (isPolylineClosed(previewPoints, 0.0001)) {
+            ctx.save();
+            ctx.globalAlpha = 0.22;
+            ctx.fillStyle = '#ff7cc8';
+            const firstPreview = worldToCanvas(layout, previewPoints[0][0], previewPoints[0][1]);
+            ctx.beginPath();
+            ctx.moveTo(firstPreview.x, firstPreview.y);
+            for (let index = 1; index < previewPoints.length; index += 1) {
+              const nextPreview = worldToCanvas(layout, previewPoints[index][0], previewPoints[index][1]);
+              ctx.lineTo(nextPreview.x, nextPreview.y);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+          }
+        }
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        const previewCanvas = worldToCanvas(layout, previewTarget.x, previewTarget.y);
+        ctx.lineTo(previewCanvas.x, previewCanvas.y);
+        ctx.stroke();
       } else {
         ctx.beginPath();
         ctx.moveTo(p.x, p.y);
@@ -6686,6 +6825,8 @@ function addObjectAt(tool, x, y, options = {}) {
   }
   if (isPolylineTool(tool)) {
     const wallType = String(tool || 'wall_polyline');
+    const isFilledWall = isFilledWallTool(wallType);
+    const closeSnapDistance = 0.45;
     const useSnap45 = options.snap45 === true;
     if (!editorState.pendingWallStart || !editorState.pendingWallType || editorState.pendingWallType !== wallType) {
       editorState.pendingWallStart = { x, y };
@@ -6709,9 +6850,12 @@ function addObjectAt(tool, x, y, options = {}) {
     if (!editorState.pendingWallOid) {
       const created = {
         oid: wallType === 'wall_corridor_polyline' ? nextOid('corridor') : nextOid('wall'),
-        type: wallType === 'wall_corridor_polyline' ? 'wall_corridor_polyline' : 'wall_polyline',
+        type: wallType === 'wall_corridor_polyline'
+          ? 'wall_corridor_polyline'
+          : (isFilledWall ? 'wall_filled_polyline' : 'wall_polyline'),
         points: [[start.x, start.y], [endPoint.x, endPoint.y]],
         gap: wallType === 'wall_corridor_polyline' ? getCorridorGapInput() : undefined,
+        fillOpacity: isFilledWall ? 0.88 : undefined,
         color: OBJECT_COLOR_PRESET.wall,
       };
       objects.push(created);
@@ -6724,17 +6868,40 @@ function addObjectAt(tool, x, y, options = {}) {
       }
       const targetWall = objects.find((item) => item && item.oid === editorState.pendingWallOid);
       if (targetWall && isPolylineObject(targetWall) && Array.isArray(targetWall.points)) {
+        let shouldCloseFilledWall = false;
+        if (isFilledWall && targetWall.points.length >= 2) {
+          const firstX = toFinite(targetWall.points[0] && targetWall.points[0][0], NaN);
+          const firstY = toFinite(targetWall.points[0] && targetWall.points[0][1], NaN);
+          const closeDist = Math.hypot(endPoint.x - firstX, endPoint.y - firstY);
+          if (Number.isFinite(firstX) && Number.isFinite(firstY) && closeDist <= closeSnapDistance) {
+            endPoint = { x: round1(firstX), y: round1(firstY) };
+            shouldCloseFilledWall = true;
+          }
+        }
         targetWall.points.push([endPoint.x, endPoint.y]);
         if (targetWall.type === 'wall_corridor_polyline' || targetWall.type === 'wall_corridor_segment') {
           targetWall.gap = corridorGapForObject(targetWall, getCorridorGapInput());
+        }
+        if (isFilledWall && shouldCloseFilledWall) {
+          if (!isPolylineClosed(targetWall.points, 0.0001)) {
+            const first = targetWall.points[0];
+            targetWall.points.push([toFinite(first[0], endPoint.x), toFinite(first[1], endPoint.y)]);
+          }
+          targetWall.fillOpacity = round2(clamp(toFinite(targetWall.fillOpacity, 0.88), 0.35, 1));
+          resetPendingWall();
+          updateMakerHint('폐합 면벽선 완료: 닫힌 영역이 면벽으로 채워졌습니다.');
+          setStatus('폐합 면벽선이 생성되었습니다.');
         }
         setSingleSelectedIndex(objects.findIndex((item) => item === targetWall));
       } else {
         const created = {
           oid: wallType === 'wall_corridor_polyline' ? nextOid('corridor') : nextOid('wall'),
-          type: wallType === 'wall_corridor_polyline' ? 'wall_corridor_polyline' : 'wall_polyline',
+          type: wallType === 'wall_corridor_polyline'
+            ? 'wall_corridor_polyline'
+            : (isFilledWall ? 'wall_filled_polyline' : 'wall_polyline'),
           points: [[start.x, start.y], [endPoint.x, endPoint.y]],
           gap: wallType === 'wall_corridor_polyline' ? getCorridorGapInput() : undefined,
+          fillOpacity: isFilledWall ? 0.88 : undefined,
           color: OBJECT_COLOR_PRESET.wall,
         };
         objects.push(created);
@@ -6742,8 +6909,14 @@ function addObjectAt(tool, x, y, options = {}) {
         setSingleSelectedIndex(objects.length - 1);
       }
     }
-    editorState.pendingWallStart = { x: endPoint.x, y: endPoint.y };
-    updateMakerHint(`${toolDisplayName(wallType)} 입력중: 클릭한 점을 계속 이어 그립니다. 우클릭 종료`);
+    if (editorState.pendingWallType) {
+      editorState.pendingWallStart = { x: endPoint.x, y: endPoint.y };
+      if (isFilledWall) {
+        updateMakerHint('폐합 면벽선 입력중: 점을 이어 그리고 시작점 근처 클릭 시 자동 폐합/면 채움');
+      } else {
+        updateMakerHint(`${toolDisplayName(wallType)} 입력중: 클릭한 점을 계속 이어 그립니다. 우클릭 종료`);
+      }
+    }
   } else if (tool === 'portal') {
     const created = createObjectByTool(tool, x, y);
     if (!created) {
@@ -7583,6 +7756,8 @@ function setupEvents() {
       updateMakerHint(`통로형 일반벽선 모드: 드래그 2점 생성, 간격=${getCorridorGapInput()}, Shift는 45도 스냅`);
     } else if (tool === 'wall_polyline') {
       updateMakerHint('다점 벽선 모드: 1,2,3... 클릭한 점을 이어 벽 생성, 우클릭 종료');
+    } else if (tool === 'wall_filled_polyline') {
+      updateMakerHint('폐합 면벽선 모드: 점 연결 후 시작점 근처 클릭하면 자동 폐합되어 불투명 면벽 생성');
     } else if (tool === 'wall_corridor_polyline') {
       updateMakerHint(`통로형 다절벽선 모드: 1,2,3... 점 연결, 간격=${getCorridorGapInput()}, 우클릭 종료`);
     } else if (tool === 'black_hole') {

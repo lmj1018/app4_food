@@ -541,6 +541,17 @@
       top: 10px;
       transform: rotate(-18deg);
     }
+    .tool-shape.wall-fill {
+      width: 18px;
+      height: 12px;
+      left: 6px;
+      top: 4px;
+      border: 2px solid #ff7cc8;
+      background: rgba(255, 124, 200, 0.55);
+      clip-path: polygon(10% 88%, 60% 12%, 94% 84%);
+      border-radius: 2px;
+      box-shadow: 0 0 0 1px rgba(255, 199, 229, 0.4) inset;
+    }
     .tool-shape.wall-corridor {
       width: 18px;
       height: 10px;
@@ -1123,6 +1134,7 @@
                 <button type="button" class="maker-tool-button" data-maker-tool="spawn_point"><span class="tool-icon"><span class="tool-shape spawn"></span></span><span class="tool-label">공 시작점</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="wall_segment"><span class="tool-icon"><span class="tool-shape wall"></span></span><span class="tool-label">일반 벽선</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="wall_polyline"><span class="tool-icon"><span class="tool-shape wall"></span></span><span class="tool-label">다점 벽선</span></button>
+                <button type="button" class="maker-tool-button" data-maker-tool="wall_filled_polyline"><span class="tool-icon"><span class="tool-shape wall-fill"></span></span><span class="tool-label">폐합 면벽선</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="wall_corridor_segment"><span class="tool-icon"><span class="tool-shape wall-corridor"></span></span><span class="tool-label">통로형 일반벽선</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="wall_corridor_polyline"><span class="tool-icon"><span class="tool-shape wall-corridor"></span></span><span class="tool-label">통로형 다절벽선</span></button>
                 <button type="button" class="maker-tool-button" data-maker-tool="peg_circle"><span class="tool-icon"><span class="tool-shape peg"></span></span><span class="tool-label">원형 핀</span></button>
@@ -1150,6 +1162,7 @@
                 <option value="spawn_point">공 시작점</option>
                 <option value="wall_segment">일반 벽선</option>
                 <option value="wall_polyline">다점 벽선</option>
+                <option value="wall_filled_polyline">폐합 면벽선</option>
                 <option value="wall_corridor_segment">통로형 일반벽선</option>
                 <option value="wall_corridor_polyline">통로형 다절벽선</option>
                 <option value="peg_circle">원형 핀</option>

@@ -197,6 +197,36 @@ function extractPolylinePoints(raw) {
       ].filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]));
 }
 
+function ensureClosedPolylinePoints(pointsInput, threshold = 0.0001) {
+  const points = Array.isArray(pointsInput)
+    ? pointsInput
+        .map((point) => {
+          if (!Array.isArray(point) || point.length < 2) {
+            return null;
+          }
+          const x = toFiniteNumber(point[0], NaN);
+          const y = toFiniteNumber(point[1], NaN);
+          if (!Number.isFinite(x) || !Number.isFinite(y)) {
+            return null;
+          }
+          return [x, y];
+        })
+        .filter((point) => !!point)
+    : [];
+  if (points.length < 3) {
+    return points;
+  }
+  const first = points[0];
+  const last = points[points.length - 1];
+  const dx = toFiniteNumber(last && last[0], NaN) - toFiniteNumber(first && first[0], NaN);
+  const dy = toFiniteNumber(last && last[1], NaN) - toFiniteNumber(first && first[1], NaN);
+  const closeDistance = Math.hypot(dx, dy);
+  if (Number.isFinite(closeDistance) && closeDistance <= Math.max(0, toFiniteNumber(threshold, 0.0001))) {
+    points[points.length - 1] = [first[0], first[1]];
+  }
+  return points;
+}
+
 function compileWallPolyline(raw, entityId) {
   const points = extractPolylinePoints(raw);
   if (points.length < 2) {
@@ -475,6 +505,28 @@ function compileObject(rawObject, entityId) {
         entity: compileWallPolyline(rawObject, entityId),
         behavior: null,
       };
+    case 'wall_filled_polyline': {
+      const closedPoints = ensureClosedPolylinePoints(extractPolylinePoints(rawObject), 0.2);
+      const color = typeof rawObject.color === 'string' ? rawObject.color : DEFAULT_OBJECT_COLORS.wall;
+      return {
+        entity: compileWallPolyline(
+          {
+            ...rawObject,
+            points: closedPoints,
+            color,
+          },
+          entityId,
+        ),
+        behavior: {
+          kind: 'wall_filled_polyline_visual',
+          oid: toId(rawObject.oid, `wall_filled_${entityId}`),
+          entityId,
+          points: closedPoints,
+          color,
+          fillOpacity: clamp(toFiniteNumber(rawObject.fillOpacity, 0.88), 0.35, 1),
+        },
+      };
+    }
     case 'wall_corridor_segment':
     case 'wall_corridor_polyline': {
       const entities = compileCorridorPolyline(rawObject, entityId);
@@ -3054,6 +3106,82 @@ function createStickyPadBehavior(def, env) {
   };
 }
 
+function createFilledWallPolylineVisualBehavior(def, env) {
+  const points = ensureClosedPolylinePoints(Array.isArray(def && def.points) ? def.points : [], 0.2);
+  const color = typeof def.color === 'string' ? def.color : DEFAULT_OBJECT_COLORS.wall;
+  const fillOpacity = clamp(toFiniteNumber(def.fillOpacity, 0.88), 0.35, 1);
+  let visualEffect = null;
+
+  function hasEntity() {
+    const roulette = env.getRoulette();
+    const physics = roulette && roulette.physics ? roulette.physics : null;
+    const entities = physics && Array.isArray(physics.entities) ? physics.entities : [];
+    const targetId = toFiniteNumber(def.entityId, NaN);
+    if (!Number.isFinite(targetId)) {
+      return true;
+    }
+    for (let index = 0; index < entities.length; index += 1) {
+      const entry = entities[index];
+      const entityId = toFiniteNumber(entry && entry.shape && entry.shape.__v2eid, NaN);
+      if (Number.isFinite(entityId) && entityId === targetId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function ensureVisualEffect() {
+    const roulette = env.getRoulette();
+    if (!roulette || !Array.isArray(roulette._effects) || points.length < 4) {
+      return;
+    }
+    if (visualEffect && visualEffect.isDestroy !== true) {
+      return;
+    }
+    visualEffect = {
+      elapsed: 0,
+      duration: Number.MAX_SAFE_INTEGER,
+      isDestroy: false,
+      update(deltaMs) {
+        this.elapsed += toFiniteNumber(deltaMs, 0);
+        if (!hasEntity()) {
+          this.isDestroy = true;
+        }
+      },
+      render(ctx) {
+        if (!ctx || points.length < 4) {
+          return;
+        }
+        if (!hasEntity()) {
+          this.isDestroy = true;
+          return;
+        }
+        ctx.save();
+        ctx.globalAlpha = fillOpacity;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(points[0][0], points[0][1]);
+        for (let index = 1; index < points.length; index += 1) {
+          const point = points[index];
+          ctx.lineTo(toFiniteNumber(point && point[0], 0), toFiniteNumber(point && point[1], 0));
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      },
+    };
+    roulette._effects.push(visualEffect);
+  }
+
+  return {
+    kind: 'wall_filled_polyline_visual',
+    oid: def.oid,
+    tick() {
+      ensureVisualEffect();
+    },
+  };
+}
+
 function createGoalMarkerImageBehavior(def, env) {
   let nextEmitAt = 0;
   const image = getRuntimeImage(def.imageSrc || '../../background/finish.png');
@@ -3153,6 +3281,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
   const stickyDefs = defs
     .filter((item) => item && item.kind === 'sticky_pad')
     .map((item) => ({ ...item }));
+  const filledWallDefs = defs
+    .filter((item) => item && item.kind === 'wall_filled_polyline_visual')
+    .map((item) => ({ ...item }));
   const goalMarkerDefs = defs
     .filter((item) => item && item.kind === 'goal_marker_image')
     .map((item) => ({ ...item }));
@@ -3186,6 +3317,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
   }
   for (const stickyDef of stickyDefs) {
     behaviors.push(createStickyPadBehavior(stickyDef, env));
+  }
+  for (const filledWallDef of filledWallDefs) {
+    behaviors.push(createFilledWallPolylineVisualBehavior(filledWallDef, env));
   }
   for (const goalMarkerDef of goalMarkerDefs) {
     behaviors.push(createGoalMarkerImageBehavior(goalMarkerDef, env));
