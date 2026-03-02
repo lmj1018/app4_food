@@ -172,6 +172,17 @@ function clamp(value, minValue, maxValue) {
   return Math.min(maxValue, Math.max(minValue, value));
 }
 
+function fillPathEvenOdd(ctx) {
+  if (!ctx) {
+    return;
+  }
+  try {
+    ctx.fill('evenodd');
+  } catch (_) {
+    ctx.fill();
+  }
+}
+
 function round1(value) {
   return Math.round(value * 10) / 10;
 }
@@ -3943,7 +3954,7 @@ function drawMiniMap(mainLayout = null) {
           ctx.lineTo(next.x, next.y);
         }
         ctx.closePath();
-        ctx.fill();
+        fillPathEvenOdd(ctx);
         ctx.restore();
       };
       if (obj.type === 'wall_corridor_polyline' || obj.type === 'wall_corridor_segment') {
@@ -4711,7 +4722,7 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
           ctx.lineTo(next.x, next.y);
         }
         ctx.closePath();
-        ctx.fill();
+        fillPathEvenOdd(ctx);
         ctx.restore();
       };
       if (obj.type === 'wall_corridor_polyline' || obj.type === 'wall_corridor_segment') {
@@ -5463,7 +5474,7 @@ function drawMakerCanvas() {
               ctx.lineTo(nextPreview.x, nextPreview.y);
             }
             ctx.closePath();
-            ctx.fill();
+            fillPathEvenOdd(ctx);
             ctx.restore();
           }
         }

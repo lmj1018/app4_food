@@ -127,6 +127,17 @@ function clamp(value, minValue, maxValue) {
   return Math.min(maxValue, Math.max(minValue, value));
 }
 
+function fillPathEvenOdd(ctx) {
+  if (!ctx) {
+    return;
+  }
+  try {
+    ctx.fill('evenodd');
+  } catch (_) {
+    ctx.fill();
+  }
+}
+
 function degToRad(value) {
   return (value * Math.PI) / 180;
 }
@@ -3279,7 +3290,7 @@ function createFilledWallPolylineVisualBehavior(def, env) {
           ctx.lineTo(toFiniteNumber(point && point[0], 0), toFiniteNumber(point && point[1], 0));
         }
         ctx.closePath();
-        ctx.fill();
+        fillPathEvenOdd(ctx);
         ctx.restore();
       },
     };
