@@ -632,8 +632,8 @@ function compileObject(rawObject, entityId) {
             toFiniteNumber(rawObject.triggerRadius, Math.max(0.18, toFiniteNumber(rawObject.radius, 0.72)) + 1.4),
           ),
           suctionForce: Math.max(
-            0.01,
-            toFiniteNumber(rawObject.suctionForce, toFiniteNumber(rawObject.force, 0.2)),
+            0.35,
+            toFiniteNumber(rawObject.suctionForce, toFiniteNumber(rawObject.force, 0.55)),
           ),
           cooldownMs: Math.max(80, toFiniteNumber(rawObject.cooldownMs, 900)),
           launchImpulse: Math.max(0.1, toFiniteNumber(rawObject.launchImpulse, 2.9)),
@@ -1198,7 +1198,7 @@ function createBlackHoleNetworkBehavior(blackHoleDefs, whiteHoleDefs, env) {
           const dx = centerX - px;
           const dy = centerY - py;
           const distSq = dx * dx + dy * dy;
-          if (!Number.isFinite(distSq) || distSq <= 0.0000001) {
+          if (!Number.isFinite(distSq)) {
             continue;
           }
 
@@ -1207,12 +1207,12 @@ function createBlackHoleNetworkBehavior(blackHoleDefs, whiteHoleDefs, env) {
           if (distSq > suctionRadius * suctionRadius) {
             continue;
           }
-          const dist = Math.sqrt(distSq);
+          const dist = Math.sqrt(Math.max(0.0000001, distSq));
           const nx = dx / dist;
           const ny = dy / dist;
           const falloff = Math.max(0, 1 - dist / suctionRadius);
-          const suctionForce = Math.max(0.01, toFiniteNumber(black.suctionForce, toFiniteNumber(black.force, 0.2)));
-          const pullImpulse = suctionForce * deltaScale * (0.18 + falloff * 0.82);
+          const suctionForce = Math.max(0.35, toFiniteNumber(black.suctionForce, toFiniteNumber(black.force, 0.55)));
+          const pullImpulse = suctionForce * deltaScale * (0.75 + falloff * 2.4);
           try {
             if (typeof body.SetEnabled === 'function') {
               body.SetEnabled(true);
@@ -1224,7 +1224,13 @@ function createBlackHoleNetworkBehavior(blackHoleDefs, whiteHoleDefs, env) {
           } catch (_) {
           }
 
-          const captureRadius = Math.max(0.06, coreRadius * 0.58);
+          const captureRadius = Math.max(
+            coreRadius + 0.78,
+            Math.min(
+              suctionRadius * 0.95,
+              coreRadius * 2.35,
+            ),
+          );
           if (dist > captureRadius) {
             continue;
           }

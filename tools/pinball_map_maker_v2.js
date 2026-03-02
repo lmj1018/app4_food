@@ -630,7 +630,7 @@ function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
       } else if (type === 'black_hole') {
         obj.radius = Math.max(0.18, toFinite(obj.radius, 0.72));
         obj.triggerRadius = Math.max(obj.radius + 0.2, toFinite(obj.triggerRadius, 2.1));
-        obj.suctionForce = Math.max(0.01, toFinite(obj.suctionForce, toFinite(obj.force, 0.2)));
+        obj.suctionForce = Math.max(0.35, toFinite(obj.suctionForce, toFinite(obj.force, 0.55)));
         obj.launchImpulse = Math.max(0.1, toFinite(obj.launchImpulse, 2.9));
         obj.cooldownMs = Math.max(80, Math.floor(toFinite(obj.cooldownMs, 900)));
         if (typeof obj.color !== 'string' || !obj.color.trim()) {
@@ -1656,7 +1656,7 @@ function createObjectByTool(tool, x, y) {
       y: py,
       radius: 0.72,
       triggerRadius: 2.1,
-      suctionForce: 0.2,
+      suctionForce: 0.55,
       cooldownMs: 900,
       launchImpulse: 2.9,
       color: OBJECT_COLOR_PRESET.blackHole,
@@ -1905,7 +1905,7 @@ function populateObjectEditor() {
     } else if (obj.type === 'goal_marker_image') {
       elements.objForceInput.value = '';
     } else if (obj.type === 'black_hole') {
-      elements.objForceInput.value = String(round2(toFinite(obj.suctionForce, toFinite(obj.force, 0.2))));
+      elements.objForceInput.value = String(round2(toFinite(obj.suctionForce, toFinite(obj.force, 0.55))));
     } else if (obj.type === 'white_hole') {
       elements.objForceInput.value = String(round1(toFinite(obj.launchImpulse, 2.9)));
     } else if (obj.type === 'portal') {
@@ -2533,9 +2533,9 @@ function applyObjectEditorValues() {
       elements.objExtra2Input ? elements.objExtra2Input.value : obj.launchImpulse,
       toFinite(obj.launchImpulse, 2.9),
     )));
-    obj.suctionForce = round2(Math.max(0.01, toFinite(
+    obj.suctionForce = round2(Math.max(0.35, toFinite(
       elements.objForceInput ? elements.objForceInput.value : obj.suctionForce,
-      toFinite(obj.suctionForce, toFinite(obj.force, 0.2)),
+      toFinite(obj.suctionForce, toFinite(obj.force, 0.55)),
     )));
     obj.cooldownMs = Math.round(Math.max(80, toFinite(
       elements.objIntervalInput ? elements.objIntervalInput.value : obj.cooldownMs,
@@ -6978,7 +6978,7 @@ function setupEvents() {
 
 async function boot() {
   setupEvents();
-  const initialMapId = 'v2_default';
+  const initialMapId = 'v2_custom_map';
   setMarbleCountInput(DEFAULT_MARBLE_COUNT);
   setMarbleSizeInput(DEFAULT_MARBLE_SIZE_SCALE);
   setJsonViewerOpen(false);
@@ -7008,7 +7008,29 @@ async function boot() {
     } catch (previewError) {
       setPreviewStatus(String(previewError && previewError.message ? previewError.message : previewError), 'error');
     }
-    await applyMapAndCandidates();
+    if (selectedMapCatalogEntry()) {
+      await loadSelectedCatalogMap();
+    } else {
+      await withEngineAction(async (api) => {
+        await applyDraftMapToApi(api, {
+          live: false,
+          preserveMarbles: false,
+          preserveRunning: false,
+          updateCandidates: true,
+        });
+        ensureEngineCanvasFill();
+        syncViewZoomInputFromEngine();
+        setPlayPauseUi(readEngineRunning(api));
+        applyViewZoomToEngine(true);
+        applyMarbleSizeToEngines(getCurrentMarbleSizeScale(), { silent: true });
+        await syncPreviewFromDraft({
+          preserveMarbles: false,
+          preserveRunning: false,
+          updateCandidates: true,
+        });
+        setStatus('빈 드래프트 맵 적용 완료 (맵 선택 전)');
+      }, { rethrow: true });
+    }
     await applyLiveMarbleCountNow('');
   } catch (error) {
     setStatus(String(error && error.message ? error.message : error), 'error');
