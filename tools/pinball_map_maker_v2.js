@@ -6,6 +6,7 @@ const WORLD_WIDTH = 81;
 const MIN_MARBLE_COUNT = 1;
 const MAX_MARBLE_COUNT = 256;
 const LIVE_APPLY_DEBOUNCE_MS = 120;
+const LIVE_MARBLE_COUNT_DEBOUNCE_MS = 120;
 const AUTO_SAVE_DEBOUNCE_MS = 900;
 const CANVAS_MIN_ZOOM = 0.18;
 const CANVAS_MAX_ZOOM = 14;
@@ -45,6 +46,9 @@ let autoObjectApplyTimer = 0;
 let autoStageApplyTimer = 0;
 let previewLiveApplyInFlight = false;
 let previewCanvasFillTimer = 0;
+let marbleCountApplyTimer = 0;
+let marbleCountApplyInFlight = false;
+let marbleCountApplyPending = false;
 const undoHistory = [];
 let goalMarkerPreviewImage = null;
 
@@ -73,7 +77,6 @@ const elements = {
   mapSelect: document.getElementById('mapSelect'),
   mapNameInput: document.getElementById('mapNameInput'),
   refreshMapListButton: document.getElementById('refreshMapListButton'),
-  saveSelectedMapButton: document.getElementById('saveSelectedMapButton'),
   saveAsNewMapButton: document.getElementById('saveAsNewMapButton'),
   reloadButton: document.getElementById('reloadButton'),
   playPauseToggleButton: document.getElementById('playPauseToggleButton'),
@@ -83,7 +86,6 @@ const elements = {
   quickSaveButton: document.getElementById('quickSaveButton'),
   quickLoadButton: document.getElementById('quickLoadButton'),
   marbleCountInput: document.getElementById('marbleCountInput'),
-  applyMarbleCountButton: document.getElementById('applyMarbleCountButton'),
   toggleJsonViewButton: document.getElementById('toggleJsonViewButton'),
   currentJsonViewer: document.getElementById('currentJsonViewer'),
   currentJsonText: document.getElementById('currentJsonText'),
@@ -386,7 +388,6 @@ function setBusy(isBusy) {
     elements.mapSelect,
     elements.mapNameInput,
     elements.refreshMapListButton,
-    elements.saveSelectedMapButton,
     elements.saveAsNewMapButton,
     elements.reloadButton,
     elements.playPauseToggleButton,
@@ -396,7 +397,6 @@ function setBusy(isBusy) {
     elements.previewPlayPauseButton,
     elements.previewResetButton,
     elements.marbleCountInput,
-    elements.applyMarbleCountButton,
     elements.toggleJsonViewButton,
     elements.viewZoomInput,
     elements.marbleSizeInput,
@@ -1003,6 +1003,58 @@ function applyMarbleSizeToEngines(scale, options = {}) {
     }
   }
   return appliedMain || appliedPreview;
+}
+
+async function applyLiveMarbleCountNow(statusPrefix = '') {
+  if (FILE_PROTOCOL) {
+    return;
+  }
+  if (marbleCountApplyInFlight) {
+    marbleCountApplyPending = true;
+    return;
+  }
+  marbleCountApplyInFlight = true;
+  const marbleCount = getCurrentMarbleCount();
+  try {
+    const api = await waitForEngineApi(8000);
+    const candidateResult = await api.setCandidates(buildAutoCandidates(marbleCount));
+    if (!candidateResult || candidateResult.ok !== true) {
+      throw new Error(candidateResult && candidateResult.reason ? candidateResult.reason : '공 개수 적용에 실패했습니다');
+    }
+    applyMarbleSizeToEngines(getCurrentMarbleSizeScale(), { silent: true });
+    setPlayPauseUi(readEngineRunning(api));
+    await syncPreviewFromDraft({
+      preserveMarbles: false,
+      preserveRunning: false,
+      updateCandidates: true,
+    });
+    if (statusPrefix) {
+      setStatus(`${statusPrefix}: ${marbleCount}개`);
+    }
+  } catch (error) {
+    const message = String(error && error.message ? error.message : error);
+    if (!message.includes('엔진 API 대기 시간 초과')) {
+      setStatus(message, 'error');
+    }
+  } finally {
+    marbleCountApplyInFlight = false;
+    if (marbleCountApplyPending) {
+      marbleCountApplyPending = false;
+      void applyLiveMarbleCountNow(statusPrefix);
+    }
+  }
+}
+
+function scheduleLiveMarbleCountApply(statusPrefix = '') {
+  getCurrentMarbleCount();
+  if (marbleCountApplyTimer) {
+    window.clearTimeout(marbleCountApplyTimer);
+    marbleCountApplyTimer = 0;
+  }
+  marbleCountApplyTimer = window.setTimeout(() => {
+    marbleCountApplyTimer = 0;
+    void applyLiveMarbleCountNow(statusPrefix);
+  }, LIVE_MARBLE_COUNT_DEBOUNCE_MS);
 }
 
 function ensureEngineCanvasFill() {
@@ -6216,30 +6268,6 @@ async function getCurrentMapJsonForSave() {
   return getWorkingMapJson(resolveCurrentMapId());
 }
 
-async function saveSelectedMapOverwrite() {
-  const selected = selectedMapCatalogEntry();
-  if (!selected) {
-    throw new Error('덮어쓸 맵을 목록에서 먼저 선택하세요');
-  }
-  const mapJson = await getCurrentMapJsonForSave();
-  mapJson.id = selected.id;
-  mapJson.title = selected.id;
-  await saveMapViaServer({
-    mode: 'selected',
-    selectedMapId: selected.id,
-    mapJson,
-  });
-  await refreshMapCatalog(selected.id);
-  if (elements.mapSelect) {
-    elements.mapSelect.value = selected.id;
-  }
-  if (elements.mapNameInput) {
-    elements.mapNameInput.value = selected.id;
-  }
-  await loadSelectedCatalogMap();
-  setStatus(`선택 맵 저장 완료: ${selected.id}`);
-}
-
 async function saveAsNewMap() {
   const rawName = String(elements.mapNameInput && elements.mapNameInput.value ? elements.mapNameInput.value : '').trim();
   if (!rawName) {
@@ -6307,30 +6335,15 @@ function handleMakerCanvasRightClickAction() {
 function setupEvents() {
   installContextMenuGuard(window);
 
+  bindEvent(elements.marbleCountInput, 'input', () => {
+    scheduleLiveMarbleCountApply('');
+  });
   bindEvent(elements.marbleCountInput, 'change', () => {
-    getCurrentMarbleCount();
+    scheduleLiveMarbleCountApply('테스트 공 개수 적용 완료');
   });
 
   bindEvent(elements.marbleSizeInput, 'change', () => {
     getCurrentMarbleSizeScale();
-  });
-
-  bindEvent(elements.applyMarbleCountButton, 'click', async () => {
-    const marbleCount = getCurrentMarbleCount();
-    await withEngineAction(async (api) => {
-      const candidateResult = await api.setCandidates(buildAutoCandidates(marbleCount));
-      if (!candidateResult || candidateResult.ok !== true) {
-        throw new Error(candidateResult && candidateResult.reason ? candidateResult.reason : '공 개수 적용에 실패했습니다');
-      }
-      applyMarbleSizeToEngines(getCurrentMarbleSizeScale(), { silent: true });
-      setPlayPauseUi(readEngineRunning(api));
-      setStatus(`테스트 공 개수 적용 완료: ${marbleCount}개`);
-    });
-    await syncPreviewFromDraft({
-      preserveMarbles: false,
-      preserveRunning: false,
-      updateCandidates: true,
-    });
   });
 
   bindEvent(elements.applyMarbleSizeButton, 'click', () => {
@@ -6360,17 +6373,6 @@ function setupEvents() {
     setBusy(true);
     try {
       await loadSelectedCatalogMap();
-    } catch (error) {
-      setStatus(String(error && error.message ? error.message : error), 'error');
-    } finally {
-      setBusy(false);
-    }
-  });
-
-  bindEvent(elements.saveSelectedMapButton, 'click', async () => {
-    setBusy(true);
-    try {
-      await saveSelectedMapOverwrite();
     } catch (error) {
       setStatus(String(error && error.message ? error.message : error), 'error');
     } finally {
