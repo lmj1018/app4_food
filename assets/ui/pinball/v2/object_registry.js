@@ -175,24 +175,22 @@ function drawBottomBumperPath(ctx, halfLen, halfHeight) {
 function buildBottomBumperColliderPoints(halfLen, halfHeight) {
   const safeHalfLen = Math.max(0.08, toFiniteNumber(halfLen, 0.98));
   const safeHalfHeight = Math.max(0.05, toFiniteNumber(halfHeight, 0.34));
-  const edgePad = Math.max(0.002, Math.min(0.02, safeHalfHeight * 0.04));
   const tailX = -safeHalfLen;
-  const bulgeX = tailX - safeHalfLen * 0.3 - edgePad;
   const midX = safeHalfLen * 0.4;
-  const tipX = safeHalfLen + edgePad * 0.55;
-  const top = safeHalfHeight * 0.72 + edgePad;
-  const shoulder = safeHalfHeight * 0.46 + edgePad * 0.28;
-  const wing = safeHalfHeight * 0.88 + edgePad * 0.62;
+  const tipX = safeHalfLen;
+  const top = safeHalfHeight * 0.7;
+  const shoulder = safeHalfHeight * 0.42;
+  const wing = safeHalfHeight * 0.84;
   const points = [
     [tailX, -top],
-    [tailX - safeHalfLen * 0.18 - edgePad * 0.45, -safeHalfHeight * 0.46 - edgePad * 0.22],
-    [bulgeX, 0],
-    [tailX - safeHalfLen * 0.18 - edgePad * 0.45, safeHalfHeight * 0.46 + edgePad * 0.22],
+    [tailX - safeHalfLen * 0.12, -safeHalfHeight * 0.52],
+    [tailX - safeHalfLen * 0.26, 0],
+    [tailX - safeHalfLen * 0.12, safeHalfHeight * 0.52],
     [tailX, top],
     [midX, wing],
-    [tipX * 0.95 + edgePad * 0.26, shoulder],
+    [tipX * 0.94, shoulder],
     [tipX, 0],
-    [tipX * 0.95 + edgePad * 0.26, -shoulder],
+    [tipX * 0.94, -shoulder],
     [midX, -wing],
     [tailX, -top],
   ];
@@ -336,7 +334,7 @@ function compileBottomBumperCollider(raw, entityId) {
   const height = Math.max(0.05, toFiniteNumber(raw && raw.height, 0.34));
   const restitutionInput = toFiniteNumber(raw && raw.restitution, 0.62);
   const frictionInput = toFiniteNumber(raw && raw.friction, 0.03);
-  const restitution = clamp(Math.max(0.62, restitutionInput), 0, 8);
+  const restitution = clamp(Math.max(0.74, restitutionInput), 0, 8);
   const friction = clamp(Math.min(0.03, frictionInput), 0, 8);
   const density = Math.max(0.01, toFiniteNumber(raw && raw.density, 1));
   const sensor = toBoolean(raw && raw.sensor, false) || toBoolean(raw && raw.noCollision, false);
@@ -2657,7 +2655,7 @@ function createBottomBumperBehavior(def, env) {
       return;
     }
     const centroid = getPolylineCentroid(polygon);
-    const clearance = Math.max(0.06, Math.min(0.24, transformState.halfHeight * 0.56));
+    const clearance = Math.max(0.05, Math.min(0.16, transformState.halfHeight * 0.42));
     const marbles = Array.isArray(roulette._marbles) ? roulette._marbles : [];
     for (let index = 0; index < marbles.length; index += 1) {
       const marble = marbles[index];
@@ -2693,7 +2691,7 @@ function createBottomBumperBehavior(def, env) {
         continue;
       }
       const nearestDist = Math.sqrt(Math.max(0, toFiniteNumber(nearest.distSq, 0)));
-      const minPenetration = Math.max(0.18, Math.min(0.34, clearance * 1.9));
+      const minPenetration = Math.max(0.045, Math.min(0.12, clearance * 0.65));
       if (nearestDist < minPenetration) {
         continue;
       }
@@ -2715,15 +2713,19 @@ function createBottomBumperBehavior(def, env) {
       }
       const unitOutX = outwardX / outwardLen;
       const unitOutY = outwardY / outwardLen;
-      const speed = Math.max(3.6, toFiniteNumber(def.force, 3.8) * 1.08);
-      const impulseScale = Math.max(0.18, Math.min(0.52, minPenetration * 0.9));
+      const speed = Math.max(4.2, toFiniteNumber(def.force, 3.8) * 1.16);
+      const impulseScale = Math.max(0.12, Math.min(0.32, minPenetration * 1.8));
       const velocity = typeof body.GetLinearVelocity === 'function' ? body.GetLinearVelocity() : null;
       const baseVx = toFiniteNumber(velocity && velocity.x, 0);
       const baseVy = toFiniteNumber(velocity && velocity.y, 0);
+      const outwardSpeed = baseVx * unitOutX + baseVy * unitOutY;
+      if (outwardSpeed > Math.max(0.9, speed * 0.24)) {
+        continue;
+      }
       const outwardBoostX = unitOutX * speed;
       const outwardBoostY = unitOutY * speed;
-      const nextVx = baseVx * 0.75 + outwardBoostX;
-      const nextVy = baseVy * 0.75 + outwardBoostY;
+      const nextVx = baseVx * 0.82 + outwardBoostX;
+      const nextVy = baseVy * 0.82 + outwardBoostY;
       try {
         if (typeof body.SetEnabled === 'function') {
           body.SetEnabled(true);
@@ -2740,7 +2742,7 @@ function createBottomBumperBehavior(def, env) {
         if (typeof body.SetLinearVelocity === 'function') {
           body.SetLinearVelocity(new box2d.b2Vec2(nextVx, nextVy));
         }
-        ejectCooldownByMarble[marbleKey] = now + 220;
+        ejectCooldownByMarble[marbleKey] = now + 120;
       } catch (_) {
       }
     }
