@@ -1850,7 +1850,6 @@ function createFanBehavior(def, env) {
     const body = entry.body;
     const x = toFiniteNumber(def.x, 0);
     const y = toFiniteNumber(def.y, 0);
-    const angle = degToRad(toFiniteNumber(def.dirDeg, 0));
     try {
       if (typeof body.SetEnabled === 'function') {
         body.SetEnabled(true);
@@ -1859,7 +1858,7 @@ function createFanBehavior(def, env) {
         body.SetAwake(true);
       }
       if (typeof body.SetTransform === 'function') {
-        body.SetTransform(new box2d.b2Vec2(x, y), angle);
+        body.SetTransform(new box2d.b2Vec2(x, y), 0);
       }
       if (typeof body.SetLinearVelocity === 'function') {
         body.SetLinearVelocity(new box2d.b2Vec2(0, 0));

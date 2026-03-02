@@ -124,6 +124,44 @@ function applyAppVisualCompatibility() {
   }
 }
 
+function ensureCanvasFillLayout() {
+  const roulette = getRoulette();
+  const renderer = roulette && roulette._renderer && typeof roulette._renderer === 'object'
+    ? roulette._renderer
+    : null;
+  const canvas = renderer && renderer.canvas
+    ? renderer.canvas
+    : document.querySelector('canvas');
+  if (!canvas) {
+    return;
+  }
+  const root = document.documentElement;
+  if (root && root.__v2CanvasFillApplied !== true) {
+    root.style.width = '100%';
+    root.style.height = '100%';
+    root.style.overflow = 'hidden';
+    root.__v2CanvasFillApplied = true;
+  }
+  const body = document.body;
+  if (body && body.__v2CanvasFillApplied !== true) {
+    body.style.width = '100%';
+    body.style.height = '100%';
+    body.style.margin = '0';
+    body.style.overflow = 'hidden';
+    body.__v2CanvasFillApplied = true;
+  }
+  if (canvas.__v2CanvasFillApplied !== true) {
+    canvas.style.display = 'block';
+    canvas.style.position = 'fixed';
+    canvas.style.inset = '0';
+    canvas.style.width = '100vw';
+    canvas.style.height = '100vh';
+    canvas.style.maxWidth = '100vw';
+    canvas.style.maxHeight = '100vh';
+    canvas.__v2CanvasFillApplied = true;
+  }
+}
+
 function installContextMenuGuard() {
   if (window.__v2RuntimeContextMenuGuard === true) {
     return;
@@ -711,6 +749,7 @@ function startTickLoop() {
   control.tickStarted = true;
   const tick = () => {
     const now = Date.now();
+    ensureCanvasFillLayout();
     applyAppVisualCompatibility();
     suppressMarbleCooldownIndicator();
     updateSkillPolicy(now);
@@ -1441,6 +1480,7 @@ function getCurrentMapJson() {
 
 async function init(payload = {}) {
   await ensureRouletteReady();
+  ensureCanvasFillLayout();
   control.fromApp = detectFromAppContext(payload);
   applyAppVisualCompatibility();
   patchPhysicsStep();

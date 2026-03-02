@@ -33,6 +33,8 @@ class PinballV2Screen extends StatefulWidget {
 class _PinballV2ScreenState extends State<PinballV2Screen> {
   static const String _pinballAssetDir = 'assets/ui/pinball';
   static const Duration _startupTimeout = Duration(seconds: 30);
+  static const String _thirdPartyNoticesAssetPath =
+      'assets/licenses/THIRD_PARTY_NOTICES.txt';
   static const List<String> _slowMotionBannerAssets = <String>[
     'assets/background/p1_1.png',
     'assets/background/p2_1.png',
@@ -40,6 +42,30 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
   static const Duration _slowMotionFirstTrigger = Duration(seconds: 4);
   static const Duration _slowMotionSecondTrigger = Duration(seconds: 8);
   static const Duration _slowMotionBannerDuration = Duration(seconds: 3);
+  static const String _thirdPartyNoticesFallback = '''
+Marble Roulette (Pinball Engine)
+Copyright (c) 2022 lazygyu
+
+Licensed under the MIT License.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+''';
 
   late final WebViewController _controller;
   HttpServer? _localServer;
@@ -275,6 +301,91 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
       _slowMotionActive = false;
       _slowMotionActiveSince = null;
     }
+  }
+
+  Future<String> _loadThirdPartyNoticesText() async {
+    try {
+      final text = await rootBundle.loadString(_thirdPartyNoticesAssetPath);
+      if (text.trim().isNotEmpty) {
+        return text;
+      }
+    } catch (_) {}
+    return _thirdPartyNoticesFallback;
+  }
+
+  Future<void> _showLicenseNotice() async {
+    final noticeText = await _loadThirdPartyNoticesText();
+    if (!mounted) {
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        final textTheme = Theme.of(dialogContext).textTheme;
+        return Dialog(
+          backgroundColor: const Color(0xFF101214),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 10,
+            vertical: 14,
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 560),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Licensed',
+                          style: textTheme.titleMedium?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        icon: const Icon(
+                          Icons.close_rounded,
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Container(
+                    height: 1,
+                    color: Colors.white.withValues(alpha: 0.14),
+                  ),
+                  const SizedBox(height: 6),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: SelectableText(
+                        noticeText,
+                        style: textTheme.bodySmall?.copyWith(
+                          color: Colors.white.withValues(alpha: 0.92),
+                          height: 1.45,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      child: const Text('닫기'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   ContentType _contentTypeForPath(String path) {
@@ -886,6 +997,43 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
                 ),
               ),
             ),
+          SafeArea(
+            child: Align(
+              alignment: Alignment.bottomRight,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8, bottom: 2),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(7),
+                    onTap: _showLicenseNotice,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.68),
+                        borderRadius: BorderRadius.circular(7),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.16),
+                          width: 0.8,
+                        ),
+                      ),
+                      child: const Text(
+                        'Licensed',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 8.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
