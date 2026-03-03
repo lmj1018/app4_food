@@ -2632,7 +2632,6 @@ function createBottomBumperBehavior(def, env) {
   let lastTickAt = 0;
   let lastCenterX = NaN;
   let lastCenterY = NaN;
-  let nextVisualAt = 0;
   let broken = false;
   let remainingBreakHits = configuredBreakHitCount;
   let visualEffect = null;
@@ -2963,44 +2962,6 @@ function createBottomBumperBehavior(def, env) {
     roulette._effects.push(visualEffect);
   }
 
-  function emitSwingVisual(now, tipX, tipY) {
-    if (now < nextVisualAt) {
-      return;
-    }
-    nextVisualAt = now + 120;
-    const roulette = env.getRoulette();
-    if (!roulette || !Array.isArray(roulette._effects)) {
-      return;
-    }
-    roulette._effects.push({
-      elapsed: 0,
-      duration: 220,
-      isDestroy: false,
-      update(deltaMs) {
-        this.elapsed += toFiniteNumber(deltaMs, 0);
-        if (this.elapsed >= this.duration) {
-          this.isDestroy = true;
-        }
-      },
-      render(ctx, zoomScale) {
-        if (!ctx) {
-          return;
-        }
-        const ratio = clamp(this.elapsed / Math.max(1, this.duration), 0, 1);
-        const radius = 0.24 + ratio * 0.58;
-        const alpha = Math.max(0, 0.45 * (1 - ratio));
-        ctx.save();
-        ctx.globalAlpha = alpha;
-        ctx.strokeStyle = 'rgba(122, 214, 255, 0.95)';
-        ctx.lineWidth = Math.max(0.55, 1.15 / Math.max(1, toFiniteNumber(zoomScale, 1)));
-        ctx.beginPath();
-        ctx.arc(tipX, tipY, radius, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.restore();
-      },
-    });
-  }
-
   function updateTransform(now) {
     const mainEntry = getMainEntry();
     const shortEntry = getBrokenEntry();
@@ -3167,7 +3128,6 @@ function createBottomBumperBehavior(def, env) {
         continue;
       }
       setHitCooldown(marble.id, now);
-      emitSwingVisual(now, transformState.tipX, transformState.tipY);
       consumeBreakHit(now);
     }
   }
@@ -3204,7 +3164,6 @@ function createBottomBumperBehavior(def, env) {
         lastTickAt: toFiniteNumber(lastTickAt, 0),
         lastCenterX: toFiniteNumber(lastCenterX, toFiniteNumber(def.x, 0)),
         lastCenterY: toFiniteNumber(lastCenterY, toFiniteNumber(def.y, 0)),
-        nextVisualAt: toFiniteNumber(nextVisualAt, 0),
         broken,
         remainingBreakHits: Math.max(0, toFiniteNumber(remainingBreakHits, configuredBreakHitCount)),
         cooldownByMarble: { ...cooldownByMarble },
@@ -3219,7 +3178,6 @@ function createBottomBumperBehavior(def, env) {
       lastTickAt = Math.max(0, toFiniteNumber(safeState.lastTickAt, 0));
       lastCenterX = toFiniteNumber(safeState.lastCenterX, toFiniteNumber(def.x, 0));
       lastCenterY = toFiniteNumber(safeState.lastCenterY, toFiniteNumber(def.y, 0));
-      nextVisualAt = Math.max(0, toFiniteNumber(safeState.nextVisualAt, 0));
       for (const key of Object.keys(cooldownByMarble)) {
         delete cooldownByMarble[key];
       }
