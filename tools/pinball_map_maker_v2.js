@@ -111,6 +111,7 @@ const elements = {
   stageDisableSkillsInput: document.getElementById('stageDisableSkillsInput'),
   stageDisableSkillsSlowInput: document.getElementById('stageDisableSkillsSlowInput'),
   stageSkillWarmupSecInput: document.getElementById('stageSkillWarmupSecInput'),
+  stageHideMiniMapInput: document.getElementById('stageHideMiniMapInput'),
   stageResetOnObjectChangeInput: document.getElementById('stageResetOnObjectChangeInput'),
   applyViewZoomButton: document.getElementById('applyViewZoomButton'),
   applyMarbleSizeButton: document.getElementById('applyMarbleSizeButton'),
@@ -135,6 +136,9 @@ const elements = {
   objRadiusLabel: document.getElementById('objRadiusLabel'),
   objRadiusInput: document.getElementById('objRadiusInput'),
   objRotationInput: document.getElementById('objRotationInput'),
+  objDiamondRotateInput: document.getElementById('objDiamondRotateInput'),
+  objDiamondRotateSpeedInput: document.getElementById('objDiamondRotateSpeedInput'),
+  objDiamondRotateAutoInput: document.getElementById('objDiamondRotateAutoInput'),
   reverseRotationButton: document.getElementById('reverseRotationButton'),
   objPairInput: document.getElementById('objPairInput'),
   objDirLabel: document.getElementById('objDirLabel'),
@@ -143,6 +147,8 @@ const elements = {
   objForceInput: document.getElementById('objForceInput'),
   objIntervalLabel: document.getElementById('objIntervalLabel'),
   objIntervalInput: document.getElementById('objIntervalInput'),
+  objBreakHitCountLabel: document.getElementById('objBreakHitCountLabel'),
+  objBreakHitCountInput: document.getElementById('objBreakHitCountInput'),
   objHitDistanceLabel: document.getElementById('objHitDistanceLabel'),
   objHitDistanceInput: document.getElementById('objHitDistanceInput'),
   objRestitutionInput: document.getElementById('objRestitutionInput'),
@@ -371,6 +377,28 @@ function readEngineRunning(api) {
   return !!(state && state.running === true);
 }
 
+function shouldHideMiniMapInMaker() {
+  return !!(elements.stageHideMiniMapInput && elements.stageHideMiniMapInput.checked);
+}
+
+async function applyMiniMapVisibilityToEngine(api, options = {}) {
+  if (!api || typeof api.setMiniMapVisible !== 'function') {
+    return false;
+  }
+  const visible = !shouldHideMiniMapInMaker();
+  const result = await api.setMiniMapVisible(visible);
+  if (!result || result.ok !== true) {
+    if (options.throwOnFail === true) {
+      throw new Error(result && result.reason ? result.reason : '미니맵 표시 설정 실패');
+    }
+    return false;
+  }
+  if (options.silent !== true) {
+    setStatus(visible ? '인게임 미니맵 표시' : '인게임 미니맵 숨김');
+  }
+  return true;
+}
+
 function applyViewZoomRespectRunning() {
   const api = getEngineApi();
   const running = readEngineRunning(api);
@@ -434,6 +462,7 @@ function setBusy(isBusy) {
     elements.stageDisableSkillsInput,
     elements.stageDisableSkillsSlowInput,
     elements.stageSkillWarmupSecInput,
+    elements.stageHideMiniMapInput,
     elements.applyViewZoomButton,
     elements.applyMarbleSizeButton,
     elements.fitStageButton,
@@ -450,11 +479,15 @@ function setBusy(isBusy) {
     elements.objExtra2Input,
     elements.objRadiusInput,
     elements.objRotationInput,
+    elements.objDiamondRotateInput,
+    elements.objDiamondRotateSpeedInput,
+    elements.objDiamondRotateAutoInput,
     elements.reverseRotationButton,
     elements.objPairInput,
     elements.objDirInput,
     elements.objForceInput,
     elements.objIntervalInput,
+    elements.objBreakHitCountInput,
     elements.objHitDistanceInput,
     elements.objRestitutionInput,
     elements.objFrictionInput,
@@ -700,6 +733,7 @@ function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
         obj.mirror = obj.mirror === true;
         obj.force = Math.max(0.1, toFinite(obj.force, 3.8));
         obj.intervalMs = Math.max(80, Math.floor(toFinite(obj.intervalMs, 780)));
+        obj.breakHitCount = Math.max(0, Math.floor(toFinite(obj.breakHitCount, 0)));
         obj.triggerRadius = Math.max(0.2, toFinite(obj.triggerRadius, 1.25));
         obj.hitDistance = Math.max(0.2, toFinite(obj.hitDistance, 1.15));
         obj.swingDeg = Math.max(2, toFinite(obj.swingDeg, 34));
@@ -708,6 +742,18 @@ function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
         if (typeof obj.color !== 'string' || !obj.color.trim()) {
           obj.color = OBJECT_COLOR_PRESET.bottomBumper;
         }
+      } else if (type === 'diamond_block') {
+        const half = round1(Math.max(0.12, toFinite(obj.width, toFinite(obj.height, 0.12))));
+        obj.width = half;
+        obj.height = half;
+        obj.rotation = round1(normalizeDeg(toFinite(obj.rotation, 45)));
+        obj.rotateEnabled = obj.rotateEnabled === true
+          || obj.rotateEnabled === 1
+          || String(obj.rotateEnabled || '').trim().toLowerCase() === 'true';
+        obj.rotateSpeedDeg = round1(clamp(toFinite(obj.rotateSpeedDeg, 120), -720, 720));
+        obj.rotateSpeedAuto = obj.rotateSpeedAuto === true
+          || obj.rotateSpeedAuto === 1
+          || String(obj.rotateSpeedAuto || '').trim().toLowerCase() === 'true';
       } else if (type === 'goal_marker_image') {
         const src = String(obj.imageSrc || '').trim();
         obj.imageSrc = !src || src.includes('goal_line_tab1.svg')
@@ -1973,6 +2019,9 @@ function createObjectByTool(tool, x, y) {
       width: 0.34,
       height: 0.34,
       rotation: 45,
+      rotateEnabled: false,
+      rotateSpeedDeg: 120,
+      rotateSpeedAuto: false,
       restitution: 1.5,
       color: OBJECT_COLOR_PRESET.diamond,
     };
@@ -2079,6 +2128,7 @@ function createObjectByTool(tool, x, y) {
       mirror: false,
       force: 3.8,
       intervalMs: 780,
+      breakHitCount: 0,
       triggerRadius: 1.25,
       cooldownMs: 160,
       swingDeg: 34,
@@ -2204,10 +2254,26 @@ function clearObjectEditor() {
     elements.objRotationInput.value = '';
     elements.objRotationInput.disabled = true;
   }
+  if (elements.objDiamondRotateInput) {
+    elements.objDiamondRotateInput.checked = false;
+    elements.objDiamondRotateInput.disabled = true;
+  }
+  if (elements.objDiamondRotateSpeedInput) {
+    elements.objDiamondRotateSpeedInput.value = '';
+    elements.objDiamondRotateSpeedInput.disabled = true;
+  }
+  if (elements.objDiamondRotateAutoInput) {
+    elements.objDiamondRotateAutoInput.checked = false;
+    elements.objDiamondRotateAutoInput.disabled = true;
+  }
   if (elements.objPairInput) elements.objPairInput.value = '';
   if (elements.objDirInput) elements.objDirInput.value = '';
   if (elements.objForceInput) elements.objForceInput.value = '';
   if (elements.objIntervalInput) elements.objIntervalInput.value = '';
+  if (elements.objBreakHitCountInput) {
+    elements.objBreakHitCountInput.value = '';
+    elements.objBreakHitCountInput.disabled = true;
+  }
   if (elements.objHitDistanceInput) elements.objHitDistanceInput.value = '';
   if (elements.objHitDistanceInput) elements.objHitDistanceInput.disabled = true;
   if (elements.objRestitutionInput) {
@@ -2228,6 +2294,7 @@ function clearObjectEditor() {
   if (elements.objDirLabel) elements.objDirLabel.textContent = '방향 각도(도)';
   if (elements.objForceLabel) elements.objForceLabel.textContent = '힘';
   if (elements.objIntervalLabel) elements.objIntervalLabel.textContent = '간격(ms)';
+  if (elements.objBreakHitCountLabel) elements.objBreakHitCountLabel.textContent = '파손 충격 횟수(0=비활성)';
 }
 
 function populateObjectEditor() {
@@ -2264,6 +2331,23 @@ function populateObjectEditor() {
     elements.objRotationInput.value = canRotate
       ? String(round1(toFinite(obj.rotation, 0)))
       : (isAimDirectionalObject(obj) ? '0' : '');
+  }
+  if (elements.objDiamondRotateInput) {
+    const isDiamond = obj.type === 'diamond_block';
+    elements.objDiamondRotateInput.disabled = !isDiamond;
+    elements.objDiamondRotateInput.checked = isDiamond && obj.rotateEnabled === true;
+  }
+  if (elements.objDiamondRotateSpeedInput) {
+    const isDiamond = obj.type === 'diamond_block';
+    elements.objDiamondRotateSpeedInput.disabled = !isDiamond;
+    elements.objDiamondRotateSpeedInput.value = isDiamond
+      ? String(round1(clamp(toFinite(obj.rotateSpeedDeg, 120), -720, 720)))
+      : '';
+  }
+  if (elements.objDiamondRotateAutoInput) {
+    const isDiamond = obj.type === 'diamond_block';
+    elements.objDiamondRotateAutoInput.disabled = !isDiamond;
+    elements.objDiamondRotateAutoInput.checked = isDiamond && obj.rotateSpeedAuto === true;
   }
   if (elements.objRestitutionInput) {
     const canTuneImpact = supportsImpactTuning(obj);
@@ -2452,6 +2536,18 @@ function populateObjectEditor() {
       intervalLabel = '랜덤 간격(ms)';
     }
     elements.objIntervalLabel.textContent = intervalLabel;
+  }
+  if (elements.objBreakHitCountInput) {
+    const isBottomBumper = obj.type === 'bottom_bumper';
+    elements.objBreakHitCountInput.disabled = !isBottomBumper;
+    elements.objBreakHitCountInput.value = isBottomBumper
+      ? String(Math.max(0, Math.floor(toFinite(obj.breakHitCount, 0))))
+      : '';
+  }
+  if (elements.objBreakHitCountLabel) {
+    elements.objBreakHitCountLabel.textContent = obj.type === 'bottom_bumper'
+      ? '파손 충격 횟수(0=비활성)'
+      : '파손 충격 횟수(미사용)';
   }
 
   if (isPolylineObject(obj)) {
@@ -2672,6 +2768,11 @@ function buildFloatingInspectorFieldDefs(obj) {
   if (elements.objRotationInput && !elements.objRotationInput.disabled) {
     pushField('objRotationInput', '회전 각도');
   }
+  if (obj.type === 'diamond_block' && elements.objDiamondRotateInput && !elements.objDiamondRotateInput.disabled) {
+    pushField('objDiamondRotateInput', '자동 회전', { force: true });
+    pushField('objDiamondRotateSpeedInput', '회전 속도(도/초)', { force: true });
+    pushField('objDiamondRotateAutoInput', '속도 자동', { force: true });
+  }
 
   if (obj.type === 'portal' || obj.type === 'goal_marker_image' || (elements.objPairInput && String(elements.objPairInput.value || '').trim())) {
     pushField('objPairInput', obj.type === 'goal_marker_image' ? '이미지 경로' : '연결 포털', {
@@ -2683,6 +2784,9 @@ function buildFloatingInspectorFieldDefs(obj) {
   pushField('objDirInput', readMakerLabelText(elements.objDirLabel, '방향'));
   pushField('objForceInput', readMakerLabelText(elements.objForceLabel, '힘'));
   pushField('objIntervalInput', readMakerLabelText(elements.objIntervalLabel, '간격(ms)'));
+  if (elements.objBreakHitCountInput && !elements.objBreakHitCountInput.disabled) {
+    pushField('objBreakHitCountInput', readMakerLabelText(elements.objBreakHitCountLabel, '파손 충격 횟수'));
+  }
   if (elements.objHitDistanceInput && !elements.objHitDistanceInput.disabled) {
     pushField('objHitDistanceInput', readMakerLabelText(elements.objHitDistanceLabel, '이동거리'));
   }
@@ -2924,7 +3028,7 @@ function sharedSyncKeysForType(type) {
     case 'box_block':
       return ['color', 'width', 'height', 'rotation', 'restitution', 'friction'];
     case 'diamond_block':
-      return ['color', 'width', 'height', 'rotation', 'restitution', 'friction'];
+      return ['color', 'width', 'height', 'rotation', 'rotateEnabled', 'rotateSpeedDeg', 'rotateSpeedAuto', 'restitution', 'friction'];
     case 'rotor':
       return ['color', 'width', 'height', 'rotation', 'angularVelocity', 'restitution', 'friction'];
     case 'peg_circle':
@@ -2940,7 +3044,7 @@ function sharedSyncKeysForType(type) {
     case 'hammer':
       return ['color', 'width', 'height', 'dirDeg', 'force', 'intervalMs', 'triggerRadius', 'cooldownMs', 'swingDeg', 'swingDurationMs', 'hitDistance', 'doubleHit', 'restitution', 'friction'];
     case 'bottom_bumper':
-      return ['color', 'width', 'height', 'dirDeg', 'mirror', 'force', 'intervalMs', 'triggerRadius', 'cooldownMs', 'swingDeg', 'swingDurationMs', 'hitDistance', 'restitution', 'friction'];
+      return ['color', 'width', 'height', 'dirDeg', 'mirror', 'force', 'intervalMs', 'breakHitCount', 'triggerRadius', 'cooldownMs', 'swingDeg', 'swingDurationMs', 'hitDistance', 'restitution', 'friction'];
     case 'fan':
       return ['color', 'width', 'height', 'dirDeg', 'force', 'triggerRadius', 'hitDistance', 'restitution', 'friction'];
     case 'sticky_pad':
@@ -3269,6 +3373,10 @@ function applyObjectEditorValues() {
       elements.objIntervalInput ? elements.objIntervalInput.value : obj.intervalMs,
       toFinite(obj.intervalMs, 780),
     )));
+    obj.breakHitCount = Math.max(0, Math.floor(toFinite(
+      elements.objBreakHitCountInput ? elements.objBreakHitCountInput.value : obj.breakHitCount,
+      toFinite(obj.breakHitCount, 0),
+    )));
     obj.hitDistance = round1(toFinite(
       elements.objHitDistanceInput ? elements.objHitDistanceInput.value : obj.hitDistance,
       toFinite(obj.hitDistance, 1.15),
@@ -3375,6 +3483,16 @@ function applyObjectEditorValues() {
     const half = round1(Math.max(0.12, toFinite(obj.width, toFinite(obj.height, 0.12))));
     obj.width = half;
     obj.height = half;
+    obj.rotateEnabled = !!(elements.objDiamondRotateInput && elements.objDiamondRotateInput.checked);
+    obj.rotateSpeedDeg = round1(clamp(
+      toFinite(
+        elements.objDiamondRotateSpeedInput ? elements.objDiamondRotateSpeedInput.value : obj.rotateSpeedDeg,
+        toFinite(obj.rotateSpeedDeg, 120),
+      ),
+      -720,
+      720,
+    ));
+    obj.rotateSpeedAuto = !!(elements.objDiamondRotateAutoInput && elements.objDiamondRotateAutoInput.checked);
   }
   obj.radius = round1(toFinite(elements.objRadiusInput ? elements.objRadiusInput.value : obj.radius, toFinite(obj.radius, 0.6)));
   obj.rotation = round1(toFinite(elements.objRotationInput ? elements.objRotationInput.value : obj.rotation, toFinite(obj.rotation, 0)));
@@ -6038,6 +6156,7 @@ function createBottomBumperFromDrag(startWorld, endWorld, options = {}) {
     mirror: false,
     force: 3.8,
     intervalMs: 780,
+    breakHitCount: 0,
     triggerRadius: round1(Math.max(0.35, Math.max(halfWidth, halfHeight) + 0.4)),
     cooldownMs: 160,
     swingDeg: 34,
@@ -7417,6 +7536,7 @@ async function applyDraftLiveNow(reason = '') {
       preserveRunning: preserveRunningForApply,
       updateCandidates: false,
     });
+    await applyMiniMapVisibilityToEngine(api, { silent: true });
     if (shouldReset && !shouldAutoStartAfterReset) {
       if (typeof api.pause === 'function') {
         await api.pause();
@@ -7563,6 +7683,7 @@ async function applyMapAndCandidates() {
     if (!candidateResult || candidateResult.ok !== true) {
       throw new Error(candidateResult && candidateResult.reason ? candidateResult.reason : '후보 설정에 실패했습니다');
     }
+    await applyMiniMapVisibilityToEngine(api, { silent: true });
     ensureEngineCanvasFill();
     syncViewZoomInputFromEngine();
     setPlayPauseUi(readEngineRunning(api));
@@ -7681,6 +7802,7 @@ async function loadEngineFrame() {
   if (!startupCandidates || startupCandidates.ok !== true) {
     throw new Error(startupCandidates && startupCandidates.reason ? startupCandidates.reason : '초기 공 후보 설정 실패');
   }
+  await applyMiniMapVisibilityToEngine(api, { silent: true });
   if (typeof api.getCurrentMapJson === 'function') {
     const mapJson = api.getCurrentMapJson();
     if (mapJson && typeof mapJson === 'object') {
@@ -7839,6 +7961,7 @@ async function deleteSelectedMapFromCatalog() {
       preserveRunning: false,
       updateCandidates: true,
     });
+    await applyMiniMapVisibilityToEngine(api, { silent: true });
     ensureEngineCanvasFill();
     syncViewZoomInputFromEngine();
     setPlayPauseUi(readEngineRunning(api));
@@ -8157,6 +8280,9 @@ function setupEvents() {
     elements.objExtra2Input,
     elements.objRadiusInput,
     elements.objRotationInput,
+    elements.objDiamondRotateInput,
+    elements.objDiamondRotateSpeedInput,
+    elements.objDiamondRotateAutoInput,
     elements.objPairInput,
     elements.objDirInput,
     elements.objForceInput,
@@ -8229,6 +8355,17 @@ function setupEvents() {
   });
   bindEvent(elements.stageSkillWarmupSecInput, 'change', () => {
     scheduleAutoStageApply('스테이지 자동 반영');
+  });
+  bindEvent(elements.stageHideMiniMapInput, 'change', async () => {
+    await withEngineAction(async (api) => {
+      const applied = await applyMiniMapVisibilityToEngine(api, {
+        silent: true,
+        throwOnFail: true,
+      });
+      if (applied) {
+        setStatus(shouldHideMiniMapInMaker() ? '인게임 미니맵 숨김' : '인게임 미니맵 표시');
+      }
+    });
   });
   bindEvent(elements.viewZoomInput, 'input', () => {
     applyViewZoomRespectRunning();

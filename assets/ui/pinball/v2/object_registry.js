@@ -60,6 +60,28 @@ function toBoolean(value, fallback = false) {
   return fallback;
 }
 
+function toTruthyBoolean(value, fallback = false) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value !== 0 : fallback;
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) {
+      return fallback;
+    }
+    if (normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on') {
+      return true;
+    }
+    if (normalized === 'false' || normalized === '0' || normalized === 'no' || normalized === 'off') {
+      return false;
+    }
+  }
+  return fallback;
+}
+
 function toId(value, fallback) {
   if (typeof value === 'string' && value.trim()) {
     return value.trim();
@@ -693,18 +715,33 @@ function compileDiamond(raw, entityId) {
   const rotationDeg = Number.isFinite(Number(raw.rotation))
     ? toFiniteNumber(raw.rotation, 45)
     : 45;
+  const rotateEnabled = toTruthyBoolean(raw.rotateEnabled, false);
+  const hasRotateSpeedDeg = Number.isFinite(Number(raw.rotateSpeedDeg));
+  const hasRotateSpeedRad = Number.isFinite(Number(raw.rotateSpeedRad));
+  const desiredAngularVelocity = hasRotateSpeedDeg
+    ? degToRad(toFiniteNumber(raw.rotateSpeedDeg, 120))
+    : (hasRotateSpeedRad
+      ? toFiniteNumber(raw.rotateSpeedRad, degToRad(120))
+      : toFiniteNumber(raw.angularVelocity, degToRad(120)));
+  const angularVelocity = rotateEnabled
+    ? (Math.abs(desiredAngularVelocity) < 0.01
+      ? degToRad(120)
+      : desiredAngularVelocity)
+    : 0;
   return compileBox(
     {
       ...raw,
       width: Math.max(0.05, toFiniteNumber(raw.width, size)),
       height: Math.max(0.05, toFiniteNumber(raw.height, size)),
       rotation: rotationDeg,
+      bodyType: rotateEnabled ? 'kinematic' : 'static',
+      angularVelocity,
       restitution: toFiniteNumber(raw.restitution, 1.4),
       density: toFiniteNumber(raw.density, 1),
       color: typeof raw.color === 'string' ? raw.color : DEFAULT_OBJECT_COLORS.diamond,
     },
     entityId,
-    false,
+    rotateEnabled,
   );
 }
 
@@ -782,7 +819,23 @@ function compileObject(rawObject, entityId) {
     case 'diamond_block':
       return {
         entity: compileDiamond(rawObject, entityId),
-        behavior: null,
+        behavior: toTruthyBoolean(rawObject.rotateEnabled, false) && toTruthyBoolean(rawObject.rotateSpeedAuto, false)
+          ? {
+            kind: 'diamond_auto_rotate',
+            oid: toId(rawObject.oid, `diamond_${entityId}`),
+            entityId,
+            maxAbsSpeedDeg: Math.max(
+              30,
+              Math.abs(
+                toFiniteNumber(
+                  rawObject.maxAbsRotateSpeedDeg,
+                  toFiniteNumber(rawObject.rotateAutoMaxSpeedDeg, 0),
+                ),
+              ),
+              Math.abs(toFiniteNumber(rawObject.rotateSpeedDeg, 120)),
+            ),
+          }
+          : null,
       };
     case 'peg_circle':
       return {
@@ -1057,31 +1110,44 @@ function compileObject(rawObject, entityId) {
         const bumperColor = typeof rawObject.color === 'string'
           ? rawObject.color
           : DEFAULT_OBJECT_COLORS.bottomBumper;
-      return {
-        entity: compileBottomBumperCollider(
+        const safeWidth = Math.max(0.08, toFiniteNumber(rawObject.width, 0.98));
+        const safeHeight = Math.max(0.05, toFiniteNumber(rawObject.height, 0.34));
+        const safeRestitution = Math.max(0.38, toFiniteNumber(rawObject.restitution, 0.62));
+        const safeFriction = Math.min(0.08, toFiniteNumber(rawObject.friction, 0.03));
+        const colliderBase = {
+          ...rawObject,
+          width: safeWidth,
+          height: safeHeight,
+          restitution: safeRestitution,
+          friction: safeFriction,
+        };
+        const mainEntity = compileBottomBumperCollider(colliderBase, entityId);
+        const brokenEntity = compileBottomBumperCollider(
           {
-            ...rawObject,
-            width: Math.max(0.08, toFiniteNumber(rawObject.width, 0.98)),
-            height: Math.max(0.05, toFiniteNumber(rawObject.height, 0.34)),
-            restitution: Math.max(0.38, toFiniteNumber(rawObject.restitution, 0.62)),
-            friction: Math.min(0.08, toFiniteNumber(rawObject.friction, 0.03)),
+            ...colliderBase,
+            width: Math.max(0.08, safeWidth / 3),
           },
-          entityId,
-        ),
+          entityId + 1,
+        );
+      return {
+        entity: mainEntity,
+        entities: [mainEntity, brokenEntity],
         behavior: {
           kind: 'bottom_bumper',
           oid: toId(rawObject.oid, `bottom_bumper_${entityId}`),
           entityId,
+          entityIds: [entityId, entityId + 1],
           x: toFiniteNumber(rawObject.x, 11.75),
           y: toFiniteNumber(rawObject.y, 72),
-          width: Math.max(0.08, toFiniteNumber(rawObject.width, 0.98)),
-          height: Math.max(0.05, toFiniteNumber(rawObject.height, 0.34)),
+          width: safeWidth,
+          height: safeHeight,
           rotation: toFiniteNumber(rawObject.rotation, toFiniteNumber(rawObject.dirDeg, 270)),
           dirDeg: toFiniteNumber(rawObject.dirDeg, toFiniteNumber(rawObject.rotation, 270)),
           mirror: toBoolean(rawObject.mirror, false),
           color: bumperColor,
           force: Math.max(0.1, toFiniteNumber(rawObject.force, 3.8)),
           intervalMs: Math.max(80, toFiniteNumber(rawObject.intervalMs, 780)),
+          breakHitCount: Math.max(0, Math.floor(toFiniteNumber(rawObject.breakHitCount, 0))),
           triggerRadius: Math.max(0.2, toFiniteNumber(rawObject.triggerRadius, 1.25)),
           hitDistance: Math.max(0.2, toFiniteNumber(rawObject.hitDistance, 1.15)),
           swingDeg: Math.max(2, toFiniteNumber(rawObject.swingDeg, 34)),
@@ -2550,6 +2616,16 @@ function createHammerBehavior(def, env) {
 function createBottomBumperBehavior(def, env) {
   const cooldownByMarble = {};
   const ejectCooldownByMarble = {};
+  const configuredBreakHitCount = Math.max(0, Math.floor(toFiniteNumber(def.breakHitCount, 0)));
+  const entityIds = Array.isArray(def.entityIds)
+    ? def.entityIds.map((id) => toFiniteNumber(id, NaN)).filter((id) => Number.isFinite(id))
+    : [];
+  const mainEntityId = Number.isFinite(toFiniteNumber(def.entityId, NaN))
+    ? toFiniteNumber(def.entityId, NaN)
+    : (entityIds.length > 0 ? entityIds[0] : NaN);
+  const brokenEntityId = entityIds.length > 1 ? entityIds[1] : NaN;
+  const offscreenX = -9999;
+  const offscreenY = -9999;
   let nextSwingAt = 0;
   let swingStartAt = 0;
   let swingUntil = 0;
@@ -2557,20 +2633,40 @@ function createBottomBumperBehavior(def, env) {
   let lastCenterX = NaN;
   let lastCenterY = NaN;
   let nextVisualAt = 0;
+  let broken = false;
+  let remainingBreakHits = configuredBreakHitCount;
   let visualEffect = null;
 
-  function getEntry() {
+  function getEntryByEntityId(targetEntityId) {
+    if (!Number.isFinite(toFiniteNumber(targetEntityId, NaN))) {
+      return null;
+    }
     const roulette = env.getRoulette();
     const physics = roulette && roulette.physics ? roulette.physics : null;
     const entities = physics && Array.isArray(physics.entities) ? physics.entities : [];
     for (let index = 0; index < entities.length; index += 1) {
       const entry = entities[index];
       const entityId = toFiniteNumber(entry && entry.shape && entry.shape.__v2eid, NaN);
-      if (Number.isFinite(entityId) && entityId === toFiniteNumber(def.entityId, -1)) {
+      if (Number.isFinite(entityId) && entityId === targetEntityId) {
         return entry;
       }
     }
     return null;
+  }
+
+  function getMainEntry() {
+    return getEntryByEntityId(mainEntityId);
+  }
+
+  function getBrokenEntry() {
+    return getEntryByEntityId(brokenEntityId);
+  }
+
+  function getActiveEntry() {
+    if (broken) {
+      return getBrokenEntry() || getMainEntry();
+    }
+    return getMainEntry() || getBrokenEntry();
   }
 
   function randomUnit() {
@@ -2585,6 +2681,53 @@ function createBottomBumperBehavior(def, env) {
     nextSwingAt = now + Math.round(baseInterval * factor);
   }
 
+  function setEntryEnabled(entry, enabled) {
+    if (!entry) {
+      return;
+    }
+    const box2d = env.getBox2D();
+    const body = entry.body;
+    if (!body || !box2d || typeof box2d.b2Vec2 !== 'function') {
+      if (enabled) {
+        return;
+      }
+      entry.x = offscreenX;
+      entry.y = offscreenY;
+      if (entry.position && typeof entry.position === 'object') {
+        entry.position.x = offscreenX;
+        entry.position.y = offscreenY;
+      }
+      return;
+    }
+    try {
+      if (typeof body.SetEnabled === 'function') {
+        body.SetEnabled(enabled === true);
+      }
+      if (typeof body.SetAwake === 'function') {
+        body.SetAwake(enabled === true);
+      }
+      if (typeof body.SetLinearVelocity === 'function') {
+        body.SetLinearVelocity(new box2d.b2Vec2(0, 0));
+      }
+      if (typeof body.SetAngularVelocity === 'function') {
+        body.SetAngularVelocity(0);
+      }
+      if (!enabled && typeof body.SetTransform === 'function') {
+        const currentAngle = typeof body.GetAngle === 'function' ? body.GetAngle() : 0;
+        body.SetTransform(new box2d.b2Vec2(offscreenX, offscreenY), currentAngle);
+      }
+    } catch (_) {
+    }
+    if (!enabled) {
+      entry.x = offscreenX;
+      entry.y = offscreenY;
+      if (entry.position && typeof entry.position === 'object') {
+        entry.position.x = offscreenX;
+        entry.position.y = offscreenY;
+      }
+    }
+  }
+
   function applyBodyTransform(entry, centerX, centerY, angleRad, velocityX, velocityY) {
     const box2d = env.getBox2D();
     if (!entry || !entry.body || !box2d || typeof box2d.b2Vec2 !== 'function') {
@@ -2596,12 +2739,7 @@ function createBottomBumperBehavior(def, env) {
     }
     const body = entry.body;
     try {
-      if (typeof body.SetEnabled === 'function') {
-        body.SetEnabled(true);
-      }
-      if (typeof body.SetAwake === 'function') {
-        body.SetAwake(true);
-      }
+      setEntryEnabled(entry, true);
       if (typeof body.SetTransform === 'function') {
         body.SetTransform(new box2d.b2Vec2(centerX, centerY), angleRad);
       }
@@ -2646,7 +2784,7 @@ function createBottomBumperBehavior(def, env) {
     if (!roulette || !physics || !physics.marbleMap || !box2d || typeof box2d.b2Vec2 !== 'function') {
       return;
     }
-    const entry = getEntry();
+    const entry = getActiveEntry();
     if (!entry || !entry.shape || !Array.isArray(entry.shape.points)) {
       return;
     }
@@ -2762,7 +2900,7 @@ function createBottomBumperBehavior(def, env) {
       isDestroy: false,
       update(deltaMs) {
         this.elapsed += toFiniteNumber(deltaMs, 0);
-        if (!getEntry()) {
+        if (!getActiveEntry()) {
           this.isDestroy = true;
         }
       },
@@ -2770,7 +2908,7 @@ function createBottomBumperBehavior(def, env) {
         if (!ctx) {
           return;
         }
-        const entry = getEntry();
+        const entry = getActiveEntry();
         if (!entry) {
           this.isDestroy = true;
           return;
@@ -2778,7 +2916,8 @@ function createBottomBumperBehavior(def, env) {
         const centerX = toFiniteNumber(entry.x, toFiniteNumber(def.x, 0));
         const centerY = toFiniteNumber(entry.y, toFiniteNumber(def.y, 0));
         const angleRad = toFiniteNumber(entry.angle, toFiniteNumber(entry && entry.shape && entry.shape.rotation, 0));
-        const halfLen = Math.max(0.08, toFiniteNumber(def.width, 0.98));
+        const baseHalfLen = Math.max(0.08, toFiniteNumber(def.width, 0.98));
+        const halfLen = broken ? Math.max(0.08, baseHalfLen / 3) : baseHalfLen;
         const halfHeight = Math.max(0.05, toFiniteNumber(def.height, 0.34));
         const mirror = def.mirror === true;
         const lineWidth = Math.max(0.08, 0.42 / Math.max(1, toFiniteNumber(zoomScale, 1)));
@@ -2863,10 +3002,13 @@ function createBottomBumperBehavior(def, env) {
   }
 
   function updateTransform(now) {
-    const entry = getEntry();
+    const mainEntry = getMainEntry();
+    const shortEntry = getBrokenEntry();
     const baseCenterX = toFiniteNumber(def.x, 0);
     const baseCenterY = toFiniteNumber(def.y, 0);
-    const halfLen = Math.max(0.08, toFiniteNumber(def.width, 0.98));
+    const fullHalfLen = Math.max(0.08, toFiniteNumber(def.width, 0.98));
+    const shortHalfLen = Math.max(0.08, fullHalfLen / 3);
+    const activeHalfLen = broken ? shortHalfLen : fullHalfLen;
     const baseDirRad = degToRad(toFiniteNumber(def.dirDeg, toFiniteNumber(def.rotation, 270)));
     const swingMagnitude = degToRad(Math.max(2, toFiniteNumber(def.swingDeg, 34)));
     const swingDuration = Math.max(60, toFiniteNumber(def.swingDurationMs, 210));
@@ -2888,20 +3030,28 @@ function createBottomBumperBehavior(def, env) {
     const angleRad = baseDirRad + swingMagnitude * swingRatio * swingSign;
     const axisX = Math.cos(angleRad);
     const axisY = Math.sin(angleRad);
-    const pivotX = baseCenterX + Math.cos(baseDirRad) * halfLen * pivotSign;
-    const pivotY = baseCenterY + Math.sin(baseDirRad) * halfLen * pivotSign;
-    const centerX = pivotX - axisX * halfLen * pivotSign;
-    const centerY = pivotY - axisY * halfLen * pivotSign;
+    const pivotX = baseCenterX + Math.cos(baseDirRad) * fullHalfLen * pivotSign;
+    const pivotY = baseCenterY + Math.sin(baseDirRad) * fullHalfLen * pivotSign;
+    const centerFullX = pivotX - axisX * fullHalfLen * pivotSign;
+    const centerFullY = pivotY - axisY * fullHalfLen * pivotSign;
+    const centerX = pivotX - axisX * activeHalfLen * pivotSign;
+    const centerY = pivotY - axisY * activeHalfLen * pivotSign;
     const tipSign = -pivotSign;
-    const tipX = centerX + axisX * halfLen * tipSign;
-    const tipY = centerY + axisY * halfLen * tipSign;
+    const tipX = centerX + axisX * activeHalfLen * tipSign;
+    const tipY = centerY + axisY * activeHalfLen * tipSign;
     const tipDirX = axisX * tipSign;
     const tipDirY = axisY * tipSign;
 
     const dtSec = Math.max(0.004, Math.min(0.08, toFiniteNumber(now - lastTickAt, 16) / 1000));
     const velocityX = Number.isFinite(lastCenterX) ? (centerX - lastCenterX) / Math.max(0.0001, dtSec) : 0;
     const velocityY = Number.isFinite(lastCenterY) ? (centerY - lastCenterY) / Math.max(0.0001, dtSec) : 0;
-    applyBodyTransform(entry, centerX, centerY, angleRad, velocityX, velocityY);
+    if (broken) {
+      setEntryEnabled(mainEntry, false);
+      applyBodyTransform(shortEntry || mainEntry, centerX, centerY, angleRad, velocityX, velocityY);
+    } else {
+      applyBodyTransform(mainEntry || shortEntry, centerFullX, centerFullY, angleRad, velocityX, velocityY);
+      setEntryEnabled(shortEntry, false);
+    }
     lastCenterX = centerX;
     lastCenterY = centerY;
     lastTickAt = now;
@@ -2912,7 +3062,7 @@ function createBottomBumperBehavior(def, env) {
       tipX,
       tipY,
       angleRad,
-      halfLen,
+      halfLen: activeHalfLen,
       halfHeight: Math.max(0.05, toFiniteNumber(def.height, 0.34)),
       tipDirX,
       tipDirY,
@@ -2932,6 +3082,25 @@ function createBottomBumperBehavior(def, env) {
   function setHitCooldown(marbleId, now) {
     const cooldownMs = Math.max(0, toFiniteNumber(def.cooldownMs, 160));
     cooldownByMarble[String(marbleId)] = now + cooldownMs;
+  }
+
+  function consumeBreakHit(now) {
+    if (configuredBreakHitCount <= 0 || broken) {
+      return;
+    }
+    remainingBreakHits = Math.max(0, remainingBreakHits - 1);
+    if (remainingBreakHits > 0) {
+      return;
+    }
+    broken = true;
+    swingStartAt = now;
+    swingUntil = now;
+    const mainEntry = getMainEntry();
+    setEntryEnabled(mainEntry, false);
+    const brokenEntry = getBrokenEntry();
+    if (brokenEntry) {
+      setEntryEnabled(brokenEntry, true);
+    }
   }
 
   function applySwingImpulse(now, transformState) {
@@ -2999,8 +3168,11 @@ function createBottomBumperBehavior(def, env) {
       }
       setHitCooldown(marble.id, now);
       emitSwingVisual(now, transformState.tipX, transformState.tipY);
+      consumeBreakHit(now);
     }
   }
+
+  setEntryEnabled(getBrokenEntry(), false);
 
   return {
     kind: 'bottom_bumper',
@@ -3010,13 +3182,15 @@ function createBottomBumperBehavior(def, env) {
       if (env.isPaused()) {
         return;
       }
-      if (!Number.isFinite(toFiniteNumber(nextSwingAt, NaN)) || nextSwingAt <= 0) {
-        scheduleNextSwing(now - Math.max(80, toFiniteNumber(def.intervalMs, 780)));
-      }
-      if (now >= nextSwingAt && swingUntil <= now) {
-        swingStartAt = now;
-        swingUntil = now + Math.max(60, toFiniteNumber(def.swingDurationMs, 210));
-        scheduleNextSwing(now);
+      if (!broken) {
+        if (!Number.isFinite(toFiniteNumber(nextSwingAt, NaN)) || nextSwingAt <= 0) {
+          scheduleNextSwing(now - Math.max(80, toFiniteNumber(def.intervalMs, 780)));
+        }
+        if (now >= nextSwingAt && swingUntil <= now) {
+          swingStartAt = now;
+          swingUntil = now + Math.max(60, toFiniteNumber(def.swingDurationMs, 210));
+          scheduleNextSwing(now);
+        }
       }
       const transformState = updateTransform(now);
       resolveMarblesInsideBody(now, transformState);
@@ -3031,7 +3205,10 @@ function createBottomBumperBehavior(def, env) {
         lastCenterX: toFiniteNumber(lastCenterX, toFiniteNumber(def.x, 0)),
         lastCenterY: toFiniteNumber(lastCenterY, toFiniteNumber(def.y, 0)),
         nextVisualAt: toFiniteNumber(nextVisualAt, 0),
+        broken,
+        remainingBreakHits: Math.max(0, toFiniteNumber(remainingBreakHits, configuredBreakHitCount)),
         cooldownByMarble: { ...cooldownByMarble },
+        ejectCooldownByMarble: { ...ejectCooldownByMarble },
       };
     },
     restoreState(rawState) {
@@ -3055,6 +3232,23 @@ function createBottomBumperBehavior(def, env) {
       for (const key of Object.keys(nextCooldown)) {
         cooldownByMarble[key] = toFiniteNumber(nextCooldown[key], 0);
       }
+      const nextEjectCooldown = safeState.ejectCooldownByMarble && typeof safeState.ejectCooldownByMarble === 'object'
+        ? safeState.ejectCooldownByMarble
+        : {};
+      for (const key of Object.keys(nextEjectCooldown)) {
+        ejectCooldownByMarble[key] = toFiniteNumber(nextEjectCooldown[key], 0);
+      }
+      const hasBrokenFlag = Object.prototype.hasOwnProperty.call(safeState, 'broken');
+      broken = hasBrokenFlag ? safeState.broken === true : configuredBreakHitCount > 0 && toFiniteNumber(safeState.remainingBreakHits, configuredBreakHitCount) <= 0;
+      remainingBreakHits = Math.max(
+        0,
+        Math.floor(
+          toFiniteNumber(
+            safeState.remainingBreakHits,
+            broken ? 0 : configuredBreakHitCount,
+          ),
+        ),
+      );
       ensureVisualEffect();
       updateTransform(Date.now());
     },
@@ -3635,6 +3829,95 @@ function createGoalMarkerImageBehavior(def, env) {
   };
 }
 
+function createDiamondAutoRotateBehavior(def, env) {
+  let nextShuffleAt = 0;
+  let currentAngularVelocity = 0;
+  const maxAbsSpeedDeg = Math.max(
+    30,
+    Math.abs(toFiniteNumber(def && def.maxAbsSpeedDeg, 120)),
+  );
+
+  function getBody() {
+    const roulette = env.getRoulette();
+    const physics = roulette && roulette.physics ? roulette.physics : null;
+    const entities = physics && Array.isArray(physics.entities) ? physics.entities : [];
+    const targetId = Math.floor(toFiniteNumber(def && def.entityId, NaN));
+    if (!Number.isFinite(targetId)) {
+      return null;
+    }
+    for (let index = 0; index < entities.length; index += 1) {
+      const entry = entities[index];
+      const entityId = Math.floor(toFiniteNumber(entry && entry.shape && entry.shape.__v2eid, NaN));
+      if (entityId === targetId) {
+        return entry && entry.body ? entry.body : null;
+      }
+    }
+    return null;
+  }
+
+  function applyAngularVelocity(nextAngularVelocity) {
+    const body = getBody();
+    if (!body) {
+      return false;
+    }
+    const safeAngularVelocity = toFiniteNumber(nextAngularVelocity, 0);
+    currentAngularVelocity = safeAngularVelocity;
+    try {
+      if (typeof body.SetAngularVelocity === 'function') {
+        body.SetAngularVelocity(safeAngularVelocity);
+      }
+      if (typeof body.SetAwake === 'function') {
+        body.SetAwake(true);
+      }
+      if (typeof body.SetEnabled === 'function') {
+        body.SetEnabled(true);
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function shuffleAngularVelocity(now) {
+    const rng = env.getRng();
+    const randomUnit = rng && typeof rng.next === 'function' ? rng.next() : Math.random();
+    const randomSignSeed = rng && typeof rng.next === 'function' ? rng.next() : Math.random();
+    const minAbsSpeedDeg = 20;
+    const absSpeedDeg = minAbsSpeedDeg + (maxAbsSpeedDeg - minAbsSpeedDeg) * clamp(toFiniteNumber(randomUnit, 0.5), 0, 1);
+    const sign = randomSignSeed < 0.5 ? -1 : 1;
+    const nextDegPerSec = absSpeedDeg * sign;
+    applyAngularVelocity(degToRad(nextDegPerSec));
+    nextShuffleAt = now + 1000;
+  }
+
+  return {
+    kind: 'diamond_auto_rotate',
+    oid: def.oid,
+    tick(now) {
+      const safeNow = Math.max(0, toFiniteNumber(now, Date.now()));
+      if (safeNow >= nextShuffleAt) {
+        shuffleAngularVelocity(safeNow);
+      } else if (Math.abs(currentAngularVelocity) > 0.0001) {
+        applyAngularVelocity(currentAngularVelocity);
+      }
+    },
+    serializeState() {
+      return {
+        nextShuffleAt: toFiniteNumber(nextShuffleAt, 0),
+        angularVelocity: toFiniteNumber(currentAngularVelocity, 0),
+      };
+    },
+    restoreState(rawState) {
+      const safeState = rawState && typeof rawState === 'object' ? rawState : {};
+      nextShuffleAt = Math.max(0, toFiniteNumber(safeState.nextShuffleAt, 0));
+      currentAngularVelocity = toFiniteNumber(safeState.angularVelocity, 0);
+      if (Math.abs(currentAngularVelocity) > 0.0001) {
+        applyAngularVelocity(currentAngularVelocity);
+      }
+    },
+  };
+}
+
 export function createBehaviorRuntime(env, behaviorDefs) {
   const defs = Array.isArray(behaviorDefs) ? behaviorDefs : [];
   const portalDefs = defs
@@ -3663,6 +3946,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
     .map((item) => ({ ...item }));
   const stickyDefs = defs
     .filter((item) => item && item.kind === 'sticky_pad')
+    .map((item) => ({ ...item }));
+  const diamondAutoRotateDefs = defs
+    .filter((item) => item && item.kind === 'diamond_auto_rotate')
     .map((item) => ({ ...item }));
   const filledWallDefs = defs
     .filter((item) => item && item.kind === 'wall_filled_polyline_visual')
@@ -3701,6 +3987,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
   for (const stickyDef of stickyDefs) {
     behaviors.push(createStickyPadBehavior(stickyDef, env));
   }
+  for (const diamondAutoRotateDef of diamondAutoRotateDefs) {
+    behaviors.push(createDiamondAutoRotateBehavior(diamondAutoRotateDef, env));
+  }
   for (const filledWallDef of filledWallDefs) {
     behaviors.push(createFilledWallPolylineVisualBehavior(filledWallDef, env));
   }
@@ -3726,6 +4015,7 @@ export function createBehaviorRuntime(env, behaviorDefs) {
       const fan = {};
       const stopwatch = {};
       const sticky = {};
+      const diamondAutoRotate = {};
       const goalMarker = {};
       const wormhole = {};
       for (let index = 0; index < behaviors.length; index += 1) {
@@ -3750,13 +4040,15 @@ export function createBehaviorRuntime(env, behaviorDefs) {
           stopwatch[behavior.oid] = state;
         } else if (behavior.kind === 'sticky_pad') {
           sticky[behavior.oid] = state;
+        } else if (behavior.kind === 'diamond_auto_rotate') {
+          diamondAutoRotate[behavior.oid] = state;
         } else if (behavior.kind === 'goal_marker_image') {
           goalMarker[behavior.oid] = state;
         } else if (behavior.kind === 'black_hole_network') {
           wormhole[behavior.oid] = state;
         }
       }
-      return { portal, burst, hammer, bottomBumper, fan, stopwatch, sticky, goalMarker, wormhole };
+      return { portal, burst, hammer, bottomBumper, fan, stopwatch, sticky, diamondAutoRotate, goalMarker, wormhole };
     },
     restoreState(rawState) {
       const safeState = rawState && typeof rawState === 'object' ? rawState : {};
@@ -3767,6 +4059,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
       const fanState = safeState.fan && typeof safeState.fan === 'object' ? safeState.fan : {};
       const stopwatchState = safeState.stopwatch && typeof safeState.stopwatch === 'object' ? safeState.stopwatch : {};
       const stickyState = safeState.sticky && typeof safeState.sticky === 'object' ? safeState.sticky : {};
+      const diamondAutoRotateState = safeState.diamondAutoRotate && typeof safeState.diamondAutoRotate === 'object'
+        ? safeState.diamondAutoRotate
+        : {};
       const goalMarkerState = safeState.goalMarker && typeof safeState.goalMarker === 'object' ? safeState.goalMarker : {};
       const wormholeState = safeState.wormhole && typeof safeState.wormhole === 'object' ? safeState.wormhole : {};
       for (let index = 0; index < behaviors.length; index += 1) {
@@ -3788,6 +4083,8 @@ export function createBehaviorRuntime(env, behaviorDefs) {
           behavior.restoreState(stopwatchState[behavior.oid]);
         } else if (behavior.kind === 'sticky_pad') {
           behavior.restoreState(stickyState[behavior.oid]);
+        } else if (behavior.kind === 'diamond_auto_rotate') {
+          behavior.restoreState(diamondAutoRotateState[behavior.oid]);
         } else if (behavior.kind === 'goal_marker_image') {
           behavior.restoreState(goalMarkerState[behavior.oid]);
         } else if (behavior.kind === 'black_hole_network') {
