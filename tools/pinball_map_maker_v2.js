@@ -4703,21 +4703,18 @@ function findStageHandle(point, layout) {
     return null;
   }
   const thresholdWorld = Math.max(0.1, 10 / Math.max(0.001, layout.scale));
-  const stageBounds = inferStageWallBounds(getMutableMap());
   const topY = getTopWallYWorld();
-  const leftTop = { x: stageBounds.leftX, y: topY };
-  const rightTop = { x: stageBounds.rightX, y: topY };
+  const leftTop = { x: 0, y: topY };
+  const rightTop = { x: WORLD_WIDTH, y: topY };
   const leftDist = Math.hypot(point.x - leftTop.x, point.y - leftTop.y);
   const rightDist = Math.hypot(point.x - rightTop.x, point.y - rightTop.y);
-  if (leftDist <= thresholdWorld * 1.2) {
+  if (leftDist <= thresholdWorld * 1.8) {
     return { kind: 'stage_wall_left' };
   }
-  if (rightDist <= thresholdWorld * 1.2) {
+  if (rightDist <= thresholdWorld * 1.8) {
     return { kind: 'stage_wall_right' };
   }
-  const minX = Math.min(leftTop.x, rightTop.x);
-  const maxX = Math.max(leftTop.x, rightTop.x);
-  if (point.x >= minX && point.x <= maxX && Math.abs(point.y - topY) <= thresholdWorld * 0.9) {
+  if (point.x >= -0.5 && point.x <= WORLD_WIDTH + 0.5 && Math.abs(point.y - topY) <= thresholdWorld * 1.6) {
     return { kind: 'stage_wall_span' };
   }
   const spawn = getSpawnPointWorld();
@@ -5526,8 +5523,8 @@ function drawMakerCanvas() {
   const rightGuide = worldToCanvas(layout, stageBounds.rightX, 0);
   const rightGuideBottom = worldToCanvas(layout, stageBounds.rightX, layout.stageGoalY);
   const topGuideY = getTopWallYWorld();
-  const topLeftGuide = worldToCanvas(layout, stageBounds.leftX, topGuideY);
-  const topRightGuide = worldToCanvas(layout, stageBounds.rightX, topGuideY);
+  const topLeftGuide = worldToCanvas(layout, 0, topGuideY);
+  const topRightGuide = worldToCanvas(layout, WORLD_WIDTH, topGuideY);
   ctx.strokeStyle = 'rgba(255, 124, 200, 0.98)';
   ctx.lineWidth = 2.8;
   ctx.beginPath();
