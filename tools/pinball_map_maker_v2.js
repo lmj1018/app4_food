@@ -14,6 +14,8 @@ const MAX_UNDO_HISTORY = 50;
 const ENABLE_COORDINATE_OVERLAY = false;
 const GOAL_MARKER_IMAGE_DEFAULT_SRC = '../../background/finish.png';
 const GOAL_MARKER_IMAGE_PREVIEW_SRC = '../assets/background/finish.png';
+const MAGIC_WIZARD_IMAGE_DEFAULT_SRC = '../../background/magic.svg';
+const MAGIC_WIZARD_IMAGE_PREVIEW_SRC = '../assets/background/magic.svg';
 const DEFAULT_SKILL_WARMUP_SEC = 5;
 const OBJECT_COLOR_PRESET = {
   wall: '#ff7cc8',
@@ -33,6 +35,7 @@ const OBJECT_COLOR_PRESET = {
   domino: '#ff67be',
   physicsBall: '#ff79cb',
   goalMarker: '#ffc4e7',
+  magicWizard: '#ffa66c',
 };
 const DEFAULT_MARBLE_SIZE_SCALE = 1;
 const MIN_MARBLE_SIZE_SCALE = 0.4;
@@ -56,6 +59,7 @@ let marbleCountApplyInFlight = false;
 let marbleCountApplyPending = false;
 const undoHistory = [];
 let goalMarkerPreviewImage = null;
+let magicWizardPreviewImage = null;
 
 let mapCatalog = [];
 let workingMapJson = null;
@@ -767,6 +771,20 @@ function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
           ? GOAL_MARKER_IMAGE_DEFAULT_SRC
           : src;
         obj.opacity = round2(clamp(toFinite(obj.opacity, 0.86), 0.05, 1));
+      } else if (type === 'magic_wizard') {
+        obj.width = Math.max(0.08, toFinite(obj.width, 0.72));
+        obj.height = Math.max(0.08, toFinite(obj.height, 0.9));
+        obj.dirDeg = round1(normalizeDeg(toFinite(obj.dirDeg, toFinite(obj.rotation, 0))));
+        obj.rotation = obj.dirDeg;
+        obj.mirror = obj.mirror === true;
+        obj.fireIntervalMs = Math.max(120, Math.floor(toFinite(obj.fireIntervalMs, toFinite(obj.intervalMs, 900))));
+        obj.fireballSpeed = Math.max(0.2, toFinite(obj.fireballSpeed, toFinite(obj.hitDistance, 7.4)));
+        obj.fireballRadius = Math.max(0.05, toFinite(obj.fireballRadius, toFinite(obj.radius, 0.2)));
+        obj.force = Math.max(0.1, toFinite(obj.force, 2.8));
+        obj.imageSrc = MAGIC_WIZARD_IMAGE_DEFAULT_SRC;
+        if (typeof obj.color !== 'string' || !obj.color.trim()) {
+          obj.color = 'rgba(0,0,0,0)';
+        }
       }
       if (supportsImpactTuning(obj)) {
         obj.restitution = round2(clamp(
@@ -1627,6 +1645,8 @@ function toolDisplayName(tool) {
       return '하단 범퍼';
     case 'fan':
       return '선풍기';
+    case 'magic_wizard':
+      return '마법사 화염';
     case 'sticky_pad':
       return '이동 점착패드';
     case 'burst_bumper':
@@ -1668,6 +1688,7 @@ function defaultRestitutionForType(type) {
     case 'hammer':
     case 'bottom_bumper':
     case 'fan':
+    case 'magic_wizard':
     case 'sticky_pad':
     case 'black_hole':
     case 'white_hole':
@@ -1727,6 +1748,8 @@ function defaultColorForObjectType(type) {
       return OBJECT_COLOR_PRESET.bottomBumper;
     case 'fan':
       return OBJECT_COLOR_PRESET.fan;
+    case 'magic_wizard':
+      return 'rgba(0,0,0,0)';
     case 'sticky_pad':
       return OBJECT_COLOR_PRESET.sticky;
     case 'burst_bumper':
@@ -1923,6 +1946,7 @@ function setSelectedTool(tool) {
     'hammer',
     'bottom_bumper',
     'fan',
+    'magic_wizard',
     'sticky_pad',
     'burst_bumper',
     'domino_block',
@@ -2164,6 +2188,25 @@ function createObjectByTool(tool, x, y) {
       triggerRadius: 0.9,
       hitDistance: 2.8,
       color: OBJECT_COLOR_PRESET.fan,
+    };
+  }
+  if (tool === 'magic_wizard') {
+    return {
+      oid: nextOid('magic'),
+      type: 'magic_wizard',
+      x: px,
+      y: py,
+      width: 0.72,
+      height: 0.9,
+      rotation: 0,
+      dirDeg: 0,
+      mirror: false,
+      fireIntervalMs: 900,
+      fireballSpeed: 7.4,
+      fireballRadius: 0.2,
+      force: 2.8,
+      imageSrc: MAGIC_WIZARD_IMAGE_DEFAULT_SRC,
+      color: 'rgba(0,0,0,0)',
     };
   }
   if (tool === 'sticky_pad') {
@@ -2410,6 +2453,8 @@ function populateObjectEditor() {
       elements.objForceInput.value = String(round2(toFinite(obj.angularVelocity, 2.2)));
     } else if (obj.type === 'goal_marker_image') {
       elements.objForceInput.value = '';
+    } else if (obj.type === 'magic_wizard') {
+      elements.objForceInput.value = String(round2(toFinite(obj.force, 2.8)));
     } else if (obj.type === 'stopwatch_bomb') {
       elements.objForceInput.value = String(round1(toFinite(obj.force, 4.8)));
     } else if (obj.type === 'black_hole') {
@@ -2429,6 +2474,8 @@ function populateObjectEditor() {
       elements.objIntervalInput.value = '';
     } else if (obj.type === 'goal_marker_image') {
       elements.objIntervalInput.value = '';
+    } else if (obj.type === 'magic_wizard') {
+      elements.objIntervalInput.value = String(Math.round(toFinite(obj.fireIntervalMs, 900)));
     } else if (obj.type === 'stopwatch_bomb') {
       elements.objIntervalInput.value = String(Math.round(toFinite(obj.intervalMs, 4000)));
     } else if (obj.type === 'black_hole' || obj.type === 'white_hole') {
@@ -2463,6 +2510,12 @@ function populateObjectEditor() {
       elements.objHitDistanceInput.disabled = false;
       if (elements.objHitDistanceLabel) {
         elements.objHitDistanceLabel.textContent = '바람거리';
+      }
+    } else if (obj.type === 'magic_wizard') {
+      elements.objHitDistanceInput.value = String(round2(toFinite(obj.fireballSpeed, 7.4)));
+      elements.objHitDistanceInput.disabled = false;
+      if (elements.objHitDistanceLabel) {
+        elements.objHitDistanceLabel.textContent = '화염구 속도';
       }
     } else if (obj.type === 'burst_bumper') {
       elements.objHitDistanceInput.value = String(Math.max(1, Math.floor(toFinite(obj.hpPerLayer, 1))));
@@ -2504,6 +2557,8 @@ function populateObjectEditor() {
       dirLabel = '레이어 수';
     } else if (obj.type === 'fan') {
       dirLabel = '바람 방향(도)';
+    } else if (obj.type === 'magic_wizard') {
+      dirLabel = '발사 방향(도)';
     } else if (obj.type === 'bottom_bumper') {
       dirLabel = '타격 방향(도)';
     } else if (obj.type === 'sticky_pad') {
@@ -2527,6 +2582,8 @@ function populateObjectEditor() {
       forceLabel = '출구 가속(impulse)';
     } else if (obj.type === 'fan') {
       forceLabel = '풍압';
+    } else if (obj.type === 'magic_wizard') {
+      forceLabel = '화염구 힘';
     } else if (obj.type === 'bottom_bumper') {
       forceLabel = '타격힘';
     } else if (obj.type === 'sticky_pad') {
@@ -2546,6 +2603,9 @@ function populateObjectEditor() {
       intervalLabel = '쿨다운(ms)';
     } else if (obj.type === 'bottom_bumper') {
       intervalLabel = '랜덤 간격(ms)';
+    }
+    if (obj.type === 'magic_wizard') {
+      intervalLabel = '발사 간격(ms)';
     }
     elements.objIntervalLabel.textContent = intervalLabel;
   }
@@ -2608,6 +2668,13 @@ function populateObjectEditor() {
     if (elements.objExtra2Input) elements.objExtra2Input.value = String('0');
     if (elements.objExtra1Label) elements.objExtra1Label.textContent = '영향폭';
     if (elements.objExtra2Label) elements.objExtra2Label.textContent = '보조(미사용)';
+  } else if (obj.type === 'magic_wizard') {
+    if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
+    if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
+    if (elements.objExtra1Input) elements.objExtra1Input.value = String(round2(toFinite(obj.fireballRadius, 0.2)));
+    if (elements.objExtra2Input) elements.objExtra2Input.value = String(obj.mirror === true ? '1' : '0');
+    if (elements.objExtra1Label) elements.objExtra1Label.textContent = '화염구 반경';
+    if (elements.objExtra2Label) elements.objExtra2Label.textContent = '좌우 반전(0/1)';
   } else if (obj.type === 'sticky_pad') {
     const pathB = Array.isArray(obj.pathB) ? obj.pathB : [toFinite(obj.x, 0) + 2.4, toFinite(obj.y, 0)];
     if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
@@ -3059,6 +3126,8 @@ function sharedSyncKeysForType(type) {
       return ['color', 'width', 'height', 'dirDeg', 'mirror', 'force', 'intervalMs', 'breakHitCount', 'triggerRadius', 'cooldownMs', 'swingDeg', 'swingDurationMs', 'hitDistance', 'restitution', 'friction'];
     case 'fan':
       return ['color', 'width', 'height', 'dirDeg', 'force', 'triggerRadius', 'hitDistance', 'restitution', 'friction'];
+    case 'magic_wizard':
+      return ['color', 'width', 'height', 'dirDeg', 'mirror', 'force', 'fireIntervalMs', 'fireballSpeed', 'fireballRadius', 'imageSrc', 'restitution', 'friction'];
     case 'sticky_pad':
       return ['color', 'width', 'height', 'rotation', 'speed', 'pauseMs', 'stickyTopOnly', 'restitution', 'friction'];
     case 'burst_bumper':
@@ -3423,6 +3492,41 @@ function applyObjectEditorValues() {
     finalizeObjectEditorValues(obj);
     return;
   }
+  if (obj.type === 'magic_wizard') {
+    obj.x = round1(toFinite(elements.objXInput ? elements.objXInput.value : obj.x, toFinite(obj.x, 0)));
+    obj.y = round1(toFinite(elements.objYInput ? elements.objYInput.value : obj.y, toFinite(obj.y, 0)));
+    obj.fireballRadius = round2(Math.max(0.05, toFinite(
+      elements.objExtra1Input ? elements.objExtra1Input.value : obj.fireballRadius,
+      toFinite(obj.fireballRadius, 0.2),
+    )));
+    const rawMirror = elements.objExtra2Input ? String(elements.objExtra2Input.value ?? '').trim() : '';
+    if (rawMirror) {
+      obj.mirror = toFinite(rawMirror, obj.mirror === true ? 1 : 0) >= 1;
+    }
+    const rawDir = elements.objDirInput ? String(elements.objDirInput.value ?? '').trim() : '';
+    const rawRotation = elements.objRotationInput ? String(elements.objRotationInput.value ?? '').trim() : '';
+    const fallbackDir = toFinite(obj.dirDeg, toFinite(obj.rotation, 0));
+    const nextDir = rawDir
+      ? toFinite(rawDir, fallbackDir)
+      : (rawRotation ? toFinite(rawRotation, fallbackDir) : fallbackDir);
+    obj.dirDeg = round1(normalizeDeg(nextDir));
+    obj.rotation = obj.dirDeg;
+    obj.force = round2(Math.max(0.1, toFinite(
+      elements.objForceInput ? elements.objForceInput.value : obj.force,
+      toFinite(obj.force, 2.8),
+    )));
+    obj.fireIntervalMs = Math.round(Math.max(120, toFinite(
+      elements.objIntervalInput ? elements.objIntervalInput.value : obj.fireIntervalMs,
+      toFinite(obj.fireIntervalMs, toFinite(obj.intervalMs, 900)),
+    )));
+    obj.fireballSpeed = round2(Math.max(0.2, toFinite(
+      elements.objHitDistanceInput ? elements.objHitDistanceInput.value : obj.fireballSpeed,
+      toFinite(obj.fireballSpeed, toFinite(obj.hitDistance, 7.4)),
+    )));
+    obj.imageSrc = MAGIC_WIZARD_IMAGE_DEFAULT_SRC;
+    finalizeObjectEditorValues(obj);
+    return;
+  }
   if (obj.type === 'sticky_pad') {
     obj.x = round1(toFinite(elements.objXInput ? elements.objXInput.value : obj.x, toFinite(obj.x, 0)));
     obj.y = round1(toFinite(elements.objYInput ? elements.objYInput.value : obj.y, toFinite(obj.y, 0)));
@@ -3546,6 +3650,12 @@ function reverseSelectedObjectRotation() {
     if (obj.type === 'fan') {
       obj.dirDeg = round1(normalizeDeg(toFinite(obj.dirDeg, 0) + 180));
       lastMessage = `선풍기 방향 반전 완료 (dirDeg=${obj.dirDeg})`;
+      changedCount += 1;
+      continue;
+    }
+    if (obj.type === 'magic_wizard') {
+      obj.mirror = obj.mirror !== true;
+      lastMessage = `마법사 좌우 반전 완료 (mirror=${obj.mirror ? 1 : 0})`;
       changedCount += 1;
       continue;
     }
@@ -4259,7 +4369,7 @@ function getRectLikeGeometryWorld(obj) {
     return null;
   }
   let angleDeg = normalizeDeg(toFinite(obj.rotation, 0));
-  if (type === 'hammer' || type === 'bottom_bumper' || type === 'fan') {
+  if (type === 'hammer' || type === 'bottom_bumper' || type === 'fan' || type === 'magic_wizard') {
     angleDeg = normalizeDeg(toFinite(obj.dirDeg, angleDeg));
   }
   const rad = (Math.PI / 180) * angleDeg;
@@ -4663,6 +4773,7 @@ function supportsRotationHandle(obj) {
     || type === 'hammer'
     || type === 'bottom_bumper'
     || type === 'fan'
+    || type === 'magic_wizard'
     || type === 'domino_block'
     || type === 'sticky_pad'
     || type === 'goal_marker_image';
@@ -4715,6 +4826,7 @@ function getBoxResizeHandlesWorld(obj) {
     && type !== 'hammer'
     && type !== 'bottom_bumper'
     && type !== 'fan'
+    && type !== 'magic_wizard'
     && type !== 'sticky_pad'
     && type !== 'domino_block'
     && type !== 'goal_marker_image') {
@@ -4724,7 +4836,7 @@ function getBoxResizeHandlesWorld(obj) {
   const cy = toFinite(obj.y, 0);
   const width = Math.max(0.08, toFinite(obj.width, 1.2));
   const height = Math.max(0.05, toFinite(obj.height, 0.2));
-  const angleDeg = type === 'hammer' || type === 'bottom_bumper' || type === 'fan'
+  const angleDeg = type === 'hammer' || type === 'bottom_bumper' || type === 'fan' || type === 'magic_wizard'
     ? normalizeDeg(toFinite(obj.dirDeg, toFinite(obj.rotation, 0)))
     : normalizeDeg(toFinite(obj.rotation, 0));
   const rad = (Math.PI / 180) * angleDeg;
@@ -5129,6 +5241,23 @@ function getGoalMarkerPreviewImage() {
   return goalMarkerPreviewImage;
 }
 
+function getMagicWizardPreviewImage() {
+  if (magicWizardPreviewImage) {
+    return magicWizardPreviewImage;
+  }
+  const image = new Image();
+  image.decoding = 'async';
+  image.src = MAGIC_WIZARD_IMAGE_PREVIEW_SRC;
+  image.addEventListener('load', () => {
+    drawMakerCanvas();
+  });
+  image.addEventListener('error', () => {
+    magicWizardPreviewImage = null;
+  });
+  magicWizardPreviewImage = image;
+  return magicWizardPreviewImage;
+}
+
 function drawObjectOnCanvas(ctx, layout, obj, selected) {
   if (!selected && isBoundaryWallObject(obj)) {
     return;
@@ -5334,6 +5463,69 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
       }
     }
     ctx.restore();
+    return;
+  }
+  if (obj.type === 'magic_wizard') {
+    const width = Math.max(0.08, toFinite(obj.width, 0.72));
+    const height = Math.max(0.08, toFinite(obj.height, 0.9));
+    const drawWidth = width * layout.scale;
+    const drawHeight = height * layout.scale;
+    const angleDeg = normalizeDeg(toFinite(obj.dirDeg, toFinite(obj.rotation, 0)));
+    const rotation = (Math.PI / 180) * angleDeg;
+    const mirror = obj.mirror === true;
+    const image = getMagicWizardPreviewImage();
+    ctx.save();
+    ctx.translate(center.x, center.y);
+    ctx.rotate(rotation);
+    if (mirror) {
+      ctx.scale(-1, 1);
+    }
+    if (image && image.complete && image.naturalWidth > 0) {
+      ctx.drawImage(image, -drawWidth, -drawHeight, drawWidth * 2, drawHeight * 2);
+    } else {
+      ctx.fillStyle = selected ? 'rgba(255, 212, 77, 0.2)' : 'rgba(255, 166, 108, 0.24)';
+      ctx.strokeStyle = selected ? '#ffd44d' : '#ffa66c';
+      ctx.lineWidth = selected ? 2 : 1.6;
+      ctx.beginPath();
+      ctx.rect(-drawWidth * 0.72, -drawHeight * 0.82, drawWidth * 1.44, drawHeight * 1.64);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255, 148, 84, 0.92)';
+      ctx.beginPath();
+      ctx.arc(drawWidth * 0.62, -drawHeight * 0.12, Math.max(2, drawHeight * 0.24), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (selected) {
+      ctx.strokeStyle = '#ffd44d';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.rect(-drawWidth, -drawHeight, drawWidth * 2, drawHeight * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+    if (selected) {
+      drawHandleWithFeedback(ctx, center.x, center.y, 5.1, 'move_anchor', {
+        fill: 'rgba(8,16,36,0.95)',
+        stroke: '#ffd44d',
+      });
+      const resizeHandles = getBoxResizeHandlesWorld(obj);
+      for (let index = 0; index < resizeHandles.length; index += 1) {
+        const handle = resizeHandles[index];
+        const p = worldToCanvas(layout, handle.x, handle.y);
+        drawHandleWithFeedback(ctx, p.x, p.y, 5.2, handle.kind, {
+          fill: 'rgba(8,16,36,0.95)',
+          stroke: '#ffd44d',
+        });
+      }
+      const rotationHandle = getRotationHandleWorld(obj);
+      if (rotationHandle) {
+        const hp = worldToCanvas(layout, rotationHandle.x, rotationHandle.y);
+        drawHandleWithFeedback(ctx, hp.x, hp.y, 5.2, 'rotation', {
+          fill: 'rgba(8,16,36,0.95)',
+          stroke: '#ffd44d',
+        });
+      }
+    }
     return;
   }
 
@@ -5740,6 +5932,9 @@ function drawCreateDragPreview(ctx, layout, drag) {
   } else if (tool === 'bottom_bumper') {
     ctx.fillStyle = 'rgba(88, 184, 255, 0.2)';
     ctx.strokeStyle = '#8fd5ff';
+  } else if (tool === 'magic_wizard') {
+    ctx.fillStyle = 'rgba(255, 166, 108, 0.18)';
+    ctx.strokeStyle = '#ffa66c';
   } else if (tool === 'domino_block') {
     ctx.fillStyle = 'rgba(255, 103, 190, 0.2)';
     ctx.strokeStyle = '#ff67be';
@@ -5790,6 +5985,20 @@ function drawCreateDragPreview(ctx, layout, drag) {
     ctx.rect(left, top, width, height);
     ctx.fill();
     ctx.stroke();
+    if (tool === 'magic_wizard') {
+      const image = getMagicWizardPreviewImage();
+      if (image && image.complete && image.naturalWidth > 0) {
+        const centerX = (start.x + current.x) / 2;
+        const centerY = (start.y + current.y) / 2;
+        const center = worldToCanvas(layout, centerX, centerY);
+        const halfWidth = Math.max(0.12, Math.abs(current.x - start.x) / 2) * layout.scale;
+        const halfHeight = Math.max(0.12, Math.abs(current.y - start.y) / 2) * layout.scale;
+        ctx.save();
+        ctx.translate(center.x, center.y);
+        ctx.drawImage(image, -halfWidth, -halfHeight, halfWidth * 2, halfHeight * 2);
+        ctx.restore();
+      }
+    }
   }
   ctx.restore();
 }
@@ -6544,6 +6753,37 @@ function createFanFromDrag(startWorld, endWorld) {
   };
 }
 
+function createMagicWizardFromDrag(startWorld, endWorld) {
+  const mapJson = getMutableMap();
+  const goalY = Math.max(25, toFinite(mapJson.stage && mapJson.stage.goalY, 210) + 4);
+  const start = clampWorldPoint(startWorld, goalY);
+  const end = clampWorldPoint(endWorld, goalY);
+  const minSize = 0.08;
+  const fullWidth = Math.max(minSize, Math.abs(end.x - start.x));
+  const fullHeight = Math.max(minSize, Math.abs(end.y - start.y));
+  const centerX = round1((start.x + end.x) / 2);
+  const centerY = round1((start.y + end.y) / 2);
+  const halfWidth = round1(Math.max(0.12, fullWidth / 2));
+  const halfHeight = round1(Math.max(0.12, fullHeight / 2));
+  return {
+    oid: nextOid('magic'),
+    type: 'magic_wizard',
+    x: centerX,
+    y: centerY,
+    width: halfWidth,
+    height: halfHeight,
+    rotation: 0,
+    dirDeg: 0,
+    mirror: false,
+    fireIntervalMs: 900,
+    fireballSpeed: 7.4,
+    fireballRadius: round2(Math.max(0.08, Math.min(0.42, Math.min(halfWidth, halfHeight) * 0.22))),
+    force: 2.8,
+    imageSrc: MAGIC_WIZARD_IMAGE_DEFAULT_SRC,
+    color: 'rgba(0,0,0,0)',
+  };
+}
+
 function createBottomBumperFromDrag(startWorld, endWorld, options = {}) {
   const mapJson = getMutableMap();
   const goalY = Math.max(25, toFinite(mapJson.stage && mapJson.stage.goalY, 210) + 4);
@@ -6694,6 +6934,7 @@ function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
       || tool === 'hammer'
       || tool === 'bottom_bumper'
       || tool === 'fan'
+      || tool === 'magic_wizard'
       || tool === 'sticky_pad'
       || tool === 'domino_block'
       || tool === 'goal_marker_image';
@@ -6769,10 +7010,13 @@ function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
   if (tool === 'fan') {
     return createFanFromDrag(start, end);
   }
+  if (tool === 'magic_wizard') {
+    return createMagicWizardFromDrag(start, end);
+  }
   if (tool === 'sticky_pad') {
     return createStickyPadFromDrag(start, end);
   }
-  if (tool === 'box_block' || tool === 'diamond_block' || tool === 'goal_marker_image') {
+  if (tool === 'box_block' || tool === 'diamond_block' || tool === 'goal_marker_image' || tool === 'magic_wizard') {
     const created = createObjectByTool(tool, (start.x + end.x) / 2, (start.y + end.y) / 2);
     if (!created) {
       return null;
@@ -6783,6 +7027,10 @@ function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
       const half = round1(Math.max(0.12, Math.max(Math.abs(dx), Math.abs(dy)) / 2));
       created.width = half;
       created.height = half;
+    } else if (tool === 'magic_wizard') {
+      created.width = round1(Math.max(0.12, Math.abs(dx) / 2));
+      created.height = round1(Math.max(0.12, Math.abs(dy) / 2));
+      created.fireballRadius = round2(Math.max(0.08, Math.min(0.42, Math.min(created.width, created.height) * 0.22)));
     } else {
       const minHalfWidth = tool === 'goal_marker_image' ? 0.2 : 0.08;
       const minHalfHeight = tool === 'goal_marker_image' ? 0.2 : 0.05;
@@ -6851,6 +7099,7 @@ function canResizeByBoxHandle(obj) {
     || type === 'hammer'
     || type === 'bottom_bumper'
     || type === 'fan'
+    || type === 'magic_wizard'
     || type === 'sticky_pad'
     || type === 'domino_block'
     || type === 'goal_marker_image';
@@ -6946,6 +7195,9 @@ function applyMultiResizeFromPrimary(primaryIndex, dragType, beforeValue, afterV
         const baseHalfSize = Math.max(toFinite(obj.width, 0.12), toFinite(obj.height, 0.08));
         obj.triggerRadius = round1(Math.max(0.35, baseHalfSize + 0.35));
         obj.hitDistance = round1(Math.max(0.5, baseHalfSize * 2.8));
+      } else if (obj.type === 'magic_wizard') {
+        const baseHalfSize = Math.max(toFinite(obj.width, 0.12), toFinite(obj.height, 0.12));
+        obj.fireballRadius = round2(Math.max(0.05, Math.min(0.42, baseHalfSize * 0.22)));
       } else if (obj.type === 'bottom_bumper') {
         const baseHalfSize = Math.max(toFinite(obj.width, 0.12), toFinite(obj.height, 0.08));
         obj.triggerRadius = round1(Math.max(0.35, baseHalfSize + 0.4));
@@ -7132,12 +7384,13 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
       || type === 'hammer'
       || type === 'bottom_bumper'
       || type === 'fan'
+      || type === 'magic_wizard'
       || type === 'sticky_pad'
       || type === 'domino_block'
       || type === 'goal_marker_image') {
       const cx = toFinite(obj.x, 0);
       const cy = toFinite(obj.y, 0);
-      const angleDeg = type === 'hammer' || type === 'bottom_bumper' || type === 'fan'
+      const angleDeg = type === 'hammer' || type === 'bottom_bumper' || type === 'fan' || type === 'magic_wizard'
         ? normalizeDeg(toFinite(obj.dirDeg, toFinite(obj.rotation, 0)))
         : normalizeDeg(toFinite(obj.rotation, 0));
       const rad = (Math.PI / 180) * angleDeg;
@@ -7193,6 +7446,9 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
         const baseHalfSize = Math.max(toFinite(obj.width, 0.12), toFinite(obj.height, 0.08));
         obj.triggerRadius = round1(Math.max(0.35, baseHalfSize + 0.35));
         obj.hitDistance = round1(Math.max(0.5, baseHalfSize * 2.8));
+      } else if (type === 'magic_wizard') {
+        const baseHalfSize = Math.max(toFinite(obj.width, 0.12), toFinite(obj.height, 0.12));
+        obj.fireballRadius = round2(Math.max(0.05, Math.min(0.42, baseHalfSize * 0.22)));
       } else if (type === 'bottom_bumper') {
         const baseHalfSize = Math.max(toFinite(obj.width, 0.12), toFinite(obj.height, 0.08));
         obj.triggerRadius = round1(Math.max(0.35, baseHalfSize + 0.4));
@@ -7252,7 +7508,7 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
       nextRotation = snapAngleDeg(nextRotation, 45);
     }
     obj.rotation = normalizeDeg(nextRotation);
-    if (isAimDirectionalObject(obj)) {
+    if (isAimDirectionalObject(obj) || obj.type === 'magic_wizard') {
       obj.dirDeg = obj.rotation;
     }
     drag.moved = true;
@@ -8705,6 +8961,8 @@ function setupEvents() {
       updateMakerHint('도미노 블럭 모드: 드래그로 크기 생성 (동적 물리)');
     } else if (tool === 'physics_ball') {
       updateMakerHint('물리 공 모드: 드래그로 반지름 생성 (동적 물리)');
+    } else if (tool === 'magic_wizard') {
+      updateMakerHint('마법사 화염 모드: 드래그로 크기 생성, 속성에서 좌우반전/화염구 옵션 조절');
     } else if (tool === 'goal_marker_image') {
       updateMakerHint('골라인 이미지 모드: 드래그로 크기 지정 생성 (배경 마커)');
     } else if (tool === 'rotor') {

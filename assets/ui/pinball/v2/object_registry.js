@@ -27,12 +27,16 @@ const DEFAULT_OBJECT_COLORS = {
   domino: '#ff67be',
   physicsBall: '#ff79cb',
   goalMarker: '#ffc4e7',
+  magicWizard: '#ffa66c',
 };
 
 const runtimeImageCache = new Map();
 
 function getRuntimeImage(src) {
-  const key = normalizeGoalMarkerImageSrc(src);
+  const key = toId(src, '');
+  if (!key) {
+    return null;
+  }
   if (runtimeImageCache.has(key)) {
     return runtimeImageCache.get(key);
   }
@@ -118,6 +122,11 @@ function normalizeGoalMarkerImageSrc(value) {
     }
   }
   return normalized;
+}
+
+function normalizeMagicWizardImageSrc(value) {
+  const raw = toId(value, '../../background/magic.svg');
+  return raw || '../../background/magic.svg';
 }
 
 function isTransparentColorString(value) {
@@ -1196,6 +1205,44 @@ function compileObject(rawObject, entityId) {
               ),
             ),
           ),
+        },
+      };
+    case 'magic_wizard':
+      return {
+        entity: compileBox(
+          {
+            ...rawObject,
+            width: Math.max(0.08, toFiniteNumber(rawObject.width, 0.72)),
+            height: Math.max(0.08, toFiniteNumber(rawObject.height, 0.9)),
+            restitution: toFiniteNumber(rawObject.restitution, 0.05),
+            rotation: toFiniteNumber(rawObject.rotation, toFiniteNumber(rawObject.dirDeg, 0)),
+            color: typeof rawObject.color === 'string' ? rawObject.color : 'rgba(0,0,0,0)',
+          },
+          entityId,
+          false,
+        ),
+        behavior: {
+          kind: 'magic_wizard',
+          oid: toId(rawObject.oid, `magic_${entityId}`),
+          entityId,
+          x: toFiniteNumber(rawObject.x, 11.75),
+          y: toFiniteNumber(rawObject.y, 70),
+          width: Math.max(0.08, toFiniteNumber(rawObject.width, 0.72)),
+          height: Math.max(0.08, toFiniteNumber(rawObject.height, 0.9)),
+          dirDeg: toFiniteNumber(rawObject.dirDeg, toFiniteNumber(rawObject.rotation, 0)),
+          mirror: toBoolean(rawObject.mirror, false),
+          force: Math.max(0.1, toFiniteNumber(rawObject.force, 2.8)),
+          fireIntervalMs: Math.max(
+            120,
+            toFiniteNumber(rawObject.fireIntervalMs, toFiniteNumber(rawObject.intervalMs, 900)),
+          ),
+          fireballSpeed: Math.max(
+            0.2,
+            toFiniteNumber(rawObject.fireballSpeed, toFiniteNumber(rawObject.hitDistance, 7.4)),
+          ),
+          fireballRadius: Math.max(0.05, toFiniteNumber(rawObject.fireballRadius, toFiniteNumber(rawObject.radius, 0.2))),
+          fireballLifeMs: Math.max(260, toFiniteNumber(rawObject.fireballLifeMs, 900)),
+          imageSrc: normalizeMagicWizardImageSrc(rawObject.imageSrc),
         },
       };
     case 'sticky_pad':
@@ -3426,6 +3473,375 @@ function createFanBehavior(def, env) {
   };
 }
 
+function createMagicWizardBehavior(def, env) {
+  let nextShotAt = 0;
+  let lastTickAt = 0;
+  let wizardVisualEffect = null;
+  let fireballVisualEffect = null;
+  const fireballs = [];
+  const image = getRuntimeImage(normalizeMagicWizardImageSrc(def.imageSrc || '../../background/magic.svg'));
+
+  function hasEntity() {
+    const roulette = env.getRoulette();
+    const physics = roulette && roulette.physics ? roulette.physics : null;
+    const entities = physics && Array.isArray(physics.entities) ? physics.entities : [];
+    const targetId = Math.floor(toFiniteNumber(def.entityId, NaN));
+    if (!Number.isFinite(targetId)) {
+      return false;
+    }
+    for (let index = 0; index < entities.length; index += 1) {
+      const entry = entities[index];
+      const entityId = toFiniteNumber(entry && entry.shape && entry.shape.__v2eid, NaN);
+      if (Number.isFinite(entityId) && entityId === targetId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function getEffectiveDirRad() {
+    const baseDir = toFiniteNumber(def.dirDeg, 0);
+    const mirroredDir = def.mirror === true ? (180 - baseDir) : baseDir;
+    return degToRad(mirroredDir);
+  }
+
+  function ensureWizardVisualEffect() {
+    const roulette = env.getRoulette();
+    if (!roulette || !Array.isArray(roulette._effects)) {
+      return;
+    }
+    if (wizardVisualEffect && wizardVisualEffect.isDestroy !== true) {
+      return;
+    }
+    wizardVisualEffect = {
+      elapsed: 0,
+      duration: Number.MAX_SAFE_INTEGER,
+      isDestroy: false,
+      update(deltaMs) {
+        this.elapsed += toFiniteNumber(deltaMs, 0);
+        if (!hasEntity()) {
+          this.isDestroy = true;
+        }
+      },
+      render(ctx) {
+        if (!ctx) {
+          return;
+        }
+        if (!hasEntity()) {
+          this.isDestroy = true;
+          return;
+        }
+        const width = Math.max(0.08, toFiniteNumber(def.width, 0.72));
+        const height = Math.max(0.08, toFiniteNumber(def.height, 0.9));
+        const x = toFiniteNumber(def.x, 0);
+        const y = toFiniteNumber(def.y, 0);
+        const dirRad = getEffectiveDirRad();
+        const mirror = def.mirror === true;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(dirRad);
+        if (mirror) {
+          ctx.scale(-1, 1);
+        }
+        if (image && image.complete && image.naturalWidth > 0) {
+          ctx.drawImage(image, -width, -height, width * 2, height * 2);
+        } else {
+          ctx.fillStyle = 'rgba(255,166,108,0.3)';
+          ctx.strokeStyle = 'rgba(255,196,154,0.9)';
+          ctx.lineWidth = 0.08;
+          ctx.beginPath();
+          ctx.rect(-width * 0.72, -height * 0.82, width * 1.44, height * 1.64);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = 'rgba(255,132,76,0.92)';
+          ctx.beginPath();
+          ctx.arc(width * 0.62, -height * 0.12, Math.max(0.06, height * 0.24), 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      },
+    };
+    roulette._effects.push(wizardVisualEffect);
+  }
+
+  function ensureFireballVisualEffect() {
+    const roulette = env.getRoulette();
+    if (!roulette || !Array.isArray(roulette._effects)) {
+      return;
+    }
+    if (fireballVisualEffect && fireballVisualEffect.isDestroy !== true) {
+      return;
+    }
+    fireballVisualEffect = {
+      elapsed: 0,
+      duration: Number.MAX_SAFE_INTEGER,
+      isDestroy: false,
+      update(deltaMs) {
+        this.elapsed += toFiniteNumber(deltaMs, 0);
+        if (!hasEntity() && fireballs.length <= 0) {
+          this.isDestroy = true;
+        }
+      },
+      render(ctx, zoomScale) {
+        if (!ctx || fireballs.length <= 0) {
+          return;
+        }
+        const safeZoom = Math.max(1, toFiniteNumber(zoomScale, 1));
+        for (let index = 0; index < fireballs.length; index += 1) {
+          const projectile = fireballs[index];
+          if (!projectile) {
+            continue;
+          }
+          const lifeRatio = clamp(
+            (projectile.expireAt - projectile.now) / Math.max(1, projectile.expireAt - projectile.spawnAt),
+            0,
+            1,
+          );
+          const alpha = 0.3 + lifeRatio * 0.7;
+          const radius = Math.max(0.04, toFiniteNumber(projectile.radius, 0.2));
+          const tailWidth = Math.max(0.04, (radius * 0.84) / safeZoom);
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.strokeStyle = `rgba(255,128,62,${0.55 * alpha})`;
+          ctx.lineWidth = tailWidth;
+          ctx.beginPath();
+          ctx.moveTo(toFiniteNumber(projectile.prevX, projectile.x), toFiniteNumber(projectile.prevY, projectile.y));
+          ctx.lineTo(toFiniteNumber(projectile.x, 0), toFiniteNumber(projectile.y, 0));
+          ctx.stroke();
+          ctx.fillStyle = `rgba(255,86,36,${0.62 * alpha})`;
+          ctx.beginPath();
+          ctx.arc(projectile.x, projectile.y, radius * 1.42, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = `rgba(255,176,72,${0.95 * alpha})`;
+          ctx.beginPath();
+          ctx.arc(projectile.x, projectile.y, radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = `rgba(255,236,162,${0.88 * alpha})`;
+          ctx.beginPath();
+          ctx.arc(projectile.x + radius * 0.18, projectile.y - radius * 0.2, radius * 0.44, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+      },
+    };
+    roulette._effects.push(fireballVisualEffect);
+  }
+
+  function emitImpactEffect(x, y, baseRadius) {
+    const roulette = env.getRoulette();
+    if (!roulette || !Array.isArray(roulette._effects)) {
+      return;
+    }
+    const radius = Math.max(0.08, toFiniteNumber(baseRadius, 0.22));
+    roulette._effects.push({
+      elapsed: 0,
+      duration: 190,
+      isDestroy: false,
+      update(deltaMs) {
+        this.elapsed += toFiniteNumber(deltaMs, 0);
+        if (this.elapsed >= this.duration) {
+          this.isDestroy = true;
+        }
+      },
+      render(ctx, zoomScale) {
+        if (!ctx) {
+          return;
+        }
+        const ratio = clamp(this.elapsed / Math.max(1, this.duration), 0, 1);
+        const alpha = Math.max(0, 1 - ratio);
+        const ringRadius = radius * (0.9 + ratio * 2.2);
+        const safeZoom = Math.max(1, toFiniteNumber(zoomScale, 1));
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.strokeStyle = `rgba(255,156,92,${0.78 * alpha})`;
+        ctx.lineWidth = Math.max(0.03, (radius * 0.46) / safeZoom);
+        ctx.beginPath();
+        ctx.arc(x, y, ringRadius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = `rgba(255,102,42,${0.28 * alpha})`;
+        ctx.beginPath();
+        ctx.arc(x, y, ringRadius * 0.55, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      },
+    });
+  }
+
+  function spawnFireball(now) {
+    const dirRad = getEffectiveDirRad();
+    const width = Math.max(0.08, toFiniteNumber(def.width, 0.72));
+    const height = Math.max(0.08, toFiniteNumber(def.height, 0.9));
+    const originX = toFiniteNumber(def.x, 0);
+    const originY = toFiniteNumber(def.y, 0);
+    const muzzleDistance = Math.max(0.12, Math.max(width, height) * 0.62);
+    const speed = Math.max(0.2, toFiniteNumber(def.fireballSpeed, 7.4));
+    const radius = Math.max(0.05, toFiniteNumber(def.fireballRadius, 0.2));
+    const lifeMs = Math.max(260, toFiniteNumber(def.fireballLifeMs, 900));
+    const startX = originX + Math.cos(dirRad) * muzzleDistance;
+    const startY = originY + Math.sin(dirRad) * muzzleDistance;
+    fireballs.push({
+      x: startX,
+      y: startY,
+      prevX: startX,
+      prevY: startY,
+      vx: Math.cos(dirRad) * speed,
+      vy: Math.sin(dirRad) * speed,
+      radius,
+      spawnAt: now,
+      now,
+      expireAt: now + lifeMs,
+    });
+    if (fireballs.length > 18) {
+      fireballs.splice(0, fireballs.length - 18);
+    }
+  }
+
+  function updateFireballs(now, deltaMs) {
+    const roulette = env.getRoulette();
+    const physics = roulette && roulette.physics ? roulette.physics : null;
+    const box2d = env.getBox2D();
+    const marbles = roulette && Array.isArray(roulette._marbles) ? roulette._marbles : [];
+    const canImpact = !!(
+      roulette
+      && physics
+      && physics.marbleMap
+      && box2d
+      && typeof box2d.b2Vec2 === 'function'
+    );
+    const dtSec = Math.max(0.004, Math.min(0.09, toFiniteNumber(deltaMs, 16.666) / 1000));
+    const impulsePower = Math.max(0.1, toFiniteNumber(def.force, 2.8));
+    const impactPadding = 0.36;
+    for (let index = fireballs.length - 1; index >= 0; index -= 1) {
+      const projectile = fireballs[index];
+      if (!projectile) {
+        fireballs.splice(index, 1);
+        continue;
+      }
+      projectile.prevX = toFiniteNumber(projectile.x, 0);
+      projectile.prevY = toFiniteNumber(projectile.y, 0);
+      projectile.x += toFiniteNumber(projectile.vx, 0) * dtSec;
+      projectile.y += toFiniteNumber(projectile.vy, 0) * dtSec;
+      projectile.now = now;
+      const expired = now >= toFiniteNumber(projectile.expireAt, 0);
+      const outOfBounds = projectile.x < -8 || projectile.x > 96 || projectile.y < -12 || projectile.y > 260;
+      let consumed = false;
+      if (!expired && !outOfBounds && canImpact && marbles.length > 0) {
+        const radius = Math.max(0.05, toFiniteNumber(projectile.radius, 0.2));
+        const hitRadius = radius + impactPadding;
+        const hitRadiusSq = hitRadius * hitRadius;
+        for (let marbleIndex = 0; marbleIndex < marbles.length; marbleIndex += 1) {
+          const marble = marbles[marbleIndex];
+          if (!marble || typeof marble.id !== 'number') {
+            continue;
+          }
+          const body = physics.marbleMap[marble.id];
+          if (!body || typeof body.GetPosition !== 'function' || typeof body.ApplyLinearImpulseToCenter !== 'function') {
+            continue;
+          }
+          const pos = body.GetPosition();
+          const mx = toFiniteNumber(pos && pos.x, NaN);
+          const my = toFiniteNumber(pos && pos.y, NaN);
+          if (!Number.isFinite(mx) || !Number.isFinite(my)) {
+            continue;
+          }
+          const dx = mx - projectile.x;
+          const dy = my - projectile.y;
+          if ((dx * dx) + (dy * dy) > hitRadiusSq) {
+            continue;
+          }
+          try {
+            if (typeof body.SetEnabled === 'function') {
+              body.SetEnabled(true);
+            }
+            if (typeof body.SetAwake === 'function') {
+              body.SetAwake(true);
+            }
+            body.ApplyLinearImpulseToCenter(
+              new box2d.b2Vec2(
+                toFiniteNumber(projectile.vx, 0) * impulsePower * 0.18,
+                toFiniteNumber(projectile.vy, 0) * impulsePower * 0.18,
+              ),
+              true,
+            );
+          } catch (_) {
+          }
+          emitImpactEffect(projectile.x, projectile.y, radius);
+          consumed = true;
+          break;
+        }
+      }
+      if (expired || outOfBounds || consumed) {
+        fireballs.splice(index, 1);
+      }
+    }
+  }
+
+  return {
+    kind: 'magic_wizard',
+    oid: def.oid,
+    tick(now) {
+      ensureWizardVisualEffect();
+      ensureFireballVisualEffect();
+      if (env.isPaused()) {
+        return;
+      }
+      const deltaMs = Math.max(8, Math.min(90, toFiniteNumber(now - lastTickAt, 16)));
+      lastTickAt = now;
+      updateFireballs(now, deltaMs);
+      const interval = Math.max(120, toFiniteNumber(def.fireIntervalMs, 900));
+      if (now >= nextShotAt) {
+        spawnFireball(now);
+        nextShotAt = now + interval;
+      }
+    },
+    serializeState() {
+      return {
+        nextShotAt: toFiniteNumber(nextShotAt, 0),
+        lastTickAt: toFiniteNumber(lastTickAt, 0),
+        fireballs: fireballs.slice(0, 24).map((projectile) => ({
+          x: toFiniteNumber(projectile && projectile.x, 0),
+          y: toFiniteNumber(projectile && projectile.y, 0),
+          prevX: toFiniteNumber(projectile && projectile.prevX, 0),
+          prevY: toFiniteNumber(projectile && projectile.prevY, 0),
+          vx: toFiniteNumber(projectile && projectile.vx, 0),
+          vy: toFiniteNumber(projectile && projectile.vy, 0),
+          radius: Math.max(0.05, toFiniteNumber(projectile && projectile.radius, 0.2)),
+          spawnAt: toFiniteNumber(projectile && projectile.spawnAt, 0),
+          expireAt: toFiniteNumber(projectile && projectile.expireAt, 0),
+          now: toFiniteNumber(projectile && projectile.now, 0),
+        })),
+      };
+    },
+    restoreState(rawState) {
+      const safeState = rawState && typeof rawState === 'object' ? rawState : {};
+      nextShotAt = toFiniteNumber(safeState.nextShotAt, 0);
+      lastTickAt = toFiniteNumber(safeState.lastTickAt, 0);
+      fireballs.length = 0;
+      const nextFireballs = Array.isArray(safeState.fireballs) ? safeState.fireballs : [];
+      for (let index = 0; index < nextFireballs.length; index += 1) {
+        const projectile = nextFireballs[index];
+        if (!projectile || typeof projectile !== 'object') {
+          continue;
+        }
+        fireballs.push({
+          x: toFiniteNumber(projectile.x, 0),
+          y: toFiniteNumber(projectile.y, 0),
+          prevX: toFiniteNumber(projectile.prevX, toFiniteNumber(projectile.x, 0)),
+          prevY: toFiniteNumber(projectile.prevY, toFiniteNumber(projectile.y, 0)),
+          vx: toFiniteNumber(projectile.vx, 0),
+          vy: toFiniteNumber(projectile.vy, 0),
+          radius: Math.max(0.05, toFiniteNumber(projectile.radius, 0.2)),
+          spawnAt: toFiniteNumber(projectile.spawnAt, 0),
+          expireAt: toFiniteNumber(projectile.expireAt, 0),
+          now: toFiniteNumber(projectile.now, 0),
+        });
+      }
+      ensureWizardVisualEffect();
+      ensureFireballVisualEffect();
+    },
+  };
+}
+
 function createStickyPadBehavior(def, env) {
   let progress = 0;
   let direction = 1;
@@ -3899,6 +4315,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
   const fanDefs = defs
     .filter((item) => item && item.kind === 'fan')
     .map((item) => ({ ...item }));
+  const magicWizardDefs = defs
+    .filter((item) => item && item.kind === 'magic_wizard')
+    .map((item) => ({ ...item }));
   const stopwatchDefs = defs
     .filter((item) => item && item.kind === 'stopwatch_bomb')
     .map((item) => ({ ...item }));
@@ -3939,6 +4358,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
   for (const fanDef of fanDefs) {
     behaviors.push(createFanBehavior(fanDef, env));
   }
+  for (const magicWizardDef of magicWizardDefs) {
+    behaviors.push(createMagicWizardBehavior(magicWizardDef, env));
+  }
   for (const stopwatchDef of stopwatchDefs) {
     behaviors.push(createStopwatchBombBehavior(stopwatchDef, env));
   }
@@ -3971,6 +4393,7 @@ export function createBehaviorRuntime(env, behaviorDefs) {
       const hammer = {};
       const bottomBumper = {};
       const fan = {};
+      const magicWizard = {};
       const stopwatch = {};
       const sticky = {};
       const diamondAutoRotate = {};
@@ -3994,6 +4417,8 @@ export function createBehaviorRuntime(env, behaviorDefs) {
           bottomBumper[behavior.oid] = state;
         } else if (behavior.kind === 'fan') {
           fan[behavior.oid] = state;
+        } else if (behavior.kind === 'magic_wizard') {
+          magicWizard[behavior.oid] = state;
         } else if (behavior.kind === 'stopwatch_bomb') {
           stopwatch[behavior.oid] = state;
         } else if (behavior.kind === 'sticky_pad') {
@@ -4006,7 +4431,7 @@ export function createBehaviorRuntime(env, behaviorDefs) {
           wormhole[behavior.oid] = state;
         }
       }
-      return { portal, burst, hammer, bottomBumper, fan, stopwatch, sticky, diamondAutoRotate, goalMarker, wormhole };
+      return { portal, burst, hammer, bottomBumper, fan, magicWizard, stopwatch, sticky, diamondAutoRotate, goalMarker, wormhole };
     },
     restoreState(rawState) {
       const safeState = rawState && typeof rawState === 'object' ? rawState : {};
@@ -4015,6 +4440,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
       const hammerState = safeState.hammer && typeof safeState.hammer === 'object' ? safeState.hammer : {};
       const bottomBumperState = safeState.bottomBumper && typeof safeState.bottomBumper === 'object' ? safeState.bottomBumper : {};
       const fanState = safeState.fan && typeof safeState.fan === 'object' ? safeState.fan : {};
+      const magicWizardState = safeState.magicWizard && typeof safeState.magicWizard === 'object'
+        ? safeState.magicWizard
+        : {};
       const stopwatchState = safeState.stopwatch && typeof safeState.stopwatch === 'object' ? safeState.stopwatch : {};
       const stickyState = safeState.sticky && typeof safeState.sticky === 'object' ? safeState.sticky : {};
       const diamondAutoRotateState = safeState.diamondAutoRotate && typeof safeState.diamondAutoRotate === 'object'
@@ -4037,6 +4465,8 @@ export function createBehaviorRuntime(env, behaviorDefs) {
           behavior.restoreState(bottomBumperState[behavior.oid]);
         } else if (behavior.kind === 'fan') {
           behavior.restoreState(fanState[behavior.oid]);
+        } else if (behavior.kind === 'magic_wizard') {
+          behavior.restoreState(magicWizardState[behavior.oid]);
         } else if (behavior.kind === 'stopwatch_bomb') {
           behavior.restoreState(stopwatchState[behavior.oid]);
         } else if (behavior.kind === 'sticky_pad') {
