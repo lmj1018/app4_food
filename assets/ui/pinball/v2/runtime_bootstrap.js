@@ -1081,6 +1081,40 @@ function alignSpawnToStage() {
   }
 }
 
+function readStageSpawnSnapshot(stageInput) {
+  const stage = stageInput && typeof stageInput === 'object' ? stageInput : null;
+  const spawn = stage && stage.spawn && typeof stage.spawn === 'object'
+    ? stage.spawn
+    : null;
+  if (!spawn) {
+    return null;
+  }
+  return {
+    x: toFiniteNumber(spawn.x, 10.25),
+    y: toFiniteNumber(spawn.y, 0),
+    columns: Math.max(1, Math.floor(toFiniteNumber(spawn.columns, 10))),
+    spacingX: Math.max(0.08, toFiniteNumber(spawn.spacingX, 0.6)),
+    visibleRows: Math.max(1, Math.floor(toFiniteNumber(spawn.visibleRows, 5))),
+  };
+}
+
+function hasStageSpawnChanged(previousStage, nextStage) {
+  const previous = readStageSpawnSnapshot(previousStage);
+  const next = readStageSpawnSnapshot(nextStage);
+  if (!previous && !next) {
+    return false;
+  }
+  if (!previous || !next) {
+    return true;
+  }
+  const samePosition = Math.abs(previous.x - next.x) <= 0.0001
+    && Math.abs(previous.y - next.y) <= 0.0001;
+  const sameGrid = previous.columns === next.columns
+    && Math.abs(previous.spacingX - next.spacingX) <= 0.0001
+    && previous.visibleRows === next.visibleRows;
+  return !(samePosition && sameGrid);
+}
+
 function createBehaviorEnvironment() {
   return {
     getRoulette,
@@ -1292,6 +1326,9 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
   const pausedBefore = control.paused;
   const runningBefore = roulette._isRunning === true && pausedBefore === false;
   const preserveRunning = options && options.preserveRunning === true;
+  const stageBeforeLive = roulette && roulette._stage && typeof roulette._stage === 'object'
+    ? roulette._stage
+    : null;
 
   control.goalReceived = false;
   if (!preserveRunning || !runningBefore) {
@@ -1320,6 +1357,8 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
   startTickLoop();
 
   const preserveMarbles = !(options && options.preserveMarbles === false);
+  const spawnChanged = hasStageSpawnChanged(stageBeforeLive, stage);
+  const shouldRespawnForSpawnChange = spawnChanged && !runningBefore;
   if (!preserveMarbles) {
     roulette.clearMarbles();
   }
@@ -1328,7 +1367,7 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
     suppressMarbleCooldownIndicator();
     alignSpawnToStage();
     enforceMarbleBodyPhysics();
-  } else if (!preserveMarbles) {
+  } else if (!preserveMarbles || shouldRespawnForSpawnChange) {
     alignSpawnToStage();
     enforceMarbleBodyPhysics();
   }
