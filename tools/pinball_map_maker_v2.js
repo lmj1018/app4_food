@@ -6536,14 +6536,16 @@ function beginMarqueeSelectDrag(point, options = {}) {
   if (!point) {
     return false;
   }
-  const additive = options.additive === true;
+  const subtract = options.subtract === true;
+  const additive = options.additive === true && !subtract;
   editorState.dragState = {
     type: 'marquee_select',
     startWorld: { x: round1(toFinite(point.x, 0)), y: round1(toFinite(point.y, 0)) },
     currentWorld: { x: round1(toFinite(point.x, 0)), y: round1(toFinite(point.y, 0)) },
     moved: false,
     additive,
-    baseSelectedIndexes: additive ? getSelectedIndexes() : [],
+    subtract,
+    baseSelectedIndexes: (additive || subtract) ? getSelectedIndexes() : [],
   };
   return true;
 }
@@ -7585,18 +7587,33 @@ function finishDrag() {
     const end = drag.currentWorld || start;
     const selectionRect = buildSelectionRectWorld(start, end);
     const moved = drag.moved === true;
+    const subtract = drag.subtract === true;
     let selected = Array.isArray(drag.baseSelectedIndexes) ? drag.baseSelectedIndexes.slice() : [];
     if (moved && selectionRect) {
       const objects = getObjects();
-      for (let index = 0; index < objects.length; index += 1) {
-        if (!objectIntersectsSelectionRect(objects[index], selectionRect)) {
-          continue;
+      if (subtract) {
+        const kept = [];
+        for (let index = 0; index < selected.length; index += 1) {
+          const selectedIndex = Math.floor(toFinite(selected[index], -1));
+          if (selectedIndex < 0 || selectedIndex >= objects.length) {
+            continue;
+          }
+          if (!objectIntersectsSelectionRect(objects[selectedIndex], selectionRect)) {
+            kept.push(selectedIndex);
+          }
         }
-        if (!selected.includes(index)) {
-          selected.push(index);
+        selected = normalizeSelectionIndexes(kept, objects.length);
+      } else {
+        for (let index = 0; index < objects.length; index += 1) {
+          if (!objectIntersectsSelectionRect(objects[index], selectionRect)) {
+            continue;
+          }
+          if (!selected.includes(index)) {
+            selected.push(index);
+          }
         }
       }
-    } else if (!drag.additive) {
+    } else if (!drag.additive && !subtract) {
       selected = [];
     }
     setSelectedIndexes(selected, {
@@ -7854,10 +7871,30 @@ function handleMakerCanvasPointerDown(event) {
     return;
   }
   if (tool === 'select') {
+    const subtractMode = event.altKey === true;
+    const additiveMode = event.shiftKey === true && !subtractMode;
     const hitDistance = Math.max(0.55, layout ? (13 / Math.max(0.001, layout.scale)) : 0.9);
     const nearestIndex = findNearestObjectIndex(point.x, point.y, hitDistance);
     if (nearestIndex >= 0) {
-      if (event.shiftKey) {
+      if (subtractMode) {
+        const selected = getSelectedIndexes();
+        if (selected.includes(nearestIndex)) {
+          const nextSelected = selected.filter((item) => item !== nearestIndex);
+          setSelectedIndexes(nextSelected, {
+            primaryIndex: nextSelected.length > 0 ? nextSelected[nextSelected.length - 1] : -1,
+            keepFloatingHidden: nextSelected.length === 0,
+          });
+          editorState.floatingInspectorHiddenByUser = nextSelected.length === 0;
+          syncObjectList({ preserveNoSelection: true });
+          updateMakerHint(nextSelected.length === 0 ? '선택 해제됨' : `${nextSelected.length}개 오브젝트 선택됨`);
+        } else {
+          syncObjectList({ preserveNoSelection: true });
+        }
+        editorState.suppressClickOnce = true;
+        drawMakerCanvas();
+        return;
+      }
+      if (additiveMode) {
         const selected = getSelectedIndexes();
         if (!selected.includes(nearestIndex)) {
           selected.push(nearestIndex);
@@ -7867,7 +7904,7 @@ function handleMakerCanvasPointerDown(event) {
         setSingleSelectedIndex(nearestIndex);
       }
       editorState.floatingInspectorHiddenByUser = false;
-    } else if (!event.shiftKey) {
+    } else if (!additiveMode && !subtractMode) {
       setSelectedIndexes([], { keepFloatingHidden: true });
     }
     syncObjectList({ preserveNoSelection: true });
@@ -7878,9 +7915,16 @@ function handleMakerCanvasPointerDown(event) {
       const selectedCount = getSelectedIndexes().length;
       updateMakerHint(selectedCount > 1 ? `${selectedCount}개 오브젝트 그룹 이동중` : '오브젝트 드래그 이동중');
     } else {
-      beginMarqueeSelectDrag(point, { additive: event.shiftKey === true });
+      beginMarqueeSelectDrag(point, {
+        additive: additiveMode,
+        subtract: subtractMode,
+      });
       editorState.suppressClickOnce = true;
-      updateMakerHint(event.shiftKey ? '영역 추가 선택 드래그중' : '영역 선택 드래그중');
+      if (subtractMode) {
+        updateMakerHint('영역 선택 해제 드래그중');
+      } else {
+        updateMakerHint(additiveMode ? '영역 추가 선택 드래그중' : '영역 선택 드래그중');
+      }
     }
     drawMakerCanvas();
     return;
@@ -8145,11 +8189,23 @@ function handleMakerCanvasClick(event) {
   }
   const tool = selectedTool();
   if (tool === 'select') {
+    const subtractMode = event.altKey === true;
+    const additiveMode = event.shiftKey === true && !subtractMode;
     const layout = getCanvasLayout();
     const hitDistance = Math.max(0.55, layout ? (13 / Math.max(0.001, layout.scale)) : 0.9);
     const nearestIndex = findNearestObjectIndex(point.x, point.y, hitDistance);
     if (nearestIndex >= 0) {
-      if (event.shiftKey) {
+      if (subtractMode) {
+        const selected = getSelectedIndexes();
+        if (selected.includes(nearestIndex)) {
+          const nextSelected = selected.filter((item) => item !== nearestIndex);
+          setSelectedIndexes(nextSelected, {
+            primaryIndex: nextSelected.length > 0 ? nextSelected[nextSelected.length - 1] : -1,
+            keepFloatingHidden: nextSelected.length === 0,
+          });
+          editorState.floatingInspectorHiddenByUser = nextSelected.length === 0;
+        }
+      } else if (additiveMode) {
         const selected = getSelectedIndexes();
         if (!selected.includes(nearestIndex)) {
           selected.push(nearestIndex);
@@ -8158,13 +8214,18 @@ function handleMakerCanvasClick(event) {
       } else {
         setSingleSelectedIndex(nearestIndex);
       }
-      editorState.floatingInspectorHiddenByUser = false;
-    } else if (!event.shiftKey) {
+      if (!subtractMode || getSelectedIndexes().length > 0) {
+        editorState.floatingInspectorHiddenByUser = false;
+      }
+    } else if (!additiveMode && !subtractMode) {
       setSelectedIndexes([], { keepFloatingHidden: true });
     }
     syncObjectList({ preserveNoSelection: true });
-    if (nearestIndex < 0 && !event.shiftKey) {
+    if (nearestIndex < 0 && !additiveMode && !subtractMode) {
       updateMakerHint('선택 해제됨');
+    } else if (subtractMode && nearestIndex >= 0) {
+      const selectionCount = getSelectedIndexes().length;
+      updateMakerHint(selectionCount === 0 ? '선택 해제됨' : `${selectionCount}개 오브젝트 선택됨`);
     }
     drawMakerCanvas();
     return;
