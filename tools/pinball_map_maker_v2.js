@@ -58,6 +58,7 @@ let marbleCountApplyTimer = 0;
 let marbleCountApplyInFlight = false;
 let marbleCountApplyPending = false;
 const undoHistory = [];
+const redoHistory = [];
 let goalMarkerPreviewImage = null;
 let magicWizardPreviewImage = null;
 
@@ -943,28 +944,34 @@ function buildUndoSnapshot() {
   };
 }
 
+function pushHistorySnapshot(history, snapshot) {
+  if (!Array.isArray(history) || !snapshot) {
+    return;
+  }
+  history.push(snapshot);
+  if (history.length > MAX_UNDO_HISTORY) {
+    history.shift();
+  }
+}
+
 function rememberUndoState(reason = '') {
   const snapshot = buildUndoSnapshot();
   const last = undoHistory.length > 0 ? undoHistory[undoHistory.length - 1] : null;
   if (last && last.key === snapshot.key) {
     return;
   }
-  undoHistory.push(snapshot);
-  if (undoHistory.length > MAX_UNDO_HISTORY) {
-    undoHistory.shift();
+  pushHistorySnapshot(undoHistory, snapshot);
+  if (redoHistory.length > 0) {
+    redoHistory.length = 0;
   }
 }
 
 function clearUndoHistory() {
   undoHistory.length = 0;
+  redoHistory.length = 0;
 }
 
-function undoLastChange() {
-  if (undoHistory.length <= 0) {
-    setStatus('되돌릴 작업이 없습니다.', 'warn');
-    return false;
-  }
-  const snapshot = undoHistory.pop();
+function restoreSnapshotFromHistory(snapshot, liveReason = '히스토리 복원') {
   if (!snapshot || !snapshot.mapJson) {
     return false;
   }
@@ -988,8 +995,45 @@ function undoLastChange() {
   }
   syncObjectList();
   drawMakerCanvas();
-  queueObjectLiveDraftApply('Ctrl+Z');
+  queueObjectLiveDraftApply(liveReason);
+  return true;
+}
+
+function undoLastChange() {
+  if (undoHistory.length <= 0) {
+    setStatus('되돌릴 작업이 없습니다.', 'warn');
+    return false;
+  }
+  const currentSnapshot = buildUndoSnapshot();
+  const snapshot = undoHistory.pop();
+  if (!snapshot || !snapshot.mapJson || !currentSnapshot) {
+    return false;
+  }
+  pushHistorySnapshot(redoHistory, currentSnapshot);
+  const restored = restoreSnapshotFromHistory(snapshot, 'Ctrl+Z');
+  if (!restored) {
+    return false;
+  }
   setStatus(`되돌리기 완료 (${undoHistory.length}/${MAX_UNDO_HISTORY})`);
+  return true;
+}
+
+function redoLastChange() {
+  if (redoHistory.length <= 0) {
+    setStatus('다시 실행할 작업이 없습니다.', 'warn');
+    return false;
+  }
+  const currentSnapshot = buildUndoSnapshot();
+  const snapshot = redoHistory.pop();
+  if (!snapshot || !snapshot.mapJson || !currentSnapshot) {
+    return false;
+  }
+  pushHistorySnapshot(undoHistory, currentSnapshot);
+  const restored = restoreSnapshotFromHistory(snapshot, 'Ctrl+Y');
+  if (!restored) {
+    return false;
+  }
+  setStatus(`다시 실행 완료 (${redoHistory.length}/${MAX_UNDO_HISTORY})`);
   return true;
 }
 
@@ -9688,10 +9732,22 @@ function setupEvents() {
       return;
     }
     const key = String(event.key || '');
-    if ((event.ctrlKey || event.metaKey) && !event.altKey && key.toLowerCase() === 'z') {
-      event.preventDefault();
-      undoLastChange();
-      return;
+    if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+      const lowerKey = key.toLowerCase();
+      if (lowerKey === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) {
+          redoLastChange();
+        } else {
+          undoLastChange();
+        }
+        return;
+      }
+      if (lowerKey === 'y') {
+        event.preventDefault();
+        redoLastChange();
+        return;
+      }
     }
     if (key === 'Delete') {
       if (getSelectedIndexes().length > 0) {
@@ -9750,7 +9806,7 @@ async function boot() {
   syncObjectList();
   setSelectedTool('select');
   drawMakerCanvas();
-  updateMakerHint('드래그 생성/편집 즉시 반영. Ctrl+Z 되돌리기 / Delete 삭제 / Space 재생·일시정지 / R 리셋');
+  updateMakerHint('드래그 생성/편집 즉시 반영. Ctrl+Z 되돌리기 / Ctrl+Y 다시실행 / Delete 삭제 / Space 재생·일시정지 / R 리셋');
   setPlayPauseUi(false);
   setPreviewPlayPauseUi(false);
   setPreviewStatus('좌표창 엔진 연결 대기');
