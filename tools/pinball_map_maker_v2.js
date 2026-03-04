@@ -772,8 +772,8 @@ function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
           : src;
         obj.opacity = round2(clamp(toFinite(obj.opacity, 0.86), 0.05, 1));
       } else if (type === 'magic_wizard') {
-        obj.width = Math.max(0.08, toFinite(obj.width, 0.72));
-        obj.height = Math.max(0.08, toFinite(obj.height, 0.9));
+        obj.width = Math.max(0.08, toFinite(obj.width, 0.8));
+        obj.height = Math.max(0.08, toFinite(obj.height, 0.8));
         obj.dirDeg = round1(normalizeDeg(toFinite(obj.dirDeg, toFinite(obj.rotation, 0))));
         obj.rotation = obj.dirDeg;
         obj.mirror = obj.mirror === true;
@@ -1781,7 +1781,11 @@ function isDirectionalTargetObject(obj) {
     return false;
   }
   const type = String(obj.type || '');
-  return type === 'hammer' || type === 'bottom_bumper' || type === 'fan' || type === 'sticky_pad';
+  return type === 'hammer'
+    || type === 'bottom_bumper'
+    || type === 'fan'
+    || type === 'sticky_pad'
+    || type === 'magic_wizard';
 }
 
 function isAimDirectionalObject(obj) {
@@ -1789,7 +1793,7 @@ function isAimDirectionalObject(obj) {
     return false;
   }
   const type = String(obj.type || '');
-  return type === 'hammer' || type === 'bottom_bumper' || type === 'fan';
+  return type === 'hammer' || type === 'bottom_bumper' || type === 'fan' || type === 'magic_wizard';
 }
 
 function isPolylineTool(tool) {
@@ -2196,8 +2200,8 @@ function createObjectByTool(tool, x, y) {
       type: 'magic_wizard',
       x: px,
       y: py,
-      width: 0.72,
-      height: 0.9,
+      width: 0.8,
+      height: 0.8,
       rotation: 0,
       dirDeg: 0,
       mirror: false,
@@ -4898,20 +4902,21 @@ function getHammerDirectionHandleWorld(obj) {
     return null;
   }
   const isBottomBumper = String(obj.type || '') === 'bottom_bumper';
+  const isMagicWizard = String(obj.type || '') === 'magic_wizard';
   const anchor = isBottomBumper
     ? (getBottomBumperPivotWorld(obj) || { x: toFinite(obj.x, 0), y: toFinite(obj.y, 0) })
     : { x: toFinite(obj.x, 0), y: toFinite(obj.y, 0) };
-  const defaultDir = obj.type === 'fan' ? 0 : 90;
+  const defaultDir = obj.type === 'fan' ? 0 : (isMagicWizard ? 0 : 90);
   const dirDeg = isBottomBumper
     ? getBottomBumperEffectiveDirDeg(obj)
     : normalizeDeg(toFinite(obj.dirDeg, defaultDir));
   const dir = (Math.PI / 180) * dirDeg;
   const defaultDistance = isBottomBumper
     ? getBottomBumperDirectionHandleDistance(obj)
-    : (obj.type === 'fan' ? 2.8 : 0.95);
+    : (obj.type === 'fan' ? 2.8 : (isMagicWizard ? toFinite(obj.fireballSpeed, 7.4) : 0.95));
   const distance = isBottomBumper
     ? getBottomBumperDirectionHandleDistance(obj)
-    : Math.max(0.2, toFinite(obj.hitDistance, defaultDistance));
+    : Math.max(0.2, toFinite(isMagicWizard ? obj.fireballSpeed : obj.hitDistance, defaultDistance));
   return {
     kind: 'hammer_dir',
     x: round1(anchor.x + Math.cos(dir) * distance),
@@ -5919,6 +5924,35 @@ function drawCreateDragPreview(ctx, layout, drag) {
     ctx.restore();
     return;
   }
+  if (tool === 'magic_wizard') {
+    const half = Math.max(0.12, Math.max(Math.abs(current.x - start.x), Math.abs(current.y - start.y)) / 2);
+    const cx = (start.x + current.x) / 2;
+    const cy = (start.y + current.y) / 2;
+    const center = worldToCanvas(layout, cx, cy);
+    const extent = half * layout.scale;
+    const image = getMagicWizardPreviewImage();
+    ctx.translate(center.x, center.y);
+    if (image && image.complete && image.naturalWidth > 0) {
+      ctx.globalAlpha = 0.9;
+      ctx.drawImage(image, -extent, -extent, extent * 2, extent * 2);
+      ctx.globalAlpha = 1;
+    } else {
+      ctx.fillStyle = 'rgba(255, 166, 108, 0.18)';
+      ctx.strokeStyle = '#ffa66c';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.rect(-extent, -extent, extent * 2, extent * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.strokeStyle = '#ffcb9e';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.rect(-extent, -extent, extent * 2, extent * 2);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
 
   const p1 = worldToCanvas(layout, start.x, start.y);
   const p2 = worldToCanvas(layout, current.x, current.y);
@@ -6238,12 +6272,17 @@ function drawMakerCanvas() {
       (item) =>
         item &&
         item.oid === editorState.pendingHammerOid &&
-        (item.type === 'hammer' || item.type === 'bottom_bumper' || item.type === 'fan' || item.type === 'sticky_pad'),
+        (item.type === 'hammer'
+          || item.type === 'bottom_bumper'
+          || item.type === 'fan'
+          || item.type === 'sticky_pad'
+          || item.type === 'magic_wizard'),
     );
     if (directional) {
       const isFan = directional.type === 'fan';
       const isBottomBumper = directional.type === 'bottom_bumper';
       const isSticky = directional.type === 'sticky_pad';
+      const isMagicWizard = directional.type === 'magic_wizard';
       const centerWorld = {
         x: toFinite(directional.x, 0),
         y: toFinite(directional.y, 0),
@@ -6261,7 +6300,7 @@ function drawMakerCanvas() {
         isBottomBumper
           ? getBottomBumperEffectiveDirDeg(directional)
           : directional.dirDeg,
-        isFan ? 0 : 90,
+        isFan ? 0 : (isMagicWizard ? 0 : 90),
       );
       const targetWorld = hoverWorld
         ? { x: hoverWorld.x, y: hoverWorld.y }
@@ -6271,17 +6310,31 @@ function drawMakerCanvas() {
             x: anchorWorld.x + Math.cos(baseRad) * (
               isBottomBumper
                 ? getBottomBumperDirectionHandleDistance(directional)
-                : Math.max(0.2, toFinite(directional.hitDistance, isFan ? 2.8 : 1))
+                : Math.max(
+                  0.2,
+                  toFinite(
+                    isMagicWizard ? directional.fireballSpeed : directional.hitDistance,
+                    isFan ? 2.8 : (isMagicWizard ? 7.4 : 1),
+                  ),
+                )
             ),
             y: anchorWorld.y + Math.sin(baseRad) * (
               isBottomBumper
                 ? getBottomBumperDirectionHandleDistance(directional)
-                : Math.max(0.2, toFinite(directional.hitDistance, isFan ? 2.8 : 1))
+                : Math.max(
+                  0.2,
+                  toFinite(
+                    isMagicWizard ? directional.fireballSpeed : directional.hitDistance,
+                    isFan ? 2.8 : (isMagicWizard ? 7.4 : 1),
+                  ),
+                )
             ),
           });
       const target = worldToCanvas(layout, targetWorld.x, targetWorld.y);
       ctx.save();
-      ctx.strokeStyle = isSticky ? '#ffaad9' : (isFan ? '#8fe6ff' : (isBottomBumper ? '#8fd5ff' : '#9fd7ff'));
+      ctx.strokeStyle = isSticky
+        ? '#ffaad9'
+        : (isFan ? '#8fe6ff' : (isBottomBumper ? '#8fd5ff' : (isMagicWizard ? '#ffbe86' : '#9fd7ff')));
       ctx.lineWidth = 1.8;
       ctx.setLineDash([6, 4]);
       ctx.beginPath();
@@ -6291,7 +6344,9 @@ function drawMakerCanvas() {
       ctx.setLineDash([]);
       drawHandleWithFeedback(ctx, target.x, target.y, 5.2, isSticky ? 'sticky_target' : 'hammer_dir', {
         fill: 'rgba(8,16,36,0.94)',
-        stroke: isSticky ? '#ffaad9' : (isFan ? '#8fe6ff' : (isBottomBumper ? '#8fd5ff' : '#9fd7ff')),
+        stroke: isSticky
+          ? '#ffaad9'
+          : (isFan ? '#8fe6ff' : (isBottomBumper ? '#8fd5ff' : (isMagicWizard ? '#ffbe86' : '#9fd7ff'))),
         lineWidth: 1.6,
       });
       const dir = Math.atan2(target.y - anchor.y, target.x - anchor.x);
@@ -6346,6 +6401,28 @@ function drawMakerCanvas() {
         ctx.fill();
         ctx.stroke();
         drawBottomBumperPivotDetail(ctx, halfW, halfH);
+      } else if (isMagicWizard) {
+        const ghost = worldToCanvas(layout, toFinite(directional.x, 0), toFinite(directional.y, 0));
+        const half = Math.max(0.12, Math.max(toFinite(directional.width, 0.7), toFinite(directional.height, 0.7))) * layout.scale;
+        const image = getMagicWizardPreviewImage();
+        ctx.translate(ghost.x, ghost.y);
+        ctx.rotate(dir);
+        if (directional.mirror === true) {
+          ctx.scale(-1, 1);
+        }
+        if (image && image.complete && image.naturalWidth > 0) {
+          ctx.globalAlpha = 0.82;
+          ctx.drawImage(image, -half, -half, half * 2, half * 2);
+          ctx.globalAlpha = 1;
+        } else {
+          ctx.fillStyle = 'rgba(255,166,108,0.2)';
+          ctx.strokeStyle = '#ffbe86';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.rect(-half, -half, half * 2, half * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
       } else {
         const ghost = worldToCanvas(layout, hitX, hitY);
         const halfW = Math.max(0.08, toFinite(directional.width, 0.9)) * layout.scale;
@@ -6760,26 +6837,24 @@ function createMagicWizardFromDrag(startWorld, endWorld) {
   const goalY = Math.max(25, toFinite(mapJson.stage && mapJson.stage.goalY, 210) + 4);
   const start = clampWorldPoint(startWorld, goalY);
   const end = clampWorldPoint(endWorld, goalY);
-  const minSize = 0.08;
-  const fullWidth = Math.max(minSize, Math.abs(end.x - start.x));
-  const fullHeight = Math.max(minSize, Math.abs(end.y - start.y));
+  const dx = toFinite(end.x, 0) - toFinite(start.x, 0);
+  const dy = toFinite(end.y, 0) - toFinite(start.y, 0);
+  const halfSize = round1(Math.max(0.12, Math.max(Math.abs(dx), Math.abs(dy)) / 2));
   const centerX = round1((start.x + end.x) / 2);
   const centerY = round1((start.y + end.y) / 2);
-  const halfWidth = round1(Math.max(0.12, fullWidth / 2));
-  const halfHeight = round1(Math.max(0.12, fullHeight / 2));
   return {
     oid: nextOid('magic'),
     type: 'magic_wizard',
     x: centerX,
     y: centerY,
-    width: halfWidth,
-    height: halfHeight,
+    width: halfSize,
+    height: halfSize,
     rotation: 0,
     dirDeg: 0,
     mirror: false,
     fireIntervalMs: 900,
     fireballSpeed: 7.4,
-    fireballRadius: round2(Math.max(0.08, Math.min(0.42, Math.min(halfWidth, halfHeight) * 0.22))),
+    fireballRadius: round2(Math.max(0.08, Math.min(0.42, halfSize * 0.22))),
     force: 2.8,
     imageSrc: MAGIC_WIZARD_IMAGE_DEFAULT_SRC,
     color: 'rgba(0,0,0,0)',
@@ -6869,14 +6944,17 @@ function setHammerDirectionAndDistance(obj, point, shiftKey = false) {
   if (obj.type === 'bottom_bumper') {
     return setBottomBumperDirectionByPivot(obj, point, shiftKey);
   }
+  const isMagicWizard = obj.type === 'magic_wizard';
   const cx = toFinite(obj.x, 0);
   const cy = toFinite(obj.y, 0);
   let dx = toFinite(point && point.x, cx) - cx;
   let dy = toFinite(point && point.y, cy) - cy;
   let distance = Math.hypot(dx, dy);
   if (distance < 0.05) {
-    const fallbackDistance = obj.type === 'fan' ? 2.8 : 1.1;
-    distance = Math.max(0.2, toFinite(obj.hitDistance, fallbackDistance));
+    const fallbackDistance = obj.type === 'fan'
+      ? 2.8
+      : (isMagicWizard ? toFinite(obj.fireballSpeed, 7.4) : 1.1);
+    distance = Math.max(0.2, toFinite(isMagicWizard ? obj.fireballSpeed : obj.hitDistance, fallbackDistance));
     dx = distance;
     dy = 0;
   }
@@ -6889,7 +6967,12 @@ function setHammerDirectionAndDistance(obj, point, shiftKey = false) {
   }
   obj.dirDeg = round1(normalizeDeg(angleDeg));
   obj.rotation = obj.dirDeg;
-  obj.hitDistance = round1(clamp(Math.hypot(dx, dy), 0.2, 24));
+  const resolvedDistance = round1(clamp(Math.hypot(dx, dy), 0.2, 24));
+  if (isMagicWizard) {
+    obj.fireballSpeed = resolvedDistance;
+  } else {
+    obj.hitDistance = resolvedDistance;
+  }
   return true;
 }
 
@@ -7018,7 +7101,7 @@ function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
   if (tool === 'sticky_pad') {
     return createStickyPadFromDrag(start, end);
   }
-  if (tool === 'box_block' || tool === 'diamond_block' || tool === 'goal_marker_image' || tool === 'magic_wizard') {
+  if (tool === 'box_block' || tool === 'diamond_block' || tool === 'goal_marker_image') {
     const created = createObjectByTool(tool, (start.x + end.x) / 2, (start.y + end.y) / 2);
     if (!created) {
       return null;
@@ -7029,10 +7112,6 @@ function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
       const half = round1(Math.max(0.12, Math.max(Math.abs(dx), Math.abs(dy)) / 2));
       created.width = half;
       created.height = half;
-    } else if (tool === 'magic_wizard') {
-      created.width = round1(Math.max(0.12, Math.abs(dx) / 2));
-      created.height = round1(Math.max(0.12, Math.abs(dy) / 2));
-      created.fireballRadius = round2(Math.max(0.08, Math.min(0.42, Math.min(created.width, created.height) * 0.22)));
     } else {
       const minHalfWidth = tool === 'goal_marker_image' ? 0.2 : 0.08;
       const minHalfHeight = tool === 'goal_marker_image' ? 0.2 : 0.05;
@@ -7222,11 +7301,18 @@ function applyMultiResizeFromPrimary(primaryIndex, dragType, beforeValue, afterV
         continue;
       }
       const distanceScale = Math.max(0.01, toFinite(options.distanceScale, 1));
-      const fallbackDir = obj.type === 'fan' ? 0 : 90;
-      const fallbackDistance = obj.type === 'fan' ? 2.8 : 0.95;
+      const isMagicWizard = obj.type === 'magic_wizard';
+      const fallbackDir = obj.type === 'fan' ? 0 : (isMagicWizard ? 0 : 90);
+      const fallbackDistance = obj.type === 'fan'
+        ? 2.8
+        : (isMagicWizard ? toFinite(obj.fireballSpeed, 7.4) : 0.95);
       obj.dirDeg = round1(normalizeDeg(toFinite(obj.dirDeg, fallbackDir) + dirDelta));
       obj.rotation = obj.dirDeg;
-      obj.hitDistance = round1(clamp(toFinite(obj.hitDistance, fallbackDistance) * distanceScale, 0.2, 24));
+      if (isMagicWizard) {
+        obj.fireballSpeed = round1(clamp(toFinite(obj.fireballSpeed, fallbackDistance) * distanceScale, 0.2, 24));
+      } else {
+        obj.hitDistance = round1(clamp(toFinite(obj.hitDistance, fallbackDistance) * distanceScale, 0.2, 24));
+      }
     }
   }
 }
@@ -7466,14 +7552,19 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
       return false;
     }
     const isBottomBumper = obj.type === 'bottom_bumper';
-    const fallbackDir = obj.type === 'fan' ? 0 : (isBottomBumper ? getBottomBumperBaseDirDeg(obj) : 90);
+    const isMagicWizard = obj.type === 'magic_wizard';
+    const fallbackDir = obj.type === 'fan'
+      ? 0
+      : (isBottomBumper ? getBottomBumperBaseDirDeg(obj) : (isMagicWizard ? 0 : 90));
     const fallbackDistance = obj.type === 'fan'
       ? 2.8
-      : (isBottomBumper ? getBottomBumperDirectionHandleDistance(obj) : 0.95);
+      : (isBottomBumper
+        ? getBottomBumperDirectionHandleDistance(obj)
+        : (isMagicWizard ? toFinite(obj.fireballSpeed, 7.4) : 0.95));
     const beforeDir = toFinite(obj.dirDeg, fallbackDir);
     const beforeDistance = isBottomBumper
       ? getBottomBumperDirectionHandleDistance(obj)
-      : Math.max(0.2, toFinite(obj.hitDistance, fallbackDistance));
+      : Math.max(0.2, toFinite(isMagicWizard ? obj.fireballSpeed : obj.hitDistance, fallbackDistance));
     const updated = setHammerDirectionAndDistance(obj, point, !!(event && event.shiftKey));
     if (!updated) {
       return false;
@@ -7481,9 +7572,9 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
     const dirDelta = normalizeSignedDeg(toFinite(obj.dirDeg, beforeDir) - beforeDir);
     const afterDistance = isBottomBumper
       ? getBottomBumperDirectionHandleDistance(obj)
-      : Math.max(0.2, toFinite(obj.hitDistance, fallbackDistance));
+      : Math.max(0.2, toFinite(isMagicWizard ? obj.fireballSpeed : obj.hitDistance, fallbackDistance));
     const distanceScale = Math.max(0.01, afterDistance / Math.max(0.01, beforeDistance));
-    applyMultiResizeFromPrimary(index, 'hammer_dir', beforeDistance, obj.hitDistance, {
+    applyMultiResizeFromPrimary(index, 'hammer_dir', beforeDistance, afterDistance, {
       dirDelta,
       distanceScale,
     });
@@ -7664,7 +7755,11 @@ function finishDrag() {
       } else {
         resetPendingPortal();
       }
-      if (tool === 'hammer' || tool === 'bottom_bumper' || tool === 'fan' || tool === 'sticky_pad') {
+      if (tool === 'hammer'
+        || tool === 'bottom_bumper'
+        || tool === 'fan'
+        || tool === 'sticky_pad'
+        || tool === 'magic_wizard') {
         editorState.pendingHammerOid = String(created.oid || '');
         let createdHint = '해머 생성 완료: 드래그/클릭으로 타격 방향·이동거리 설정';
         if (tool === 'fan') {
@@ -7673,6 +7768,8 @@ function finishDrag() {
           createdHint = '하단 범퍼 생성 완료: 드래그/클릭으로 축 기준 타격 각도 설정';
         } else if (tool === 'sticky_pad') {
           createdHint = '점착패드 생성 완료: 드래그/클릭으로 이동 목표점(B) 지정';
+        } else if (tool === 'magic_wizard') {
+          createdHint = '마법사 생성 완료: 드래그/클릭으로 화염 발사 방향 설정';
         }
         updateMakerHint(createdHint);
       } else {
@@ -7681,7 +7778,12 @@ function finishDrag() {
       syncObjectList();
       refreshCurrentJsonViewer();
       queueObjectLiveDraftApply(`${toolDisplayName(tool)} 생성`, { autoResumeAfterReset: true });
-      if (tool !== 'portal') {
+      const needsDirectionFollowup = tool === 'hammer'
+        || tool === 'bottom_bumper'
+        || tool === 'fan'
+        || tool === 'sticky_pad'
+        || tool === 'magic_wizard';
+      if (tool !== 'portal' && !needsDirectionFollowup) {
         updateMakerHint(`${toolDisplayName(tool)} 생성 완료: ${created.oid || ''}`);
       }
     }
@@ -7718,6 +7820,9 @@ function finishDrag() {
       } else if (type === 'sticky_pad') {
         queueObjectLiveDraftApply('점착패드 이동 경로 설정');
         updateMakerHint('점착패드 A↔B 이동 경로 설정 완료');
+      } else if (type === 'magic_wizard') {
+        queueObjectLiveDraftApply('마법사 발사 방향 설정');
+        updateMakerHint('마법사 화염 발사 방향 설정 완료');
       } else {
         queueObjectLiveDraftApply('해머 타격 방향/거리 설정');
         updateMakerHint('해머 타격 방향 설정 완료');
@@ -7783,13 +7888,21 @@ function handleMakerCanvasPointerDown(event) {
     drawMakerCanvas();
     return;
   }
-  if ((tool === 'hammer' || tool === 'bottom_bumper' || tool === 'fan' || tool === 'sticky_pad') && editorState.pendingHammerOid) {
+  if ((tool === 'hammer'
+    || tool === 'bottom_bumper'
+    || tool === 'fan'
+    || tool === 'sticky_pad'
+    || tool === 'magic_wizard') && editorState.pendingHammerOid) {
     const objects = getObjects();
     const index = objects.findIndex(
       (item) =>
         item &&
         item.oid === editorState.pendingHammerOid &&
-        (item.type === 'hammer' || item.type === 'bottom_bumper' || item.type === 'fan' || item.type === 'sticky_pad'),
+        (item.type === 'hammer'
+          || item.type === 'bottom_bumper'
+          || item.type === 'fan'
+          || item.type === 'sticky_pad'
+          || item.type === 'magic_wizard'),
     );
     if (index >= 0) {
       const directionalType = objects[index] && objects[index].type;
@@ -7800,6 +7913,8 @@ function handleMakerCanvasPointerDown(event) {
         directionalUndoLabel = '하단 범퍼 각도 설정 시작';
       } else if (directionalType === 'sticky_pad') {
         directionalUndoLabel = '점착패드 경로 설정 시작';
+      } else if (directionalType === 'magic_wizard') {
+        directionalUndoLabel = '마법사 발사 방향 설정 시작';
       }
       rememberUndoState(directionalUndoLabel);
       setSingleSelectedIndex(index);
@@ -7818,6 +7933,8 @@ function handleMakerCanvasPointerDown(event) {
         directionalHint = '하단 범퍼 타격 각도 설정중';
       } else if (directionalType === 'sticky_pad') {
         directionalHint = '점착패드 이동 목표점 설정중';
+      } else if (directionalType === 'magic_wizard') {
+        directionalHint = '마법사 화염 발사 방향 설정중';
       }
       updateMakerHint(directionalHint);
       drawMakerCanvas();
@@ -7848,7 +7965,9 @@ function handleMakerCanvasPointerDown(event) {
         ? '선풍기 바람 방향/거리 드래그 편집중'
         : (selectedObj && selectedObj.type === 'bottom_bumper'
           ? '하단 범퍼 타격 각도 드래그 편집중'
-          : '해머 타격 방향/거리 드래그 편집중'));
+          : (selectedObj && selectedObj.type === 'magic_wizard'
+            ? '마법사 화염 발사 방향 드래그 편집중'
+            : '해머 타격 방향/거리 드래그 편집중')));
     } else if (selectedHandle.kind === 'sticky_target') {
       updateMakerHint('점착패드 이동 목표점 드래그 편집중');
     } else if (selectedHandle.kind === 'radius') {
@@ -8154,7 +8273,11 @@ function addObjectAt(tool, x, y, options = {}) {
     if (tool !== 'portal') {
       resetPendingPortal();
     }
-    if (tool === 'hammer' || tool === 'bottom_bumper' || tool === 'fan' || tool === 'sticky_pad') {
+    if (tool === 'hammer'
+      || tool === 'bottom_bumper'
+      || tool === 'fan'
+      || tool === 'sticky_pad'
+      || tool === 'magic_wizard') {
       editorState.pendingHammerOid = String(created.oid || '');
       let createHint = '해머 생성 완료: 드래그/클릭으로 타격 방향·이동거리 설정';
       if (tool === 'fan') {
@@ -8163,6 +8286,8 @@ function addObjectAt(tool, x, y, options = {}) {
         createHint = '하단 범퍼 생성 완료: 드래그/클릭으로 축 기준 타격 각도 설정';
       } else if (tool === 'sticky_pad') {
         createHint = '점착패드 생성 완료: 드래그/클릭으로 이동 목표점(B) 지정';
+      } else if (tool === 'magic_wizard') {
+        createHint = '마법사 생성 완료: 드래그/클릭으로 화염 발사 방향 설정';
       }
       updateMakerHint(createHint);
     } else {
@@ -8856,19 +8981,27 @@ function handleMakerCanvasRightClickAction() {
     setStatus('포털 연결 대기를 취소했습니다.');
     return;
   }
-  if ((tool === 'hammer' || tool === 'bottom_bumper' || tool === 'fan' || tool === 'sticky_pad') && editorState.pendingHammerOid) {
+  if ((tool === 'hammer'
+    || tool === 'bottom_bumper'
+    || tool === 'fan'
+    || tool === 'sticky_pad'
+    || tool === 'magic_wizard') && editorState.pendingHammerOid) {
     resetPendingHammer();
     updateMakerHint(tool === 'fan'
       ? '선풍기 방향 설정 입력 취소'
       : (tool === 'bottom_bumper'
         ? '하단 범퍼 각도 설정 입력 취소'
-        : (tool === 'sticky_pad' ? '점착패드 목표점 설정 입력 취소' : '해머 방향 설정 입력 취소')));
+        : (tool === 'sticky_pad'
+          ? '점착패드 목표점 설정 입력 취소'
+          : (tool === 'magic_wizard' ? '마법사 발사 방향 설정 입력 취소' : '해머 방향 설정 입력 취소'))));
     drawMakerCanvas();
     setStatus(tool === 'fan'
       ? '선풍기 방향 설정 대기를 취소했습니다.'
       : (tool === 'bottom_bumper'
         ? '하단 범퍼 각도 설정 대기를 취소했습니다.'
-        : (tool === 'sticky_pad' ? '점착패드 목표점 설정 대기를 취소했습니다.' : '해머 방향 설정 대기를 취소했습니다.')));
+        : (tool === 'sticky_pad'
+          ? '점착패드 목표점 설정 대기를 취소했습니다.'
+          : (tool === 'magic_wizard' ? '마법사 발사 방향 설정 대기를 취소했습니다.' : '해머 방향 설정 대기를 취소했습니다.'))));
     return;
   }
   if (tool === 'select' && !editorState.dragState) {
@@ -8977,7 +9110,11 @@ function setupEvents() {
     syncToolButtons();
     resetPendingWall();
     resetPendingPortal();
-    if (selectedTool() !== 'hammer' && selectedTool() !== 'bottom_bumper' && selectedTool() !== 'fan' && selectedTool() !== 'sticky_pad') {
+    if (selectedTool() !== 'hammer'
+      && selectedTool() !== 'bottom_bumper'
+      && selectedTool() !== 'fan'
+      && selectedTool() !== 'sticky_pad'
+      && selectedTool() !== 'magic_wizard') {
       resetPendingHammer();
     }
     cancelDrag();
@@ -9023,7 +9160,9 @@ function setupEvents() {
     } else if (tool === 'physics_ball') {
       updateMakerHint('물리 공 모드: 드래그로 반지름 생성 (동적 물리)');
     } else if (tool === 'magic_wizard') {
-      updateMakerHint('마법사 화염 모드: 드래그로 크기 생성, 속성에서 좌우반전/화염구 옵션 조절');
+      updateMakerHint(editorState.pendingHammerOid
+        ? '마법사 발사 방향 설정 대기: 드래그/클릭으로 화염 방향 지정'
+        : '마법사 화염 모드: 드래그로 비율 고정 크기 생성 후, 점선 단계에서 발사 방향 지정');
     } else if (tool === 'goal_marker_image') {
       updateMakerHint('골라인 이미지 모드: 드래그로 크기 지정 생성 (배경 마커)');
     } else if (tool === 'rotor') {

@@ -1208,6 +1208,11 @@ function compileObject(rawObject, entityId) {
         },
       };
     case 'magic_wizard':
+      {
+        const rawWizardColor = typeof rawObject.color === 'string' ? rawObject.color : '';
+        const wizardColor = isTransparentColorString(rawWizardColor)
+          ? 'rgba(255,166,108,0.2)'
+          : rawWizardColor;
       return {
         entity: compileBox(
           {
@@ -1216,7 +1221,7 @@ function compileObject(rawObject, entityId) {
             height: Math.max(0.08, toFiniteNumber(rawObject.height, 0.9)),
             restitution: toFiniteNumber(rawObject.restitution, 0.05),
             rotation: toFiniteNumber(rawObject.rotation, toFiniteNumber(rawObject.dirDeg, 0)),
-            color: typeof rawObject.color === 'string' ? rawObject.color : 'rgba(0,0,0,0)',
+            color: wizardColor,
           },
           entityId,
           false,
@@ -1245,6 +1250,7 @@ function compileObject(rawObject, entityId) {
           imageSrc: normalizeMagicWizardImageSrc(rawObject.imageSrc),
         },
       };
+      }
     case 'sticky_pad':
       return {
         entity: compileBox(
@@ -3476,6 +3482,7 @@ function createFanBehavior(def, env) {
 function createMagicWizardBehavior(def, env) {
   let nextShotAt = 0;
   let lastTickAt = 0;
+  let missingEntityFrames = 0;
   let wizardVisualEffect = null;
   let fireballVisualEffect = null;
   const fireballs = [];
@@ -3485,14 +3492,45 @@ function createMagicWizardBehavior(def, env) {
     const roulette = env.getRoulette();
     const physics = roulette && roulette.physics ? roulette.physics : null;
     const entities = physics && Array.isArray(physics.entities) ? physics.entities : [];
-    const targetId = Math.floor(toFiniteNumber(def.entityId, NaN));
-    if (!Number.isFinite(targetId)) {
-      return false;
+    if (entities.length <= 0) {
+      return true;
     }
+    const targetId = Math.floor(toFiniteNumber(def.entityId, NaN));
+    const targetX = toFiniteNumber(def.x, 0);
+    const targetY = toFiniteNumber(def.y, 0);
+    const targetW = Math.max(0.08, toFiniteNumber(def.width, 0.72));
+    const targetH = Math.max(0.08, toFiniteNumber(def.height, 0.9));
+    const fallbackDistance = Math.max(0.35, Math.max(targetW, targetH) * 0.8);
     for (let index = 0; index < entities.length; index += 1) {
       const entry = entities[index];
-      const entityId = toFiniteNumber(entry && entry.shape && entry.shape.__v2eid, NaN);
-      if (Number.isFinite(entityId) && entityId === targetId) {
+      const entityId = toFiniteNumber(
+        entry && entry.shape && Number.isFinite(Number(entry.shape.__v2eid))
+          ? entry.shape.__v2eid
+          : (entry && Number.isFinite(Number(entry.__v2eid)) ? entry.__v2eid : NaN),
+        NaN,
+      );
+      if (Number.isFinite(targetId) && Number.isFinite(entityId) && entityId === targetId) {
+        return true;
+      }
+      const shape = entry && entry.shape ? entry.shape : null;
+      if (!shape || String(shape.type || '') !== 'box') {
+        continue;
+      }
+      const body = entry && entry.body ? entry.body : null;
+      const pos = body && typeof body.GetPosition === 'function' ? body.GetPosition() : null;
+      const ex = toFiniteNumber(pos && pos.x, NaN);
+      const ey = toFiniteNumber(pos && pos.y, NaN);
+      if (!Number.isFinite(ex) || !Number.isFinite(ey)) {
+        continue;
+      }
+      const ew = Math.max(0.02, toFiniteNumber(shape.width, NaN));
+      const eh = Math.max(0.02, toFiniteNumber(shape.height, NaN));
+      if (!Number.isFinite(ew) || !Number.isFinite(eh)) {
+        continue;
+      }
+      const closeEnough = Math.hypot(ex - targetX, ey - targetY) <= fallbackDistance;
+      const similarSize = Math.abs(ew - targetW) <= 0.55 && Math.abs(eh - targetH) <= 0.55;
+      if (closeEnough && similarSize) {
         return true;
       }
     }
@@ -3519,16 +3557,17 @@ function createMagicWizardBehavior(def, env) {
       isDestroy: false,
       update(deltaMs) {
         this.elapsed += toFiniteNumber(deltaMs, 0);
-        if (!hasEntity()) {
+        if (hasEntity()) {
+          missingEntityFrames = 0;
+        } else {
+          missingEntityFrames += 1;
+        }
+        if (missingEntityFrames > 720) {
           this.isDestroy = true;
         }
       },
       render(ctx) {
         if (!ctx) {
-          return;
-        }
-        if (!hasEntity()) {
-          this.isDestroy = true;
           return;
         }
         const width = Math.max(0.08, toFiniteNumber(def.width, 0.72));
@@ -3578,7 +3617,12 @@ function createMagicWizardBehavior(def, env) {
       isDestroy: false,
       update(deltaMs) {
         this.elapsed += toFiniteNumber(deltaMs, 0);
-        if (!hasEntity() && fireballs.length <= 0) {
+        if (hasEntity()) {
+          missingEntityFrames = 0;
+        } else {
+          missingEntityFrames += 1;
+        }
+        if (missingEntityFrames > 720 && fireballs.length <= 0) {
           this.isDestroy = true;
         }
       },
