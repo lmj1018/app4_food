@@ -661,7 +661,11 @@ function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
     source.stage = {};
   }
   source.stage.goalY = Math.max(20, toFinite(source.stage.goalY, 210));
-  source.stage.topWallY = round1(clamp(toFinite(source.stage.topWallY, 2), 0, Math.max(2, source.stage.goalY - 8)));
+  source.stage.topWallY = round1(clamp(
+    toFinite(source.stage.topWallY, 2),
+    getTopWallMinYWorld(source.stage.goalY),
+    Math.max(2, source.stage.goalY - 8),
+  ));
   source.stage.zoomY = Math.max(10, toFinite(source.stage.zoomY, source.stage.goalY - 4));
   const spawn = source.stage.spawn && typeof source.stage.spawn === 'object' && !Array.isArray(source.stage.spawn)
     ? source.stage.spawn
@@ -1034,7 +1038,12 @@ function upsertStageBoundaryWall(oid, x) {
     };
     objects.push(wall);
   }
-  const topY = round1(clamp(toFinite(mapJson.stage && mapJson.stage.topWallY, 2), 0, Math.max(2, toFinite(mapJson.stage && mapJson.stage.goalY, 210) - 8)));
+  const topGoalY = Math.max(20, toFinite(mapJson.stage && mapJson.stage.goalY, 210));
+  const topY = round1(clamp(
+    toFinite(mapJson.stage && mapJson.stage.topWallY, 2),
+    getTopWallMinYWorld(topGoalY),
+    Math.max(2, topGoalY - 8),
+  ));
   const bottomY = round1(Math.max(30, toFinite(mapJson.stage && mapJson.stage.goalY, 210) + 2));
   wall.points = [
     [round1(x), topY],
@@ -3885,6 +3894,15 @@ function worldToCanvas(layout, x, y) {
   };
 }
 
+function worldToCanvasRaw(layout, x, y) {
+  const safeX = toFinite(x, 0);
+  const safeY = toFinite(y, 0);
+  return {
+    x: layout.offsetX + safeX * layout.scale,
+    y: layout.offsetY + safeY * layout.scale,
+  };
+}
+
 function canvasToWorld(layout, px, py) {
   const nx = (px - layout.offsetX) / layout.drawW;
   const ny = (py - layout.offsetY) / layout.drawH;
@@ -4289,16 +4307,29 @@ function getGoalYWorld() {
   return round1(Math.max(20, toFinite(mapJson.stage.goalY, 210)));
 }
 
+function getTopWallMinYWorld(stageGoalY = null) {
+  const goalY = Math.max(20, toFinite(stageGoalY, 210));
+  return round1(-Math.max(24, Math.min(600, goalY * 0.9)));
+}
+
 function getTopWallYWorld() {
   const mapJson = getMutableMap();
   const goalY = Math.max(20, toFinite(mapJson.stage && mapJson.stage.goalY, 210));
-  return round1(clamp(toFinite(mapJson.stage && mapJson.stage.topWallY, 2), 0, Math.max(2, goalY - 8)));
+  return round1(clamp(
+    toFinite(mapJson.stage && mapJson.stage.topWallY, 2),
+    getTopWallMinYWorld(goalY),
+    Math.max(2, goalY - 8),
+  ));
 }
 
 function setTopWallYWorld(nextTopWallY) {
   const mapJson = getMutableMap();
   const goalY = Math.max(20, toFinite(mapJson.stage && mapJson.stage.goalY, 210));
-  mapJson.stage.topWallY = round1(clamp(toFinite(nextTopWallY, getTopWallYWorld()), 0, Math.max(2, goalY - 8)));
+  mapJson.stage.topWallY = round1(clamp(
+    toFinite(nextTopWallY, getTopWallYWorld()),
+    getTopWallMinYWorld(goalY),
+    Math.max(2, goalY - 8),
+  ));
   applyStageWallBoundsToMap();
 }
 
@@ -4307,7 +4338,7 @@ function setGoalYWorld(nextGoalY) {
   mapJson.stage.goalY = round1(clamp(toFinite(nextGoalY, mapJson.stage.goalY), 20, 2000));
   mapJson.stage.topWallY = round1(clamp(
     toFinite(mapJson.stage.topWallY, 2),
-    0,
+    getTopWallMinYWorld(mapJson.stage.goalY),
     Math.max(2, mapJson.stage.goalY - 8),
   ));
   mapJson.stage.zoomY = round1(clamp(toFinite(mapJson.stage.zoomY, mapJson.stage.goalY - 4), 10, 2000));
@@ -5518,13 +5549,13 @@ function drawMakerCanvas() {
   ctx.strokeRect(layout.offsetX, layout.offsetY, layout.drawW, layout.drawH);
 
   const stageBounds = inferStageWallBounds(getMutableMap());
-  const leftGuide = worldToCanvas(layout, stageBounds.leftX, 0);
-  const leftGuideBottom = worldToCanvas(layout, stageBounds.leftX, layout.stageGoalY);
-  const rightGuide = worldToCanvas(layout, stageBounds.rightX, 0);
-  const rightGuideBottom = worldToCanvas(layout, stageBounds.rightX, layout.stageGoalY);
   const topGuideY = getTopWallYWorld();
-  const topLeftGuide = worldToCanvas(layout, 0, topGuideY);
-  const topRightGuide = worldToCanvas(layout, WORLD_WIDTH, topGuideY);
+  const leftGuide = worldToCanvasRaw(layout, stageBounds.leftX, topGuideY);
+  const leftGuideBottom = worldToCanvas(layout, stageBounds.leftX, layout.stageGoalY);
+  const rightGuide = worldToCanvasRaw(layout, stageBounds.rightX, topGuideY);
+  const rightGuideBottom = worldToCanvas(layout, stageBounds.rightX, layout.stageGoalY);
+  const topLeftGuide = worldToCanvasRaw(layout, 0, topGuideY);
+  const topRightGuide = worldToCanvasRaw(layout, WORLD_WIDTH, topGuideY);
   ctx.strokeStyle = 'rgba(255, 124, 200, 0.98)';
   ctx.lineWidth = 2.8;
   ctx.beginPath();
@@ -6688,7 +6719,10 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
     return true;
   }
   if (drag.type === 'stage_top_move') {
-    setTopWallYWorld(point.y);
+    const nextY = rawPoint && Number.isFinite(toFinite(rawPoint.y, NaN))
+      ? toFinite(rawPoint.y, point.y)
+      : point.y;
+    setTopWallYWorld(nextY);
     drag.moved = true;
     syncStageInputsFromMap();
     return true;
@@ -7056,12 +7090,13 @@ function handleMakerCanvasPointerDown(event) {
     return;
   }
   const point = readCanvasWorldPoint(event);
+  const rawPoint = readCanvasWorldPointRaw(event);
   if (!point) {
     return;
   }
   const layout = getCanvasLayout();
   const tool = selectedTool();
-  const stageHandle = findStageHandle(point, layout);
+  const stageHandle = findStageHandle(rawPoint || point, layout);
   if (stageHandle) {
     let undoLabel = '시작점 이동 시작';
     if (stageHandle.kind === 'goal') {
