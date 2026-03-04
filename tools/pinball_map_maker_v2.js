@@ -284,12 +284,16 @@ function inferMarbleSizeScaleFromPhysicsBallObjects(mapJson, fallback = NaN) {
 }
 
 function inferMarbleSizeScaleFromMap(mapJson, fallback = DEFAULT_MARBLE_SIZE_SCALE) {
-  const fromPhysicsBall = inferMarbleSizeScaleFromPhysicsBallObjects(mapJson, NaN);
+  const source = mapJson && typeof mapJson === 'object' ? mapJson : {};
+  const fromStage = inferMarbleSizeScaleFromStage(source.stage, NaN);
+  if (Number.isFinite(fromStage)) {
+    return fromStage;
+  }
+  const fromPhysicsBall = inferMarbleSizeScaleFromPhysicsBallObjects(source, NaN);
   if (Number.isFinite(fromPhysicsBall)) {
     return fromPhysicsBall;
   }
-  const source = mapJson && typeof mapJson === 'object' ? mapJson : {};
-  return inferMarbleSizeScaleFromStage(source.stage, fallback);
+  return normalizeMarbleSizeScale(fallback, DEFAULT_MARBLE_SIZE_SCALE);
 }
 
 function parseMarbleSizeInputScale() {

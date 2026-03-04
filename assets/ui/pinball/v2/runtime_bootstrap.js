@@ -236,9 +236,10 @@ function resolveConfiguredMarbleRadiusFromMap(mapJson) {
   const stage = safeMap && safeMap.stage && typeof safeMap.stage === 'object'
     ? safeMap.stage
     : null;
-  const spawn = stage && stage.spawn && typeof stage.spawn === 'object'
-    ? stage.spawn
-    : null;
+  const fromStage = resolveConfiguredMarbleRadiusFromStage(stage);
+  if (Number.isFinite(fromStage) && fromStage > 0) {
+    return fromStage;
+  }
 
   const objects = Array.isArray(safeMap && safeMap.objects) ? safeMap.objects : [];
   let firstPhysicsBallRadius = NaN;
@@ -267,31 +268,6 @@ function resolveConfiguredMarbleRadiusFromMap(mapJson) {
   if (Number.isFinite(firstPhysicsBallRadius)) {
     return firstPhysicsBallRadius;
   }
-
-  const directRadiusCandidates = [
-    stage && stage.marbleRadius,
-    stage && stage.ballRadius,
-    spawn && spawn.marbleRadius,
-    spawn && spawn.ballRadius,
-  ];
-  for (let index = 0; index < directRadiusCandidates.length; index += 1) {
-    const value = toFiniteNumber(directRadiusCandidates[index], NaN);
-    if (Number.isFinite(value) && value > 0) {
-      return normalizeMarbleRadius(value);
-    }
-  }
-
-  // Some map-maker exports store diameter as ballSize; convert to radius as fallback only.
-  const diameterCandidates = [
-    stage && stage.ballSize,
-    spawn && spawn.ballSize,
-  ];
-  for (let index = 0; index < diameterCandidates.length; index += 1) {
-    const diameter = toFiniteNumber(diameterCandidates[index], NaN);
-    if (Number.isFinite(diameter) && diameter > 0) {
-      return normalizeMarbleRadius(diameter * 0.5);
-    }
-  }
   return DEFAULT_MARBLE_RADIUS;
 }
 
@@ -303,6 +279,17 @@ function resolveConfiguredMarbleRadiusFromStage(stageInput) {
   const spawn = stage.spawn && typeof stage.spawn === 'object'
     ? stage.spawn
     : null;
+
+  const scaleCandidates = [
+    stage.marbleSizeScale,
+    spawn && spawn.marbleSizeScale,
+  ];
+  for (let index = 0; index < scaleCandidates.length; index += 1) {
+    const scale = toFiniteNumber(scaleCandidates[index], NaN);
+    if (Number.isFinite(scale) && scale > 0) {
+      return normalizeMarbleRadius(DEFAULT_MARBLE_RADIUS * scale);
+    }
+  }
 
   const directRadiusCandidates = [
     stage.marbleRadius,
