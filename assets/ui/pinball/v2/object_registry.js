@@ -1208,11 +1208,6 @@ function compileObject(rawObject, entityId) {
         },
       };
     case 'magic_wizard':
-      {
-        const rawWizardColor = typeof rawObject.color === 'string' ? rawObject.color : '';
-        const wizardColor = isTransparentColorString(rawWizardColor)
-          ? 'rgba(255,166,108,0.2)'
-          : rawWizardColor;
       return {
         entity: compileBox(
           {
@@ -1221,7 +1216,9 @@ function compileObject(rawObject, entityId) {
             height: Math.max(0.08, toFiniteNumber(rawObject.height, 0.9)),
             restitution: toFiniteNumber(rawObject.restitution, 0.05),
             rotation: toFiniteNumber(rawObject.rotation, toFiniteNumber(rawObject.dirDeg, 0)),
-            color: wizardColor,
+            color: 'rgba(0,0,0,0)',
+            noCollision: true,
+            sensor: true,
           },
           entityId,
           false,
@@ -1250,7 +1247,6 @@ function compileObject(rawObject, entityId) {
           imageSrc: normalizeMagicWizardImageSrc(rawObject.imageSrc),
         },
       };
-      }
     case 'sticky_pad':
       return {
         entity: compileBox(
@@ -3537,10 +3533,23 @@ function createMagicWizardBehavior(def, env) {
     return false;
   }
 
-  function getEffectiveDirRad() {
-    const baseDir = toFiniteNumber(def.dirDeg, 0);
-    const mirroredDir = def.mirror === true ? (180 - baseDir) : baseDir;
-    return degToRad(mirroredDir);
+  function normalizeDegLocal(value) {
+    let deg = toFiniteNumber(value, 0) % 360;
+    if (deg < 0) {
+      deg += 360;
+    }
+    return deg;
+  }
+
+  function getShootDirRad() {
+    return degToRad(normalizeDegLocal(def.dirDeg));
+  }
+
+  function getVisualMirrorByDirection() {
+    const dirDeg = normalizeDegLocal(def.dirDeg);
+    const autoMirror = dirDeg > 90 && dirDeg < 270;
+    const manualFlip = def.mirror === true;
+    return manualFlip ? !autoMirror : autoMirror;
   }
 
   function ensureWizardVisualEffect() {
@@ -3574,11 +3583,9 @@ function createMagicWizardBehavior(def, env) {
         const height = Math.max(0.08, toFiniteNumber(def.height, 0.9));
         const x = toFiniteNumber(def.x, 0);
         const y = toFiniteNumber(def.y, 0);
-        const dirRad = getEffectiveDirRad();
-        const mirror = def.mirror === true;
+        const mirror = getVisualMirrorByDirection();
         ctx.save();
         ctx.translate(x, y);
-        ctx.rotate(dirRad);
         if (mirror) {
           ctx.scale(-1, 1);
         }
@@ -3712,7 +3719,7 @@ function createMagicWizardBehavior(def, env) {
   }
 
   function spawnFireball(now) {
-    const dirRad = getEffectiveDirRad();
+    const dirRad = getShootDirRad();
     const width = Math.max(0.08, toFiniteNumber(def.width, 0.72));
     const height = Math.max(0.08, toFiniteNumber(def.height, 0.9));
     const originX = toFiniteNumber(def.x, 0);

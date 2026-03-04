@@ -220,6 +220,22 @@ function normalizeSignedDeg(value) {
   return deg;
 }
 
+function isDirectionFacingLeftDeg(value) {
+  const deg = normalizeDeg(value);
+  return deg > 90 && deg < 270;
+}
+
+function getMagicWizardRenderMirror(obj, dirDegValue = null) {
+  const dirDeg = normalizeDeg(
+    dirDegValue == null
+      ? toFinite(obj && obj.dirDeg, toFinite(obj && obj.rotation, 0))
+      : toFinite(dirDegValue, 0),
+  );
+  const autoMirror = isDirectionFacingLeftDeg(dirDeg);
+  const manualFlip = !!(obj && obj.mirror === true);
+  return manualFlip ? !autoMirror : autoMirror;
+}
+
 function snapAngleDeg(valueDeg, stepDeg = 45) {
   const step = Math.max(1, toFinite(stepDeg, 45));
   return normalizeDeg(Math.round(toFinite(valueDeg, 0) / step) * step);
@@ -5518,17 +5534,15 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
     return;
   }
   if (obj.type === 'magic_wizard') {
-    const width = Math.max(0.08, toFinite(obj.width, 0.72));
-    const height = Math.max(0.08, toFinite(obj.height, 0.9));
+    const width = Math.max(0.08, toFinite(obj.width, 0.8));
+    const height = Math.max(0.08, toFinite(obj.height, 0.8));
     const drawWidth = width * layout.scale;
     const drawHeight = height * layout.scale;
     const angleDeg = normalizeDeg(toFinite(obj.dirDeg, toFinite(obj.rotation, 0)));
-    const rotation = (Math.PI / 180) * angleDeg;
-    const mirror = obj.mirror === true;
+    const mirror = getMagicWizardRenderMirror(obj, angleDeg);
     const image = getMagicWizardPreviewImage();
     ctx.save();
     ctx.translate(center.x, center.y);
-    ctx.rotate(rotation);
     if (mirror) {
       ctx.scale(-1, 1);
     }
@@ -5546,13 +5560,6 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
       ctx.beginPath();
       ctx.arc(drawWidth * 0.62, -drawHeight * 0.12, Math.max(2, drawHeight * 0.24), 0, Math.PI * 2);
       ctx.fill();
-    }
-    if (selected) {
-      ctx.strokeStyle = '#ffd44d';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.rect(-drawWidth, -drawHeight, drawWidth * 2, drawHeight * 2);
-      ctx.stroke();
     }
     ctx.restore();
     if (selected) {
@@ -5688,11 +5695,12 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
       ctx.save();
       const isFan = obj.type === 'fan';
       const isBottomBumper = obj.type === 'bottom_bumper';
+      const isMagicWizard = obj.type === 'magic_wizard';
       const anchorWorld = isBottomBumper
         ? (getBottomBumperPivotWorld(obj) || centerWorld)
         : centerWorld;
       const anchor = worldToCanvas(layout, anchorWorld.x, anchorWorld.y);
-      const lineColor = isFan ? '#8fe6ff' : (isBottomBumper ? '#8fd5ff' : '#9fd7ff');
+      const lineColor = isFan ? '#8fe6ff' : (isBottomBumper ? '#8fd5ff' : (isMagicWizard ? '#ffbe86' : '#9fd7ff'));
       ctx.strokeStyle = lineColor;
       ctx.lineWidth = 1.6;
       ctx.setLineDash([6, 4]);
@@ -5742,6 +5750,16 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
         ctx.fill();
         ctx.stroke();
         drawBottomBumperPivotDetail(ctx, halfW, halfH);
+      } else if (isMagicWizard) {
+        const targetPoint = worldToCanvas(layout, targetX, targetY);
+        const fireRadius = Math.max(0.05, toFinite(obj.fireballRadius, 0.2)) * layout.scale;
+        ctx.fillStyle = 'rgba(255,140,58,0.45)';
+        ctx.strokeStyle = '#ffbe86';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(targetPoint.x, targetPoint.y, Math.max(3.4, fireRadius * 1.25), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
       } else {
         const ghost = worldToCanvas(layout, targetX, targetY);
         const halfW = Math.max(0.08, toFinite(obj.width, 0.9)) * layout.scale;
@@ -6450,11 +6468,11 @@ function drawMakerCanvas() {
         drawBottomBumperPivotDetail(ctx, halfW, halfH);
       } else if (isMagicWizard) {
         const ghost = worldToCanvas(layout, toFinite(directional.x, 0), toFinite(directional.y, 0));
-        const half = Math.max(0.12, Math.max(toFinite(directional.width, 0.7), toFinite(directional.height, 0.7))) * layout.scale;
+        const half = Math.max(0.12, Math.max(toFinite(directional.width, 0.8), toFinite(directional.height, 0.8))) * layout.scale;
         const image = getMagicWizardPreviewImage();
         ctx.translate(ghost.x, ghost.y);
-        ctx.rotate(dir);
-        if (directional.mirror === true) {
+        const mirror = getMagicWizardRenderMirror(directional, (dir * 180) / Math.PI);
+        if (mirror) {
           ctx.scale(-1, 1);
         }
         if (image && image.complete && image.naturalWidth > 0) {
