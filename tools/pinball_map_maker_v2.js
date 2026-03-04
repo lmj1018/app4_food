@@ -3858,14 +3858,16 @@ function getCanvasLayout() {
     canvas.height = height;
   }
   const stageGoalY = Math.max(20, toFinite(getMutableMap().stage.goalY, 210));
+  const stageMinY = getStageMinYWorld();
+  const stageHeight = Math.max(20, stageGoalY - stageMinY);
   const padding = 22 * dpr;
   const usableW = Math.max(20, width - padding * 2);
   const usableH = Math.max(20, height - padding * 2);
-  const fitScale = Math.max(0.001, Math.min(usableW / WORLD_WIDTH, usableH / stageGoalY));
+  const fitScale = Math.max(0.001, Math.min(usableW / WORLD_WIDTH, usableH / stageHeight));
   const zoom = clamp(toFinite(editorState.canvasZoom, 1), CANVAS_MIN_ZOOM, CANVAS_MAX_ZOOM);
   const scale = fitScale * zoom;
   const drawW = WORLD_WIDTH * scale;
-  const drawH = stageGoalY * scale;
+  const drawH = stageHeight * scale;
   const offsetX = (width - drawW) / 2 + toFinite(editorState.canvasPanX, 0);
   const offsetY = (height - drawH) / 2 + toFinite(editorState.canvasPanY, 0);
   return {
@@ -3881,41 +3883,47 @@ function getCanvasLayout() {
     offsetY,
     drawW,
     drawH,
+    stageMinY,
+    stageHeight,
     stageGoalY,
   };
 }
 
 function worldToCanvas(layout, x, y) {
+  const stageMinY = Number.isFinite(toFinite(layout.stageMinY, NaN)) ? toFinite(layout.stageMinY, 0) : 0;
   const safeX = clamp(toFinite(x, 0), 0, WORLD_WIDTH);
-  const safeY = clamp(toFinite(y, 0), 0, layout.stageGoalY);
+  const safeY = clamp(toFinite(y, 0), stageMinY, layout.stageGoalY);
   return {
     x: layout.offsetX + safeX * layout.scale,
-    y: layout.offsetY + safeY * layout.scale,
+    y: layout.offsetY + (safeY - stageMinY) * layout.scale,
   };
 }
 
 function worldToCanvasRaw(layout, x, y) {
+  const stageMinY = Number.isFinite(toFinite(layout.stageMinY, NaN)) ? toFinite(layout.stageMinY, 0) : 0;
   const safeX = toFinite(x, 0);
   const safeY = toFinite(y, 0);
   return {
     x: layout.offsetX + safeX * layout.scale,
-    y: layout.offsetY + safeY * layout.scale,
+    y: layout.offsetY + (safeY - stageMinY) * layout.scale,
   };
 }
 
 function canvasToWorld(layout, px, py) {
+  const stageMinY = Number.isFinite(toFinite(layout.stageMinY, NaN)) ? toFinite(layout.stageMinY, 0) : 0;
   const nx = (px - layout.offsetX) / layout.drawW;
   const ny = (py - layout.offsetY) / layout.drawH;
   return {
     x: round1(clamp(nx, 0, 1) * WORLD_WIDTH),
-    y: round1(clamp(ny, 0, 1) * layout.stageGoalY),
+    y: round1(stageMinY + clamp(ny, 0, 1) * Math.max(0.001, toFinite(layout.stageHeight, layout.stageGoalY - stageMinY))),
   };
 }
 
 function canvasToWorldRaw(layout, px, py) {
+  const stageMinY = Number.isFinite(toFinite(layout.stageMinY, NaN)) ? toFinite(layout.stageMinY, 0) : 0;
   return {
     x: ((px - layout.offsetX) / Math.max(0.0001, layout.scale)),
-    y: ((py - layout.offsetY) / Math.max(0.0001, layout.scale)),
+    y: stageMinY + ((py - layout.offsetY) / Math.max(0.0001, layout.scale)),
   };
 }
 
@@ -3933,12 +3941,14 @@ function getMiniMapLayout() {
     canvas.height = height;
   }
   const stageGoalY = Math.max(20, toFinite(getMutableMap().stage.goalY, 210));
+  const stageMinY = getStageMinYWorld();
+  const stageHeight = Math.max(20, stageGoalY - stageMinY);
   const padding = 8 * dpr;
   const usableW = Math.max(30, width - padding * 2);
   const usableH = Math.max(30, height - padding * 2);
-  const scale = Math.max(0.001, Math.min(usableW / WORLD_WIDTH, usableH / stageGoalY));
+  const scale = Math.max(0.001, Math.min(usableW / WORLD_WIDTH, usableH / stageHeight));
   const drawW = WORLD_WIDTH * scale;
-  const drawH = stageGoalY * scale;
+  const drawH = stageHeight * scale;
   const offsetX = (width - drawW) / 2;
   const offsetY = (height - drawH) / 2;
   return {
@@ -3946,6 +3956,8 @@ function getMiniMapLayout() {
     dpr,
     width,
     height,
+    stageMinY,
+    stageHeight,
     stageGoalY,
     scale,
     drawW,
@@ -3956,18 +3968,20 @@ function getMiniMapLayout() {
 }
 
 function worldToMiniMap(layout, x, y) {
+  const stageMinY = Number.isFinite(toFinite(layout.stageMinY, NaN)) ? toFinite(layout.stageMinY, 0) : 0;
   return {
     x: layout.offsetX + clamp(toFinite(x, 0), 0, WORLD_WIDTH) * layout.scale,
-    y: layout.offsetY + clamp(toFinite(y, 0), 0, layout.stageGoalY) * layout.scale,
+    y: layout.offsetY + (clamp(toFinite(y, 0), stageMinY, layout.stageGoalY) - stageMinY) * layout.scale,
   };
 }
 
 function miniMapToWorld(layout, px, py) {
+  const stageMinY = Number.isFinite(toFinite(layout.stageMinY, NaN)) ? toFinite(layout.stageMinY, 0) : 0;
   const x = (px - layout.offsetX) / layout.scale;
-  const y = (py - layout.offsetY) / layout.scale;
+  const y = stageMinY + ((py - layout.offsetY) / layout.scale);
   return {
     x: round1(clamp(x, 0, WORLD_WIDTH)),
-    y: round1(clamp(y, 0, layout.stageGoalY)),
+    y: round1(clamp(y, stageMinY, layout.stageGoalY)),
   };
 }
 
@@ -3976,10 +3990,11 @@ function centerCanvasToWorld(targetX, targetY) {
   if (!layout) {
     return;
   }
+  const stageMinY = Number.isFinite(toFinite(layout.stageMinY, NaN)) ? toFinite(layout.stageMinY, 0) : 0;
   const safeX = clamp(toFinite(targetX, WORLD_WIDTH / 2), 0, WORLD_WIDTH);
-  const safeY = clamp(toFinite(targetY, layout.stageGoalY / 2), 0, layout.stageGoalY);
+  const safeY = clamp(toFinite(targetY, (stageMinY + layout.stageGoalY) / 2), stageMinY, layout.stageGoalY);
   editorState.canvasPanX = (WORLD_WIDTH / 2 - safeX) * layout.scale;
-  editorState.canvasPanY = (layout.stageGoalY / 2 - safeY) * layout.scale;
+  editorState.canvasPanY = (((stageMinY + layout.stageGoalY) / 2) - safeY) * layout.scale;
   drawMakerCanvas();
 }
 
@@ -4010,9 +4025,10 @@ function drawMiniMap(mainLayout = null) {
   ctx.lineWidth = 1;
   ctx.strokeRect(layout.offsetX, layout.offsetY, layout.drawW, layout.drawH);
   const bounds = inferStageWallBounds(getMutableMap());
-  const leftGuide = worldToMiniMap(layout, bounds.leftX, 0);
+  const topGuideY = getTopWallYWorld();
+  const leftGuide = worldToMiniMap(layout, bounds.leftX, topGuideY);
   const leftGuideBottom = worldToMiniMap(layout, bounds.leftX, layout.stageGoalY);
-  const rightGuide = worldToMiniMap(layout, bounds.rightX, 0);
+  const rightGuide = worldToMiniMap(layout, bounds.rightX, topGuideY);
   const rightGuideBottom = worldToMiniMap(layout, bounds.rightX, layout.stageGoalY);
   ctx.strokeStyle = 'rgba(255, 124, 200, 0.95)';
   ctx.lineWidth = 1.25;
@@ -4140,10 +4156,11 @@ function drawMiniMap(mainLayout = null) {
   if (main) {
     const worldTL = canvasToWorldRaw(main, 0, 0);
     const worldBR = canvasToWorldRaw(main, main.width, main.height);
+    const mainStageMinY = Number.isFinite(toFinite(main.stageMinY, NaN)) ? toFinite(main.stageMinY, 0) : 0;
     const left = clamp(Math.min(worldTL.x, worldBR.x), 0, WORLD_WIDTH);
     const right = clamp(Math.max(worldTL.x, worldBR.x), 0, WORLD_WIDTH);
-    const top = clamp(Math.min(worldTL.y, worldBR.y), 0, main.stageGoalY);
-    const bottom = clamp(Math.max(worldTL.y, worldBR.y), 0, main.stageGoalY);
+    const top = clamp(Math.min(worldTL.y, worldBR.y), mainStageMinY, main.stageGoalY);
+    const bottom = clamp(Math.max(worldTL.y, worldBR.y), mainStageMinY, main.stageGoalY);
     const p1 = worldToMiniMap(layout, left, top);
     const p2 = worldToMiniMap(layout, right, bottom);
     ctx.strokeStyle = '#ffd44d';
@@ -4272,18 +4289,20 @@ function findNearestObjectIndex(x, y) {
 
 function clampWorldPoint(point, stageGoalY) {
   const safeGoalY = Math.max(20, toFinite(stageGoalY, getMutableMap().stage.goalY));
+  const safeMinY = getStageMinYWorld();
   return {
     x: round1(clamp(toFinite(point && point.x, 0), 0, WORLD_WIDTH)),
-    y: round1(clamp(toFinite(point && point.y, 0), 0, safeGoalY)),
+    y: round1(clamp(toFinite(point && point.y, 0), safeMinY, safeGoalY)),
   };
 }
 
 function getSpawnPointWorld() {
   const mapJson = getMutableMap();
   const spawn = mapJson.stage && mapJson.stage.spawn ? mapJson.stage.spawn : {};
+  const stageMinY = getStageMinYWorld();
   return {
     x: round1(clamp(toFinite(spawn.x, 10.25), 0, WORLD_WIDTH)),
-    y: round1(clamp(toFinite(spawn.y, 0), 0, Math.max(20, toFinite(mapJson.stage.goalY, 210)))),
+    y: round1(clamp(toFinite(spawn.y, 0), stageMinY, Math.max(20, toFinite(mapJson.stage.goalY, 210)))),
   };
 }
 
@@ -4310,6 +4329,10 @@ function getGoalYWorld() {
 function getTopWallMinYWorld(stageGoalY = null) {
   const goalY = Math.max(20, toFinite(stageGoalY, 210));
   return round1(-Math.max(24, Math.min(600, goalY * 0.9)));
+}
+
+function getStageMinYWorld() {
+  return Math.min(0, getTopWallYWorld());
 }
 
 function getTopWallYWorld() {
@@ -5527,8 +5550,9 @@ function drawMakerCanvas() {
   ctx.fillRect(0, 0, layout.width, layout.height);
   ctx.strokeStyle = 'rgba(99, 131, 178, 0.26)';
   ctx.lineWidth = 1;
+  const stageMinY = Number.isFinite(toFinite(layout.stageMinY, NaN)) ? toFinite(layout.stageMinY, 0) : 0;
   for (let x = 0; x <= WORLD_WIDTH; x += 2) {
-    const p1 = worldToCanvas(layout, x, 0);
+    const p1 = worldToCanvas(layout, x, stageMinY);
     const p2 = worldToCanvas(layout, x, layout.stageGoalY);
     ctx.beginPath();
     ctx.moveTo(p1.x, p1.y);
@@ -5536,7 +5560,8 @@ function drawMakerCanvas() {
     ctx.stroke();
   }
   const stepY = layout.stageGoalY > 220 ? 20 : 10;
-  for (let y = 0; y <= layout.stageGoalY; y += stepY) {
+  const startY = Math.ceil(stageMinY / stepY) * stepY;
+  for (let y = startY; y <= layout.stageGoalY; y += stepY) {
     const p1 = worldToCanvas(layout, 0, y);
     const p2 = worldToCanvas(layout, WORLD_WIDTH, y);
     ctx.beginPath();
@@ -6926,9 +6951,10 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
   if (drag.type === 'move') {
     const mapJson = getMutableMap();
     const goalY = Math.max(25, toFinite(mapJson.stage && mapJson.stage.goalY, 210) + 4);
+    const stageMinY = getStageMinYWorld();
     let target = {
       x: clamp(toFinite(point.x - toFinite(drag.offsetX, 0), 0), 0, WORLD_WIDTH),
-      y: clamp(toFinite(point.y - toFinite(drag.offsetY, 0), 0), 0, goalY),
+      y: clamp(toFinite(point.y - toFinite(drag.offsetY, 0), 0), stageMinY, goalY),
     };
     if (event && event.shiftKey && Number.isFinite(toFinite(drag.anchorX, NaN)) && Number.isFinite(toFinite(drag.anchorY, NaN))) {
       const snapped = snapPointBy45(
@@ -6937,7 +6963,7 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
       );
       target = {
         x: clamp(toFinite(snapped.x, target.x), 0, WORLD_WIDTH),
-        y: clamp(toFinite(snapped.y, target.y), 0, goalY),
+        y: clamp(toFinite(snapped.y, target.y), stageMinY, goalY),
       };
     }
     const moveEntries = Array.isArray(drag.moveEntries) && drag.moveEntries.length > 0
@@ -6958,7 +6984,7 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
         continue;
       }
       const nextX = clamp(toFinite(entry && entry.anchorX, 0) + deltaX, 0, WORLD_WIDTH);
-      const nextY = clamp(toFinite(entry && entry.anchorY, 0) + deltaY, 0, goalY);
+      const nextY = clamp(toFinite(entry && entry.anchorY, 0) + deltaY, stageMinY, goalY);
       moveObjectToWorld(targetObj, round1(nextX), round1(nextY));
     }
     drag.moved = true;
