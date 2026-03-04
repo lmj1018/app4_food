@@ -60,6 +60,7 @@ let previewCanvasFillTimer = 0;
 let marbleCountApplyTimer = 0;
 let marbleCountApplyInFlight = false;
 let marbleCountApplyPending = false;
+let marbleSizeEnterHandled = false;
 const undoHistory = [];
 const redoHistory = [];
 let goalMarkerPreviewImage = null;
@@ -218,17 +219,110 @@ function marbleRadiusFromScale(scale) {
   return round2(Math.max(0.02, BASE_MARBLE_RADIUS * normalizeMarbleSizeScale(scale)));
 }
 
-function inferMarbleSizeScaleFromStage(stage) {
+function inferMarbleSizeScaleFromStage(stage, fallback = DEFAULT_MARBLE_SIZE_SCALE) {
   const source = stage && typeof stage === 'object' ? stage : {};
   const explicitScale = toFinite(source.marbleSizeScale, NaN);
   if (Number.isFinite(explicitScale) && explicitScale > 0) {
     return normalizeMarbleSizeScale(explicitScale);
   }
-  const explicitRadius = toFinite(source.marbleRadius, NaN);
-  if (Number.isFinite(explicitRadius) && explicitRadius > 0) {
-    return normalizeMarbleSizeScale(explicitRadius / BASE_MARBLE_RADIUS);
+  const spawn = source.spawn && typeof source.spawn === 'object' ? source.spawn : null;
+  const directRadiusCandidates = [
+    source.marbleRadius,
+    source.ballRadius,
+    spawn && spawn.marbleRadius,
+    spawn && spawn.ballRadius,
+  ];
+  for (let index = 0; index < directRadiusCandidates.length; index += 1) {
+    const radius = toFinite(directRadiusCandidates[index], NaN);
+    if (Number.isFinite(radius) && radius > 0) {
+      return normalizeMarbleSizeScale(radius / BASE_MARBLE_RADIUS);
+    }
   }
-  return DEFAULT_MARBLE_SIZE_SCALE;
+  const diameterCandidates = [
+    source.ballSize,
+    spawn && spawn.ballSize,
+  ];
+  for (let index = 0; index < diameterCandidates.length; index += 1) {
+    const diameter = toFinite(diameterCandidates[index], NaN);
+    if (Number.isFinite(diameter) && diameter > 0) {
+      return normalizeMarbleSizeScale((diameter * 0.5) / BASE_MARBLE_RADIUS);
+    }
+  }
+  return fallback;
+}
+
+function inferMarbleSizeScaleFromPhysicsBallObjects(mapJson, fallback = NaN) {
+  const source = mapJson && typeof mapJson === 'object' ? mapJson : {};
+  const objects = Array.isArray(source.objects) ? source.objects : [];
+  let firstRadiusScale = NaN;
+  for (let index = 0; index < objects.length; index += 1) {
+    const rawObject = objects[index];
+    if (!rawObject || typeof rawObject !== 'object') {
+      continue;
+    }
+    const objectType = typeof rawObject.type === 'string' ? rawObject.type.trim() : '';
+    if (objectType !== 'physics_ball') {
+      continue;
+    }
+    const radius = toFinite(rawObject.radius, NaN);
+    if (!Number.isFinite(radius) || radius <= 0) {
+      continue;
+    }
+    const scale = normalizeMarbleSizeScale(radius / BASE_MARBLE_RADIUS);
+    if (!Number.isFinite(firstRadiusScale)) {
+      firstRadiusScale = scale;
+    }
+    const oid = typeof rawObject.oid === 'string' ? rawObject.oid.trim().toLowerCase() : '';
+    if (oid === 'ball_1' || oid === 'player_ball' || oid.startsWith('ball_')) {
+      return scale;
+    }
+  }
+  if (Number.isFinite(firstRadiusScale)) {
+    return firstRadiusScale;
+  }
+  return fallback;
+}
+
+function inferMarbleSizeScaleFromMap(mapJson, fallback = DEFAULT_MARBLE_SIZE_SCALE) {
+  const fromPhysicsBall = inferMarbleSizeScaleFromPhysicsBallObjects(mapJson, NaN);
+  if (Number.isFinite(fromPhysicsBall)) {
+    return fromPhysicsBall;
+  }
+  const source = mapJson && typeof mapJson === 'object' ? mapJson : {};
+  return inferMarbleSizeScaleFromStage(source.stage, fallback);
+}
+
+function parseMarbleSizeInputScale() {
+  if (!elements.marbleSizeInput) {
+    return NaN;
+  }
+  const raw = String(elements.marbleSizeInput.value ?? '').trim();
+  if (!raw) {
+    return NaN;
+  }
+  const normalizedRaw = raw.replace(',', '.');
+  if (normalizedRaw !== raw) {
+    elements.marbleSizeInput.value = normalizedRaw;
+  }
+  const parsed = Number(normalizedRaw);
+  if (!Number.isFinite(parsed)) {
+    return NaN;
+  }
+  return normalizeMarbleSizeScale(parsed, DEFAULT_MARBLE_SIZE_SCALE);
+}
+
+function applyMarbleSizeInputToDraftLive(reason = '공 크기 실시간 반영') {
+  const scale = parseMarbleSizeInputScale();
+  if (!Number.isFinite(scale)) {
+    return false;
+  }
+  const mapJson = getMutableMap();
+  mapJson.stage.marbleSizeScale = scale;
+  mapJson.stage.marbleRadius = marbleRadiusFromScale(scale);
+  applyMarbleSizeToEngines(scale, { silent: true });
+  queueLiveDraftApply(reason);
+  refreshCurrentJsonViewer();
+  return true;
 }
 
 function normalizeDeg(value) {
@@ -317,7 +411,7 @@ function setMarbleCountInput(count) {
 }
 
 function getCurrentMarbleSizeScale() {
-  const raw = elements.marbleSizeInput ? elements.marbleSizeInput.value : DEFAULT_MARBLE_SIZE_SCALE;
+  const raw = elements.marbleSizeInput ? String(elements.marbleSizeInput.value ?? '').trim().replace(',', '.') : DEFAULT_MARBLE_SIZE_SCALE;
   const safe = normalizeMarbleSizeScale(raw, DEFAULT_MARBLE_SIZE_SCALE);
   if (elements.marbleSizeInput) {
     elements.marbleSizeInput.value = String(safe);
@@ -735,7 +829,7 @@ function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
     spacingX: Math.max(0.08, toFinite(spawn.spacingX, 0.6)),
     visibleRows: Math.max(1, Math.floor(toFinite(spawn.visibleRows, 5))),
   };
-  source.stage.marbleSizeScale = inferMarbleSizeScaleFromStage(source.stage);
+  source.stage.marbleSizeScale = inferMarbleSizeScaleFromMap(source);
   source.stage.marbleRadius = marbleRadiusFromScale(source.stage.marbleSizeScale);
   if (!Array.isArray(source.objects)) {
     source.objects = [];
@@ -1113,7 +1207,7 @@ function readSkillWarmupSecondsFromInput() {
 function syncStageInputsFromMap() {
   const mapJson = getMutableMap();
   if (elements.marbleSizeInput) {
-    setMarbleSizeInput(inferMarbleSizeScaleFromStage(mapJson.stage));
+    setMarbleSizeInput(inferMarbleSizeScaleFromMap(mapJson));
   }
   if (elements.stageZoomInput) {
     elements.stageZoomInput.value = String(round1(toFinite(mapJson.stage.zoomY, 206)));
@@ -9568,17 +9662,59 @@ function setupEvents() {
   });
   bindEvent(elements.marbleSizeInput, 'input', () => {
     try {
-      runApplyStageValuesAction({
-        trackUndo: false,
-        liveReason: '스테이지 실시간 반영',
-        silentStatus: true,
-      });
+      applyMarbleSizeInputToDraftLive('공 크기 실시간 반영');
     } catch (error) {
       setStatus(String(error && error.message ? error.message : error), 'error');
     }
   });
-  bindEvent(elements.marbleSizeInput, 'change', () => {
-    scheduleAutoStageApply('스테이지 자동 반영');
+  bindEvent(elements.marbleSizeInput, 'change', async () => {
+    if (marbleSizeEnterHandled) {
+      marbleSizeEnterHandled = false;
+      return;
+    }
+    try {
+      runApplyStageValuesAction({
+        trackUndo: true,
+        undoReason: '공 크기 변경',
+        liveReason: '공 크기 변경',
+        silentStatus: true,
+      });
+      const mapId = resolveWorkingMapId() || resolveCurrentMapId();
+      if (canAutoSaveMapId(mapId)) {
+        const mapJson = getWorkingMapJson(mapId);
+        await flushAutoSaveSelectedMap('공 크기 변경 저장', mapId, mapJson);
+      }
+      setStatus(`공 크기 적용 완료: x${round2(getCurrentMarbleSizeScale())}`);
+    } catch (error) {
+      setStatus(String(error && error.message ? error.message : error), 'error');
+    }
+  });
+  bindEvent(elements.marbleSizeInput, 'keydown', async (event) => {
+    if (!event || event.key !== 'Enter') {
+      return;
+    }
+    event.preventDefault();
+    marbleSizeEnterHandled = true;
+    try {
+      runApplyStageValuesAction({
+        trackUndo: true,
+        undoReason: '공 크기 Enter 적용',
+        liveReason: '공 크기 Enter 적용',
+        silentStatus: true,
+      });
+      const mapId = resolveWorkingMapId() || resolveCurrentMapId();
+      if (canAutoSaveMapId(mapId)) {
+        const mapJson = getWorkingMapJson(mapId);
+        await flushAutoSaveSelectedMap('공 크기 Enter 즉시 저장', mapId, mapJson);
+      }
+      setStatus(`공 크기 즉시 저장 완료: x${round2(getCurrentMarbleSizeScale())}`);
+    } catch (error) {
+      setStatus(String(error && error.message ? error.message : error), 'error');
+    } finally {
+      window.setTimeout(() => {
+        marbleSizeEnterHandled = false;
+      }, 400);
+    }
   });
 
   bindEvent(elements.applyObjectButton, 'click', () => {
