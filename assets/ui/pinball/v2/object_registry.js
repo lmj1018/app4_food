@@ -807,7 +807,7 @@ function compileObject(rawObject, entityId) {
           fillOpacity: 1,
           repelEnabled: toTruthyBoolean(
             rawObject.repelEnabled,
-            toTruthyBoolean(rawObject.ejectOnPenetration, true),
+            toTruthyBoolean(rawObject.ejectOnPenetration, false),
           ),
           repelSpeed: Math.max(0.8, toFiniteNumber(rawObject.repelSpeed, 5.4)),
           repelClearance: clamp(toFiniteNumber(rawObject.repelClearance, 0.12), 0.04, 0.45),
@@ -4139,7 +4139,7 @@ function createFilledWallPolylineVisualBehavior(def, env) {
   const color = DEFAULT_OBJECT_COLORS.box;
   const fillOpacity = 1;
   const centroid = getPolylineCentroid(polygon);
-  const repelEnabled = toTruthyBoolean(def && def.repelEnabled, true);
+  const repelEnabled = toTruthyBoolean(def && def.repelEnabled, false);
   const repelSpeed = Math.max(0.8, toFiniteNumber(def && def.repelSpeed, 5.4));
   const repelClearance = clamp(toFiniteNumber(def && def.repelClearance, 0.12), 0.04, 0.45);
   const repelCooldownMs = Math.max(0, toFiniteNumber(def && def.repelCooldownMs, 90));
