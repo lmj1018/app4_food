@@ -82,17 +82,131 @@ def normalize_manifest(raw_manifest: Any) -> dict[str, Any]:
     }
 
 
+def _parse_sort_value(value: Any, fallback: int = 9999) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return fallback
+
+
+def _list_map_json_file_names() -> list[str]:
+    ensure_maps_dir()
+    file_names: list[str] = []
+    for path in MAPS_DIR.glob("*.json"):
+        name = path.name
+        if name.lower() == "manifest.json":
+            continue
+        file_names.append(name)
+    file_names.sort(key=lambda item: item.lower())
+    return file_names
+
+
+def sync_manifest_with_map_files(manifest: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    safe_manifest = normalize_manifest(manifest)
+    maps = safe_manifest.get("maps")
+    if not isinstance(maps, list):
+        maps = []
+    available_files = _list_map_json_file_names()
+    available_set = set(available_files)
+    normalized_maps: list[dict[str, Any]] = []
+    used_files: set[str] = set()
+    used_ids: set[str] = set()
+    changed = False
+    max_sort = 100
+
+    for entry in maps:
+        if not isinstance(entry, dict):
+            changed = True
+            continue
+        map_id = sanitize_map_id(entry.get("id"))
+        if not map_id:
+            changed = True
+            continue
+        file_name = sanitize_map_file_name(entry.get("file"), map_id)
+        if file_name.lower() == "manifest.json":
+            changed = True
+            continue
+        if file_name not in available_set:
+            fallback_file = f"{map_id}.json"
+            if fallback_file in available_set:
+                file_name = fallback_file
+                changed = True
+            else:
+                changed = True
+                continue
+        if file_name in used_files:
+            changed = True
+            continue
+        if map_id in used_ids:
+            changed = True
+            suffix = 2
+            next_id = f"{map_id}_{suffix}"
+            while next_id in used_ids:
+                suffix += 1
+                next_id = f"{map_id}_{suffix}"
+            map_id = next_id
+
+        sort_value = _parse_sort_value(entry.get("sort"), 9999)
+        max_sort = max(max_sort, sort_value)
+        normalized_maps.append(
+            {
+                "id": map_id,
+                "title": str(entry.get("title", map_id)).strip() or map_id,
+                "engine": str(entry.get("engine", "v2")).strip() or "v2",
+                "file": file_name,
+                "enabled": entry.get("enabled", True) is not False,
+                "sort": sort_value,
+            }
+        )
+        used_files.add(file_name)
+        used_ids.add(map_id)
+
+    for file_name in available_files:
+        if file_name in used_files:
+            continue
+        base_id = sanitize_map_id(Path(file_name).stem)
+        if not base_id:
+            base_id = f"v2_map_{time.time_ns()}"
+        map_id = base_id
+        if map_id in used_ids:
+            suffix = 2
+            candidate = f"{base_id}_{suffix}"
+            while candidate in used_ids:
+                suffix += 1
+                candidate = f"{base_id}_{suffix}"
+            map_id = candidate
+        max_sort += 10
+        normalized_maps.append(
+            {
+                "id": map_id,
+                "title": map_id,
+                "engine": "v2",
+                "file": file_name,
+                "enabled": True,
+                "sort": max_sort,
+            }
+        )
+        used_ids.add(map_id)
+        changed = True
+
+    normalized_maps.sort(key=lambda item: (_parse_sort_value(item.get("sort"), 9999), str(item.get("id", ""))))
+    safe_manifest["maps"] = normalized_maps
+    return safe_manifest, changed
+
+
 def load_manifest() -> dict[str, Any]:
     ensure_maps_dir()
     manifest = normalize_manifest(load_json_file(MANIFEST_PATH, {"version": 1, "maps": []}))
-    if not MANIFEST_PATH.exists():
+    manifest, changed = sync_manifest_with_map_files(manifest)
+    if not MANIFEST_PATH.exists() or changed:
         write_json_file(MANIFEST_PATH, manifest)
     return manifest
 
 
 def save_manifest(manifest: dict[str, Any]) -> None:
     ensure_maps_dir()
-    write_json_file(MANIFEST_PATH, normalize_manifest(manifest))
+    synced_manifest, _ = sync_manifest_with_map_files(normalize_manifest(manifest))
+    write_json_file(MANIFEST_PATH, synced_manifest)
 
 
 def list_maps_for_response(manifest: dict[str, Any]) -> list[dict[str, Any]]:
