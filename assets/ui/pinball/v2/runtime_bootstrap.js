@@ -485,6 +485,9 @@ function patchRendererEntityVisuals() {
         continue;
       }
       const shape = entry.shape;
+      if (shape.noRender === true) {
+        continue;
+      }
       const themeEntity = theme.entity[shape.type] && typeof theme.entity[shape.type] === 'object'
         ? theme.entity[shape.type]
         : { fill: 'white', outline: 'white', bloom: 'white', bloomRadius: 0 };
