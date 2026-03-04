@@ -474,170 +474,6 @@ function ensureClosedPolylinePoints(pointsInput, threshold = 0.0001, forceClose 
   return points;
 }
 
-function normalizePolygonVertices(pointsInput) {
-  const closedPoints = ensureClosedPolylinePoints(pointsInput, 0.2, true);
-  if (closedPoints.length < 4) {
-    return [];
-  }
-  const vertices = [];
-  for (let index = 0; index < closedPoints.length; index += 1) {
-    const point = closedPoints[index];
-    if (!Array.isArray(point) || point.length < 2) {
-      continue;
-    }
-    const x = toFiniteNumber(point[0], NaN);
-    const y = toFiniteNumber(point[1], NaN);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) {
-      continue;
-    }
-    const last = vertices.length > 0 ? vertices[vertices.length - 1] : null;
-    if (last && Math.hypot(last[0] - x, last[1] - y) <= 0.0001) {
-      continue;
-    }
-    vertices.push([x, y]);
-  }
-  if (vertices.length < 4) {
-    return [];
-  }
-  const first = vertices[0];
-  const last = vertices[vertices.length - 1];
-  if (Math.hypot(toFiniteNumber(last[0], 0) - toFiniteNumber(first[0], 0), toFiniteNumber(last[1], 0) - toFiniteNumber(first[1], 0)) <= 0.0001) {
-    vertices.pop();
-  }
-  return vertices.length >= 3 ? vertices : [];
-}
-
-function buildPolygonScanlineRanges(vertices, scanValue, axis = 'y') {
-  if (!Array.isArray(vertices) || vertices.length < 3) {
-    return [];
-  }
-  const axisIndex = axis === 'x' ? 0 : 1;
-  const otherIndex = axisIndex === 0 ? 1 : 0;
-  const intersections = [];
-  for (let index = 0; index < vertices.length; index += 1) {
-    const pointA = vertices[index];
-    const pointB = vertices[(index + 1) % vertices.length];
-    const a0 = toFiniteNumber(pointA && pointA[axisIndex], NaN);
-    const a1 = toFiniteNumber(pointB && pointB[axisIndex], NaN);
-    const b0 = toFiniteNumber(pointA && pointA[otherIndex], NaN);
-    const b1 = toFiniteNumber(pointB && pointB[otherIndex], NaN);
-    if (!Number.isFinite(a0) || !Number.isFinite(a1) || !Number.isFinite(b0) || !Number.isFinite(b1)) {
-      continue;
-    }
-    const minAxis = Math.min(a0, a1);
-    const maxAxis = Math.max(a0, a1);
-    if (!(scanValue >= minAxis && scanValue < maxAxis)) {
-      continue;
-    }
-    const axisDelta = a1 - a0;
-    if (Math.abs(axisDelta) <= 0.000001) {
-      continue;
-    }
-    const ratio = (scanValue - a0) / axisDelta;
-    intersections.push(b0 + (b1 - b0) * ratio);
-  }
-  intersections.sort((left, right) => left - right);
-  const ranges = [];
-  for (let index = 0; index + 1 < intersections.length; index += 2) {
-    const start = toFiniteNumber(intersections[index], NaN);
-    const end = toFiniteNumber(intersections[index + 1], NaN);
-    if (!Number.isFinite(start) || !Number.isFinite(end)) {
-      continue;
-    }
-    if (end - start <= 0.0001) {
-      continue;
-    }
-    ranges.push([start, end]);
-  }
-  return ranges;
-}
-
-function buildFilledWallMeshPolylineDefs(raw, closedPoints) {
-  const vertices = normalizePolygonVertices(closedPoints);
-  if (vertices.length < 3) {
-    return [];
-  }
-  if (!toTruthyBoolean(raw && raw.meshEnabled, true)) {
-    return [];
-  }
-  let meshThickness = toFiniteNumber(raw && raw.meshThickness, NaN);
-  if (!Number.isFinite(meshThickness)) {
-    meshThickness = toFiniteNumber(raw && raw.colliderThickness, NaN);
-  }
-  if (!Number.isFinite(meshThickness)) {
-    meshThickness = toFiniteNumber(raw && raw.collisionThickness, NaN);
-  }
-  if (!Number.isFinite(meshThickness)) {
-    meshThickness = toFiniteNumber(raw && raw.thickness, 0.18);
-  }
-  meshThickness = clamp(meshThickness, 0.05, 6);
-  const meshSpacing = clamp(
-    toFiniteNumber(raw && raw.meshSpacing, Math.max(0.08, meshThickness * 0.72)),
-    0.05,
-    8,
-  );
-  const meshInset = Math.max(0, toFiniteNumber(raw && raw.meshInset, meshThickness * 0.52));
-  const meshCross = toTruthyBoolean(raw && raw.meshCross, true);
-  const meshMaxSegments = Math.max(32, Math.floor(toFiniteNumber(raw && raw.meshMaxSegments, 280)));
-  const meshMinSegmentLength = Math.max(0.02, toFiniteNumber(raw && raw.meshMinSegmentLength, meshThickness * 0.65));
-  const lines = [];
-
-  const emitAxisLines = (axis) => {
-    const axisIndex = axis === 'x' ? 0 : 1;
-    let minAxis = Number.POSITIVE_INFINITY;
-    let maxAxis = Number.NEGATIVE_INFINITY;
-    for (let index = 0; index < vertices.length; index += 1) {
-      const value = toFiniteNumber(vertices[index] && vertices[index][axisIndex], NaN);
-      if (!Number.isFinite(value)) {
-        continue;
-      }
-      minAxis = Math.min(minAxis, value);
-      maxAxis = Math.max(maxAxis, value);
-    }
-    if (!Number.isFinite(minAxis) || !Number.isFinite(maxAxis)) {
-      return;
-    }
-    const span = maxAxis - minAxis;
-    if (!(span > meshSpacing * 0.6)) {
-      return;
-    }
-    const firstScan = minAxis + meshSpacing * 0.5;
-    const lastScan = maxAxis - meshSpacing * 0.5;
-    for (let scan = firstScan; scan <= lastScan + 0.0001; scan += meshSpacing) {
-      if (lines.length >= meshMaxSegments) {
-        return;
-      }
-      const ranges = buildPolygonScanlineRanges(vertices, scan, axis);
-      for (let rangeIndex = 0; rangeIndex < ranges.length; rangeIndex += 1) {
-        if (lines.length >= meshMaxSegments) {
-          return;
-        }
-        const range = ranges[rangeIndex];
-        let start = toFiniteNumber(range && range[0], NaN) + meshInset;
-        let end = toFiniteNumber(range && range[1], NaN) - meshInset;
-        if (!Number.isFinite(start) || !Number.isFinite(end)) {
-          continue;
-        }
-        if (end - start < meshMinSegmentLength) {
-          continue;
-        }
-        const pointA = axis === 'x' ? [scan, start] : [start, scan];
-        const pointB = axis === 'x' ? [scan, end] : [end, scan];
-        lines.push({
-          points: [pointA, pointB],
-          colliderThickness: meshThickness,
-        });
-      }
-    }
-  };
-
-  emitAxisLines('y');
-  if (meshCross && lines.length < meshMaxSegments) {
-    emitAxisLines('x');
-  }
-  return lines;
-}
-
 function compileWallPolyline(raw, entityId) {
   const points = extractPolylinePoints(raw);
   if (points.length < 2) {
@@ -951,46 +787,17 @@ function compileObject(rawObject, entityId) {
     case 'wall_filled_polyline': {
       const closedPoints = ensureClosedPolylinePoints(extractPolylinePoints(rawObject), 0.2, true);
       const color = DEFAULT_OBJECT_COLORS.box;
-      const entities = [];
-      const boundaryEntity = compileWallPolyline(
-        {
-          ...rawObject,
-          points: closedPoints,
-          color,
-          filled: true,
-          fillOpacity: 1,
-        },
-        entityId,
-      );
-      if (boundaryEntity) {
-        entities.push(boundaryEntity);
-      }
-      const meshLines = buildFilledWallMeshPolylineDefs(rawObject, closedPoints);
-      for (let meshIndex = 0; meshIndex < meshLines.length; meshIndex += 1) {
-        const meshLine = meshLines[meshIndex];
-        const meshEntity = compileWallPolyline(
-          {
-            points: meshLine.points,
-            color: 'rgba(0,0,0,0)',
-            restitution: rawObject.restitution,
-            friction: rawObject.friction,
-            sensor: rawObject.sensor,
-            noCollision: rawObject.noCollision,
-            colliderThickness: meshLine.colliderThickness,
-          },
-          entityId + entities.length,
-        );
-        if (!meshEntity) {
-          continue;
-        }
-        if (meshEntity.shape && typeof meshEntity.shape === 'object') {
-          meshEntity.shape.noRender = true;
-        }
-        entities.push(meshEntity);
-      }
       return {
-        entity: entities[0] || null,
-        entities,
+        entity: compileWallPolyline(
+          {
+            ...rawObject,
+            points: closedPoints,
+            color,
+            filled: true,
+            fillOpacity: 1,
+          },
+          entityId,
+        ),
         behavior: {
           kind: 'wall_filled_polyline_visual',
           oid: toId(rawObject.oid, `wall_filled_${entityId}`),
