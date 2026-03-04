@@ -237,6 +237,78 @@ function getRoulette() {
     : null;
 }
 
+function clearRuntimeVisualEffects() {
+  const roulette = getRoulette();
+  if (!roulette) {
+    return;
+  }
+  if (Array.isArray(roulette._effects)) {
+    roulette._effects = [];
+  }
+  const particleManager = roulette._particleManager;
+  if (particleManager && Array.isArray(particleManager._particles)) {
+    particleManager._particles = [];
+  }
+}
+
+function isMiniMapUiObject(value) {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  return typeof value.onViewportChange === 'function'
+    && typeof value.drawViewport === 'function'
+    && typeof value.drawEntities === 'function'
+    && typeof value.drawMarbles === 'function';
+}
+
+function cacheMiniMapUiObject() {
+  const roulette = getRoulette();
+  if (!roulette || !Array.isArray(roulette._uiObjects)) {
+    return null;
+  }
+  if (isMiniMapUiObject(roulette.__v2MiniMapUiObject)) {
+    return roulette.__v2MiniMapUiObject;
+  }
+  const found = roulette._uiObjects.find((item) => isMiniMapUiObject(item)) || null;
+  if (found) {
+    roulette.__v2MiniMapUiObject = found;
+  }
+  return found;
+}
+
+function setMiniMapUiVisibility(visible = true) {
+  const roulette = getRoulette();
+  if (!roulette) {
+    return { ok: false, reason: 'roulette unavailable' };
+  }
+  if (!Array.isArray(roulette._uiObjects)) {
+    roulette._uiObjects = [];
+  }
+  const uiObjects = roulette._uiObjects;
+  const shouldShow = visible !== false;
+  const existingIndex = uiObjects.findIndex((item) => isMiniMapUiObject(item));
+
+  if (shouldShow) {
+    if (existingIndex >= 0) {
+      return { ok: true, visible: true };
+    }
+    const cachedMiniMap = cacheMiniMapUiObject();
+    if (!cachedMiniMap) {
+      return { ok: false, reason: 'mini map ui unavailable' };
+    }
+    uiObjects.push(cachedMiniMap);
+    return { ok: true, visible: true };
+  }
+
+  if (existingIndex >= 0) {
+    const removed = uiObjects.splice(existingIndex, 1)[0];
+    if (removed) {
+      roulette.__v2MiniMapUiObject = removed;
+    }
+  }
+  return { ok: true, visible: false };
+}
+
 function normalizeImageDataUrlMap(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return {};
@@ -611,6 +683,16 @@ function patchPhysicsCreateEntities() {
         );
       }
       if (rawEntity.type === 'dynamic') {
+        if (typeof body.SetAwake === 'function') {
+          body.SetAwake(true);
+        }
+        if (typeof body.SetEnabled === 'function') {
+          body.SetEnabled(true);
+        }
+      } else if (
+        rawEntity.type === 'kinematic'
+        && Math.abs(toFiniteNumber(props.angularVelocity, 0)) > 0.0001
+      ) {
         if (typeof body.SetAwake === 'function') {
           body.SetAwake(true);
         }
@@ -1087,6 +1169,7 @@ async function applyMapJson(rawMapJson) {
 
   roulette._stage = stage;
   roulette.reset();
+  clearRuntimeVisualEffects();
   patchPhysicsStep();
   patchPhysicsCreateEntities();
   patchPhysicsGetEntities();
@@ -1148,6 +1231,7 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
   roulette._stage = stage;
 
   physics.clearEntities();
+  clearRuntimeVisualEffects();
   physics.createStage(stage);
   enforceCompiledEntityPhysics();
 
@@ -1679,6 +1763,7 @@ async function reset() {
     await applyMapJson(control.compiledMap.sourceMap);
   } else {
     roulette.reset();
+    clearRuntimeVisualEffects();
     patchPhysicsStep();
     patchPhysicsCreateEntities();
     patchPhysicsGetEntities();
@@ -1714,6 +1799,9 @@ function getState() {
     mapId: control.mapId,
     paused: control.paused,
     running,
+    miniMapVisible: Array.isArray(roulette && roulette._uiObjects)
+      ? roulette._uiObjects.some((item) => isMiniMapUiObject(item))
+      : false,
     slowMotionActive,
     candidateCount: control.candidates.length,
     marbleCount: marbles.length,
@@ -1748,6 +1836,7 @@ async function init(payload = {}) {
     });
     await ensureRouletteReady();
     ensureCanvasFillLayout();
+    cacheMiniMapUiObject();
     control.fromApp = detectFromAppContext(safePayload);
     applyAppVisualCompatibility();
     patchPhysicsStep();
@@ -1848,6 +1937,9 @@ const api = {
   pause,
   reset,
   setSpeed,
+  setMiniMapVisible(visible = true) {
+    return setMiniMapUiVisibility(visible);
+  },
   getState,
   saveSnapshot,
   loadSnapshot,
