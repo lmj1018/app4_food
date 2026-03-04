@@ -14,6 +14,9 @@ import {
 
 const RUNTIME_REVISION = 'v2-runtime-r20260302-04';
 const STATUS_ELEMENT_ID = 'v2Status';
+const DEFAULT_MARBLE_RADIUS = 0.25;
+const MIN_MARBLE_RADIUS = 0.05;
+const MAX_MARBLE_RADIUS = 4;
 
 function toFiniteNumber(value, fallback) {
   const num = Number(value);
@@ -67,6 +70,7 @@ const control = {
   mapId: '',
   mapJson: null,
   compiledMap: null,
+  marbleRadius: DEFAULT_MARBLE_RADIUS,
   candidates: [],
   winningRank: 1,
   paused: true,
@@ -212,6 +216,134 @@ function setStatus(text) {
   const element = document.getElementById(STATUS_ELEMENT_ID);
   if (element) {
     element.textContent = message;
+  }
+}
+
+function normalizeMarbleRadius(rawRadius, fallback = DEFAULT_MARBLE_RADIUS) {
+  const fallbackRadius = Math.min(
+    MAX_MARBLE_RADIUS,
+    Math.max(MIN_MARBLE_RADIUS, toFiniteNumber(fallback, DEFAULT_MARBLE_RADIUS)),
+  );
+  const numeric = toFiniteNumber(rawRadius, NaN);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return fallbackRadius;
+  }
+  return Math.min(MAX_MARBLE_RADIUS, Math.max(MIN_MARBLE_RADIUS, numeric));
+}
+
+function resolveConfiguredMarbleRadiusFromMap(mapJson) {
+  const safeMap = mapJson && typeof mapJson === 'object' ? mapJson : null;
+  const stage = safeMap && safeMap.stage && typeof safeMap.stage === 'object'
+    ? safeMap.stage
+    : null;
+  const spawn = stage && stage.spawn && typeof stage.spawn === 'object'
+    ? stage.spawn
+    : null;
+
+  const directCandidates = [
+    stage && stage.marbleRadius,
+    stage && stage.ballRadius,
+    stage && stage.ballSize,
+    spawn && spawn.marbleRadius,
+    spawn && spawn.ballRadius,
+    spawn && spawn.ballSize,
+  ];
+  for (let index = 0; index < directCandidates.length; index += 1) {
+    const value = toFiniteNumber(directCandidates[index], NaN);
+    if (Number.isFinite(value) && value > 0) {
+      return normalizeMarbleRadius(value);
+    }
+  }
+
+  const objects = Array.isArray(safeMap && safeMap.objects) ? safeMap.objects : [];
+  let firstPhysicsBallRadius = NaN;
+  for (let index = 0; index < objects.length; index += 1) {
+    const rawObject = objects[index];
+    if (!rawObject || typeof rawObject !== 'object') {
+      continue;
+    }
+    const objectType = typeof rawObject.type === 'string' ? rawObject.type.trim() : '';
+    if (objectType !== 'physics_ball') {
+      continue;
+    }
+    const radius = toFiniteNumber(rawObject.radius, NaN);
+    if (!Number.isFinite(radius) || radius <= 0) {
+      continue;
+    }
+    const normalizedRadius = normalizeMarbleRadius(radius);
+    if (!Number.isFinite(firstPhysicsBallRadius)) {
+      firstPhysicsBallRadius = normalizedRadius;
+    }
+    const oid = typeof rawObject.oid === 'string' ? rawObject.oid.trim().toLowerCase() : '';
+    if (oid === 'ball_1' || oid === 'player_ball' || oid.startsWith('ball_')) {
+      return normalizedRadius;
+    }
+  }
+  if (Number.isFinite(firstPhysicsBallRadius)) {
+    return firstPhysicsBallRadius;
+  }
+  return DEFAULT_MARBLE_RADIUS;
+}
+
+function getConfiguredMarbleRadius() {
+  const cached = toFiniteNumber(control.marbleRadius, NaN);
+  if (Number.isFinite(cached) && cached > 0) {
+    return normalizeMarbleRadius(cached);
+  }
+  return resolveConfiguredMarbleRadiusFromMap(control.mapJson);
+}
+
+function applyMarbleRenderSize(radius) {
+  const roulette = getRoulette();
+  if (!roulette || !Array.isArray(roulette._marbles)) {
+    return;
+  }
+  const targetSize = Math.max(0.1, normalizeMarbleRadius(radius) * 2);
+  for (let index = 0; index < roulette._marbles.length; index += 1) {
+    const marble = roulette._marbles[index];
+    if (!marble || typeof marble !== 'object') {
+      continue;
+    }
+    marble.size = targetSize;
+  }
+}
+
+function applyMarbleBodyRadius(body, radius) {
+  if (!body || typeof body.GetFixtureList !== 'function') {
+    return;
+  }
+  const nextRadius = normalizeMarbleRadius(radius);
+  let touchedFixture = false;
+  try {
+    let guard = 0;
+    let fixture = body.GetFixtureList();
+    while (fixture && guard < 64) {
+      const shape = typeof fixture.GetShape === 'function'
+        ? fixture.GetShape()
+        : null;
+      if (shape && typeof shape.set_m_radius === 'function') {
+        shape.set_m_radius(nextRadius);
+        touchedFixture = true;
+      } else if (shape && typeof shape.SetRadius === 'function') {
+        shape.SetRadius(nextRadius);
+        touchedFixture = true;
+      }
+      const nextFixture = typeof fixture.GetNext === 'function'
+        ? fixture.GetNext()
+        : null;
+      if (!nextFixture || nextFixture === fixture) {
+        break;
+      }
+      fixture = nextFixture;
+      guard += 1;
+    }
+  } catch (_) {
+  }
+  if (touchedFixture && typeof body.ResetMassData === 'function') {
+    try {
+      body.ResetMassData();
+    } catch (_) {
+    }
   }
 }
 
@@ -1006,6 +1138,8 @@ function enforceCompiledEntityPhysics() {
 }
 
 function enforceMarbleBodyPhysics() {
+  const targetRadius = getConfiguredMarbleRadius();
+  applyMarbleRenderSize(targetRadius);
   const physics = getPhysics();
   if (!physics || !physics.marbleMap || typeof physics.marbleMap !== 'object') {
     return;
@@ -1018,6 +1152,7 @@ function enforceMarbleBodyPhysics() {
       continue;
     }
     try {
+      applyMarbleBodyRadius(body, targetRadius);
       if (typeof body.SetBullet === 'function') {
         body.SetBullet(true);
       }
@@ -1078,13 +1213,19 @@ function alignSpawnToStage() {
     return;
   }
 
+  const marbleRadius = getConfiguredMarbleRadius();
   const columns = Math.max(1, Math.floor(toFiniteNumber(spawn.columns, 10)));
-  const spacingX = Math.max(0.08, toFiniteNumber(spawn.spacingX, 0.6));
+  const spacingX = Math.max(
+    0.08,
+    toFiniteNumber(spawn.spacingX, 0.6),
+    marbleRadius * 2.05,
+  );
+  const rowSpacing = Math.max(1, marbleRadius * 2.05);
   const spawnX = toFiniteNumber(spawn.x, 10.25);
   const spawnY = toFiniteNumber(spawn.y, 0);
   const visibleRows = Math.max(1, Math.floor(toFiniteNumber(spawn.visibleRows, 5)));
   const rows = Math.max(1, Math.ceil(marbles.length / columns));
-  const lineDelta = -Math.max(0, Math.ceil(rows - visibleRows));
+  const lineDelta = -Math.max(0, Math.ceil(rows - visibleRows)) * rowSpacing;
 
   const ordered = marbles
     .slice()
@@ -1102,7 +1243,7 @@ function alignSpawnToStage() {
     const col = index % columns;
     const row = Math.floor(index / columns);
     const targetX = spawnX + col * spacingX;
-    const targetY = spawnY + row + lineDelta;
+    const targetY = spawnY + row * rowSpacing + lineDelta;
     try {
       if (typeof body.SetEnabled === 'function') {
         body.SetEnabled(true);
@@ -1142,6 +1283,7 @@ function readStageSpawnSnapshot(stageInput) {
     columns: Math.max(1, Math.floor(toFiniteNumber(spawn.columns, 10))),
     spacingX: Math.max(0.08, toFiniteNumber(spawn.spacingX, 0.6)),
     visibleRows: Math.max(1, Math.floor(toFiniteNumber(spawn.visibleRows, 5))),
+    marbleRadius: normalizeMarbleRadius(stage && stage.marbleRadius, DEFAULT_MARBLE_RADIUS),
   };
 }
 
@@ -1158,7 +1300,8 @@ function hasStageSpawnChanged(previousStage, nextStage) {
     && Math.abs(previous.y - next.y) <= 0.0001;
   const sameGrid = previous.columns === next.columns
     && Math.abs(previous.spacingX - next.spacingX) <= 0.0001
-    && previous.visibleRows === next.visibleRows;
+    && previous.visibleRows === next.visibleRows
+    && Math.abs(previous.marbleRadius - next.marbleRadius) <= 0.0001;
   return !(samePosition && sameGrid);
 }
 
@@ -1290,6 +1433,7 @@ function buildDefaultMapIfNeeded(mapId) {
     stage: {
       goalY: 210,
       zoomY: 200,
+      marbleRadius: DEFAULT_MARBLE_RADIUS,
       disableSkills: false,
       disableSkillsInSlowMotion: true,
       skillWarmupMs: 5000,
@@ -1312,6 +1456,10 @@ async function applyMapJson(rawMapJson) {
     : buildDefaultMapIfNeeded('v2_dynamic_map');
   const compiled = compileMap(mapJson);
   const stage = deepClone(compiled.stage);
+  const mapMarbleRadius = resolveConfiguredMarbleRadiusFromMap(mapJson);
+  if (stage && typeof stage === 'object') {
+    stage.marbleRadius = mapMarbleRadius;
+  }
 
   control.paused = true;
   control.goalReceived = false;
@@ -1320,6 +1468,7 @@ async function applyMapJson(rawMapJson) {
   control.mapId = compiled.mapId;
   control.mapJson = mapJson;
   control.compiledMap = compiled;
+  control.marbleRadius = mapMarbleRadius;
   control.mapDisableSkills = compiled && compiled.stage && compiled.stage.disableSkills === true;
   control.mapDisableSkillsInSlowMotion = !(compiled && compiled.stage && compiled.stage.disableSkillsInSlowMotion === false);
   control.skillWarmupMs = Math.max(0, toFiniteNumber(compiled && compiled.stage && compiled.stage.skillWarmupMs, 5000));
@@ -1364,6 +1513,10 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
     : buildDefaultMapIfNeeded(control.mapId || 'v2_dynamic_map');
   const compiled = compileMap(mapJson);
   const stage = deepClone(compiled.stage);
+  const mapMarbleRadius = resolveConfiguredMarbleRadiusFromMap(mapJson);
+  if (stage && typeof stage === 'object') {
+    stage.marbleRadius = mapMarbleRadius;
+  }
 
   const physics = getPhysics();
   if (!physics || typeof physics.clearEntities !== 'function' || typeof physics.createStage !== 'function') {
@@ -1385,6 +1538,7 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
   control.mapId = compiled.mapId;
   control.mapJson = mapJson;
   control.compiledMap = compiled;
+  control.marbleRadius = mapMarbleRadius;
   control.mapDisableSkills = compiled && compiled.stage && compiled.stage.disableSkills === true;
   control.mapDisableSkillsInSlowMotion = !(compiled && compiled.stage && compiled.stage.disableSkillsInSlowMotion === false);
   control.skillWarmupMs = Math.max(0, toFiniteNumber(compiled && compiled.stage && compiled.stage.skillWarmupMs, 5000));
@@ -1413,11 +1567,10 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
     roulette.setMarbles(control.candidates.slice());
     suppressMarbleCooldownIndicator();
     alignSpawnToStage();
-    enforceMarbleBodyPhysics();
   } else if (!preserveMarbles || shouldRespawnForSpawnChange) {
     alignSpawnToStage();
-    enforceMarbleBodyPhysics();
   }
+  enforceMarbleBodyPhysics();
   patchRendererMarbleImages();
 
   setWinningRank(control.winningRank);
