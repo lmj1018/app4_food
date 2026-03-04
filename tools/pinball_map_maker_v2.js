@@ -8064,7 +8064,6 @@ async function applyDraftLiveNow(reason = '') {
     liveApplyForceFullRebuild = false;
     const api = await waitForEngineApi(8000);
     let restoredSlotId = '';
-    const runningBeforeApply = readEngineRunning(api);
     let preserveMarblesForApply = !shouldReset;
     let preserveRunningForApply = !shouldReset;
     if (shouldReset) {
@@ -8076,22 +8075,12 @@ async function applyDraftLiveNow(reason = '') {
       }
     }
     await applyDraftMapToApi(api, {
-      live: !forceFullRebuild,
+      live: true,
       preserveMarbles: forceFullRebuild ? false : preserveMarblesForApply,
       preserveRunning: forceFullRebuild ? false : preserveRunningForApply,
       updateCandidates: false,
     });
     await applyMiniMapVisibilityToEngine(api, { silent: true });
-    if (forceFullRebuild && !shouldReset) {
-      if (runningBeforeApply && typeof api.start === 'function') {
-        const startResult = await api.start();
-        if (!startResult || startResult.ok !== true) {
-          throw new Error(startResult && startResult.reason ? startResult.reason : '재시작 실패');
-        }
-      } else if (!runningBeforeApply && typeof api.pause === 'function') {
-        await api.pause();
-      }
-    }
     if (shouldReset && !shouldAutoStartAfterReset) {
       if (typeof api.pause === 'function') {
         await api.pause();
