@@ -81,7 +81,7 @@ const editorState = {
   dragState: null,
   suppressClickOnce: false,
   isMiniMapDragging: false,
-  floatingInspectorHiddenByUser: false,
+  floatingInspectorHiddenByUser: true,
 };
 
 const elements = {
@@ -885,8 +885,11 @@ function setSelectedIndexes(indexes, options = {}) {
   editorState.selectedIndexes = normalized;
   editorState.selectedIndex = primaryIndex;
   const keepHidden = options.keepFloatingHidden === true;
-  if (!keepHidden) {
+  const showFloating = options.showFloatingInspector === true;
+  if (showFloating) {
     editorState.floatingInspectorHiddenByUser = false;
+  } else if (keepHidden) {
+    editorState.floatingInspectorHiddenByUser = true;
   }
 }
 
@@ -7709,7 +7712,7 @@ function finishDrag() {
     }
     setSelectedIndexes(selected, {
       primaryIndex: selected.length > 0 ? selected[selected.length - 1] : -1,
-      keepFloatingHidden: selected.length === 0,
+      keepFloatingHidden: true,
     });
     syncObjectList({ preserveNoSelection: true });
     if (selected.length === 0) {
@@ -8001,9 +8004,9 @@ function handleMakerCanvasPointerDown(event) {
           const nextSelected = selected.filter((item) => item !== nearestIndex);
           setSelectedIndexes(nextSelected, {
             primaryIndex: nextSelected.length > 0 ? nextSelected[nextSelected.length - 1] : -1,
-            keepFloatingHidden: nextSelected.length === 0,
+            keepFloatingHidden: true,
           });
-          editorState.floatingInspectorHiddenByUser = nextSelected.length === 0;
+          editorState.floatingInspectorHiddenByUser = true;
           syncObjectList({ preserveNoSelection: true });
           updateMakerHint(nextSelected.length === 0 ? '선택 해제됨' : `${nextSelected.length}개 오브젝트 선택됨`);
         } else {
@@ -8018,11 +8021,11 @@ function handleMakerCanvasPointerDown(event) {
         if (!selected.includes(nearestIndex)) {
           selected.push(nearestIndex);
         }
-        setSelectedIndexes(selected, { primaryIndex: nearestIndex });
+        setSelectedIndexes(selected, { primaryIndex: nearestIndex, keepFloatingHidden: true });
       } else {
-        setSingleSelectedIndex(nearestIndex);
+        setSingleSelectedIndex(nearestIndex, { keepFloatingHidden: true });
       }
-      editorState.floatingInspectorHiddenByUser = false;
+      editorState.floatingInspectorHiddenByUser = true;
     } else if (!additiveMode && !subtractMode) {
       setSelectedIndexes([], { keepFloatingHidden: true });
     }
@@ -8326,22 +8329,20 @@ function handleMakerCanvasClick(event) {
           const nextSelected = selected.filter((item) => item !== nearestIndex);
           setSelectedIndexes(nextSelected, {
             primaryIndex: nextSelected.length > 0 ? nextSelected[nextSelected.length - 1] : -1,
-            keepFloatingHidden: nextSelected.length === 0,
+            keepFloatingHidden: true,
           });
-          editorState.floatingInspectorHiddenByUser = nextSelected.length === 0;
+          editorState.floatingInspectorHiddenByUser = true;
         }
       } else if (additiveMode) {
         const selected = getSelectedIndexes();
         if (!selected.includes(nearestIndex)) {
           selected.push(nearestIndex);
         }
-        setSelectedIndexes(selected, { primaryIndex: nearestIndex });
+        setSelectedIndexes(selected, { primaryIndex: nearestIndex, keepFloatingHidden: true });
       } else {
-        setSingleSelectedIndex(nearestIndex);
+        setSingleSelectedIndex(nearestIndex, { keepFloatingHidden: true });
       }
-      if (!subtractMode || getSelectedIndexes().length > 0) {
-        editorState.floatingInspectorHiddenByUser = false;
-      }
+      editorState.floatingInspectorHiddenByUser = true;
     } else if (!additiveMode && !subtractMode) {
       setSelectedIndexes([], { keepFloatingHidden: true });
     }
@@ -9006,11 +9007,17 @@ function handleMakerCanvasRightClickAction() {
   }
   if (tool === 'select' && !editorState.dragState) {
     const selectedCount = getSelectedIndexes().length;
-    if (selectedCount > 0 && editorState.floatingInspectorHiddenByUser !== true) {
-      editorState.floatingInspectorHiddenByUser = true;
-      setFloatingInspectorVisible(false);
+    if (selectedCount > 0) {
+      const willShow = editorState.floatingInspectorHiddenByUser === true;
+      editorState.floatingInspectorHiddenByUser = !willShow;
+      if (willShow) {
+        renderFloatingObjectInspector();
+        setStatus('우클릭: 오브젝트 소형 편집창 표시');
+      } else {
+        setFloatingInspectorVisible(false);
+        setStatus('우클릭: 오브젝트 소형 편집창 숨김');
+      }
       drawMakerCanvas();
-      setStatus('우클릭: 오브젝트 소형 편집창 숨김');
       return;
     }
   }
