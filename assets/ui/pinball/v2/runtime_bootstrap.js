@@ -295,10 +295,53 @@ function resolveConfiguredMarbleRadiusFromMap(mapJson) {
   return DEFAULT_MARBLE_RADIUS;
 }
 
+function resolveConfiguredMarbleRadiusFromStage(stageInput) {
+  const stage = stageInput && typeof stageInput === 'object' ? stageInput : null;
+  if (!stage) {
+    return NaN;
+  }
+  const spawn = stage.spawn && typeof stage.spawn === 'object'
+    ? stage.spawn
+    : null;
+
+  const directRadiusCandidates = [
+    stage.marbleRadius,
+    stage.ballRadius,
+    spawn && spawn.marbleRadius,
+    spawn && spawn.ballRadius,
+  ];
+  for (let index = 0; index < directRadiusCandidates.length; index += 1) {
+    const value = toFiniteNumber(directRadiusCandidates[index], NaN);
+    if (Number.isFinite(value) && value > 0) {
+      return normalizeMarbleRadius(value);
+    }
+  }
+
+  const diameterCandidates = [
+    stage.ballSize,
+    spawn && spawn.ballSize,
+  ];
+  for (let index = 0; index < diameterCandidates.length; index += 1) {
+    const diameter = toFiniteNumber(diameterCandidates[index], NaN);
+    if (Number.isFinite(diameter) && diameter > 0) {
+      return normalizeMarbleRadius(diameter * 0.5);
+    }
+  }
+
+  return NaN;
+}
+
 function getConfiguredMarbleRadius() {
-  const cached = toFiniteNumber(control.marbleRadius, NaN);
-  if (Number.isFinite(cached) && cached > 0) {
-    return normalizeMarbleRadius(cached);
+  const roulette = getRoulette();
+  const stage = roulette && roulette._stage && typeof roulette._stage === 'object'
+    ? roulette._stage
+    : null;
+  if (stage) {
+    const stageRadius = resolveConfiguredMarbleRadiusFromStage(stage);
+    if (Number.isFinite(stageRadius) && stageRadius > 0) {
+      return normalizeMarbleRadius(stageRadius);
+    }
+    return DEFAULT_MARBLE_RADIUS;
   }
   return resolveConfiguredMarbleRadiusFromMap(control.mapJson);
 }
