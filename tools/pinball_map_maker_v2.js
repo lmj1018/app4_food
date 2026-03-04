@@ -43,6 +43,7 @@ let liveApplyInFlight = false;
 let liveApplyPending = false;
 let liveApplyResetRequested = false;
 let liveApplyAutoStartRequested = false;
+let liveApplyForceFullRebuild = false;
 let autoSaveTimer = 0;
 let autoSaveInFlight = false;
 let autoSavePending = false;
@@ -3668,6 +3669,7 @@ function queueObjectLiveDraftApply(reason = '', options = {}) {
   queueLiveDraftApply(reason, {
     objectMutation: true,
     autoResumeAfterReset: options && options.autoResumeAfterReset === true,
+    forceFullRebuild: options && options.forceFullRebuild === true,
   });
 }
 
@@ -3712,7 +3714,7 @@ function runDeleteSelectedObjectAction(reason = '오브젝트 삭제', statusMes
   rememberUndoState(reason);
   deleteSelectedObject();
   syncObjectList();
-  queueObjectLiveDraftApply(reason);
+  queueObjectLiveDraftApply(reason, { forceFullRebuild: true });
   drawMakerCanvas();
   setStatus(statusMessage);
 }
@@ -8056,10 +8058,13 @@ async function applyDraftLiveNow(reason = '') {
   try {
     const shouldReset = liveApplyResetRequested === true;
     const shouldAutoStartAfterReset = shouldReset && liveApplyAutoStartRequested === true;
+    const forceFullRebuild = liveApplyForceFullRebuild === true;
     liveApplyResetRequested = false;
     liveApplyAutoStartRequested = false;
+    liveApplyForceFullRebuild = false;
     const api = await waitForEngineApi(8000);
     let restoredSlotId = '';
+    const runningBeforeApply = readEngineRunning(api);
     let preserveMarblesForApply = !shouldReset;
     let preserveRunningForApply = !shouldReset;
     if (shouldReset) {
@@ -8071,12 +8076,22 @@ async function applyDraftLiveNow(reason = '') {
       }
     }
     await applyDraftMapToApi(api, {
-      live: true,
-      preserveMarbles: preserveMarblesForApply,
-      preserveRunning: preserveRunningForApply,
+      live: !forceFullRebuild,
+      preserveMarbles: forceFullRebuild ? false : preserveMarblesForApply,
+      preserveRunning: forceFullRebuild ? false : preserveRunningForApply,
       updateCandidates: false,
     });
     await applyMiniMapVisibilityToEngine(api, { silent: true });
+    if (forceFullRebuild && !shouldReset) {
+      if (runningBeforeApply && typeof api.start === 'function') {
+        const startResult = await api.start();
+        if (!startResult || startResult.ok !== true) {
+          throw new Error(startResult && startResult.reason ? startResult.reason : '재시작 실패');
+        }
+      } else if (!runningBeforeApply && typeof api.pause === 'function') {
+        await api.pause();
+      }
+    }
     if (shouldReset && !shouldAutoStartAfterReset) {
       if (typeof api.pause === 'function') {
         await api.pause();
@@ -8098,8 +8113,8 @@ async function applyDraftLiveNow(reason = '') {
     applyViewZoomToEngine(!running);
     setCameraLock(!running);
     await syncPreviewFromDraft({
-      preserveMarbles: preserveMarblesForApply,
-      preserveRunning: preserveRunningForApply,
+      preserveMarbles: forceFullRebuild ? false : preserveMarblesForApply,
+      preserveRunning: forceFullRebuild ? false : preserveRunningForApply,
       updateCandidates: false,
     });
     if (reason) {
@@ -8181,6 +8196,9 @@ function scheduleAutoSaveSelectedMap(reason = '') {
 function queueLiveDraftApply(reason = '', options = {}) {
   if (FILE_PROTOCOL) {
     return;
+  }
+  if (options && options.forceFullRebuild === true) {
+    liveApplyForceFullRebuild = true;
   }
   if (options && options.objectMutation === true && shouldResetOnObjectMutation()) {
     liveApplyResetRequested = true;
@@ -9044,7 +9062,7 @@ function setupEvents() {
     rememberUndoState('오브젝트 전체삭제');
     clearAllObjects();
     syncObjectList();
-    queueObjectLiveDraftApply('오브젝트 전체삭제');
+    queueObjectLiveDraftApply('오브젝트 전체삭제', { forceFullRebuild: true });
     drawMakerCanvas();
     setStatus('오브젝트 전체 삭제 완료');
   });
