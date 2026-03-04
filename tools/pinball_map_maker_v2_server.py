@@ -374,6 +374,82 @@ def delete_map_payload(payload: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def rename_map_payload(payload: dict[str, Any]) -> dict[str, str]:
+    raw_source_map_id = str(payload.get("sourceMapId") or "").strip()
+    raw_target_map_id = str(payload.get("targetMapId") or "").strip()
+    if not raw_source_map_id:
+        raise ValueError("sourceMapId is required")
+    if not raw_target_map_id:
+        raise ValueError("targetMapId is required")
+
+    source_map_id = sanitize_map_id(raw_source_map_id)
+    target_map_id = sanitize_map_id(raw_target_map_id)
+    if not source_map_id or not target_map_id:
+        raise ValueError("map id is invalid")
+
+    manifest = load_manifest()
+    maps = manifest.get("maps")
+    if not isinstance(maps, list):
+        raise ValueError("Manifest is invalid")
+
+    source_index, source_entry = find_manifest_entry(manifest, source_map_id)
+    if source_entry is None or source_index is None:
+        raise ValueError("Source map not found")
+
+    if source_map_id != target_map_id:
+        _, existing_target = find_manifest_entry(manifest, target_map_id)
+        if existing_target is not None:
+            raise ValueError("Target map id already exists")
+
+    source_file_name = sanitize_map_file_name(source_entry.get("file"), source_map_id)
+    target_file_name = f"{target_map_id}.json"
+    source_path = (MAPS_DIR / source_file_name).resolve()
+    target_path = (MAPS_DIR / target_file_name).resolve()
+    if source_path.parent != MAPS_DIR.resolve() or target_path.parent != MAPS_DIR.resolve():
+        raise ValueError("Invalid map file path")
+    if not source_path.exists():
+        raise ValueError("Source map file not found")
+
+    map_json = load_json_file(source_path, None)
+    if not isinstance(map_json, dict):
+        raise ValueError("Source map file is invalid")
+    map_json["id"] = target_map_id
+    map_json["title"] = target_map_id
+
+    schema_version = map_json.get("schemaVersion", 1)
+    try:
+        schema_version = int(schema_version)
+    except Exception:
+        schema_version = 1
+    map_json["schemaVersion"] = max(1, schema_version)
+
+    write_json_file(target_path, map_json)
+
+    source_entry["id"] = target_map_id
+    source_entry["title"] = target_map_id
+    source_entry["engine"] = "v2"
+    source_entry["file"] = target_file_name
+    if "enabled" not in source_entry:
+        source_entry["enabled"] = True
+    if "sort" not in source_entry:
+        source_entry["sort"] = 9999
+
+    save_manifest(manifest)
+
+    if source_path != target_path and source_path.exists():
+        try:
+            source_path.unlink()
+        except Exception:
+            # Manifest rename succeeded; source file cleanup is best-effort.
+            pass
+
+    return {
+        "sourceMapId": source_map_id,
+        "targetMapId": target_map_id,
+        "file": target_file_name,
+    }
+
+
 class PinballMapMakerHandler(SimpleHTTPRequestHandler):
     server_version = "PinballMapMakerV2HTTP/1.0"
 
@@ -509,6 +585,23 @@ class PinballMapMakerHandler(SimpleHTTPRequestHandler):
                         "mapsDir": MAPS_DIR_DISPLAY,
                         "deletedMapId": deleted["mapId"],
                         "deletedFile": deleted["file"],
+                        "maps": list_maps_for_response(manifest),
+                    },
+                )
+                return
+
+            if path == "/__pinball_v2_api/rename":
+                payload = self.parse_json_body()
+                renamed = rename_map_payload(payload)
+                manifest = load_manifest()
+                self.send_json(
+                    HTTPStatus.OK,
+                    {
+                        "ok": True,
+                        "mapsDir": MAPS_DIR_DISPLAY,
+                        "sourceMapId": renamed["sourceMapId"],
+                        "targetMapId": renamed["targetMapId"],
+                        "file": renamed["file"],
                         "maps": list_maps_for_response(manifest),
                     },
                 )

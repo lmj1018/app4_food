@@ -1358,7 +1358,7 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
 
   const preserveMarbles = !(options && options.preserveMarbles === false);
   const spawnChanged = hasStageSpawnChanged(stageBeforeLive, stage);
-  const shouldRespawnForSpawnChange = spawnChanged && !runningBefore;
+  const shouldRespawnForSpawnChange = spawnChanged;
   if (!preserveMarbles) {
     roulette.clearMarbles();
   }

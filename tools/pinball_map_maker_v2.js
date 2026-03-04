@@ -88,7 +88,7 @@ const editorState = {
 const elements = {
   mapSelect: document.getElementById('mapSelect'),
   mapNameInput: document.getElementById('mapNameInput'),
-  refreshMapListButton: document.getElementById('refreshMapListButton'),
+  renameMapButton: document.getElementById('renameMapButton'),
   deleteMapButton: document.getElementById('deleteMapButton'),
   saveAsNewMapButton: document.getElementById('saveAsNewMapButton'),
   reloadButton: document.getElementById('reloadButton'),
@@ -464,7 +464,7 @@ function setBusy(isBusy) {
   const controls = [
     elements.mapSelect,
     elements.mapNameInput,
-    elements.refreshMapListButton,
+    elements.renameMapButton,
     elements.deleteMapButton,
     elements.saveAsNewMapButton,
     elements.reloadButton,
@@ -8929,6 +8929,16 @@ async function saveMapViaServer(payload) {
   });
 }
 
+async function renameMapViaServer(payload) {
+  return callMapMakerApi('rename', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
 async function deleteMapViaServer(mapId) {
   return callMapMakerApi('delete', {
     method: 'POST',
@@ -8980,6 +8990,49 @@ async function saveAsNewMap() {
   }
   await loadSelectedCatalogMap();
   setStatus(`새 맵 저장 완료: ${newId}`);
+}
+
+async function renameSelectedMapFromInput() {
+  const selected = selectedMapCatalogEntry();
+  if (!selected || !selected.id) {
+    throw new Error('이름을 바꿀 맵을 먼저 선택하세요');
+  }
+  const rawName = String(elements.mapNameInput && elements.mapNameInput.value ? elements.mapNameInput.value : '').trim();
+  if (!rawName) {
+    throw new Error('새 맵 이름을 입력하세요');
+  }
+  const targetId = sanitizeMapId(rawName);
+  if (!targetId) {
+    throw new Error('유효한 맵 이름을 입력하세요');
+  }
+  const sourceId = String(selected.id || '').trim();
+  if (!sourceId) {
+    throw new Error('선택된 맵 ID가 유효하지 않습니다');
+  }
+  if (targetId === sourceId) {
+    if (elements.mapNameInput) {
+      elements.mapNameInput.value = targetId;
+    }
+    setStatus(`맵 이름이 이미 동일합니다: ${targetId}`);
+    return;
+  }
+  const confirmed = window.confirm(`맵 이름을 변경할까요?\n- ${sourceId} → ${targetId}`);
+  if (!confirmed) {
+    return;
+  }
+  await renameMapViaServer({
+    sourceMapId: sourceId,
+    targetMapId: targetId,
+  });
+  await refreshMapCatalog(targetId);
+  if (elements.mapSelect) {
+    elements.mapSelect.value = targetId;
+  }
+  if (elements.mapNameInput) {
+    elements.mapNameInput.value = targetId;
+  }
+  await loadSelectedCatalogMap();
+  setStatus(`맵 이름 변경 완료: ${sourceId} → ${targetId}`);
 }
 
 async function deleteSelectedMapFromCatalog() {
@@ -9117,10 +9170,10 @@ function setupEvents() {
     setJsonViewerOpen(!isJsonViewerOpen());
   });
 
-  bindEvent(elements.refreshMapListButton, 'click', async () => {
+  bindEvent(elements.renameMapButton, 'click', async () => {
     setBusy(true);
     try {
-      await refreshMapCatalog(selectedMapIdFromDropdown());
+      await renameSelectedMapFromInput();
     } catch (error) {
       setStatus(String(error && error.message ? error.message : error), 'error');
     } finally {
