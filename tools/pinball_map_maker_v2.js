@@ -40,6 +40,7 @@ const OBJECT_COLOR_PRESET = {
 const DEFAULT_MARBLE_SIZE_SCALE = 1;
 const MIN_MARBLE_SIZE_SCALE = 0.4;
 const MAX_MARBLE_SIZE_SCALE = 3;
+const BASE_MARBLE_RADIUS = 0.25;
 let engineCanvasFillTimer = 0;
 let liveApplyTimer = 0;
 let liveApplyInFlight = false;
@@ -50,6 +51,8 @@ let liveApplyForceFullRebuild = false;
 let autoSaveTimer = 0;
 let autoSaveInFlight = false;
 let autoSavePending = false;
+let autoSavePendingMapId = '';
+let autoSavePendingMapJson = null;
 let autoObjectApplyTimer = 0;
 let autoStageApplyTimer = 0;
 let previewLiveApplyInFlight = false;
@@ -203,6 +206,31 @@ function round2(value) {
   return Math.round(value * 100) / 100;
 }
 
+function normalizeMarbleSizeScale(value, fallback = DEFAULT_MARBLE_SIZE_SCALE) {
+  return round2(clamp(
+    toFinite(value, fallback),
+    MIN_MARBLE_SIZE_SCALE,
+    MAX_MARBLE_SIZE_SCALE,
+  ));
+}
+
+function marbleRadiusFromScale(scale) {
+  return round2(Math.max(0.02, BASE_MARBLE_RADIUS * normalizeMarbleSizeScale(scale)));
+}
+
+function inferMarbleSizeScaleFromStage(stage) {
+  const source = stage && typeof stage === 'object' ? stage : {};
+  const explicitScale = toFinite(source.marbleSizeScale, NaN);
+  if (Number.isFinite(explicitScale) && explicitScale > 0) {
+    return normalizeMarbleSizeScale(explicitScale);
+  }
+  const explicitRadius = toFinite(source.marbleRadius, NaN);
+  if (Number.isFinite(explicitRadius) && explicitRadius > 0) {
+    return normalizeMarbleSizeScale(explicitRadius / BASE_MARBLE_RADIUS);
+  }
+  return DEFAULT_MARBLE_SIZE_SCALE;
+}
+
 function normalizeDeg(value) {
   const raw = toFinite(value, 0);
   let deg = raw % 360;
@@ -290,10 +318,9 @@ function setMarbleCountInput(count) {
 
 function getCurrentMarbleSizeScale() {
   const raw = elements.marbleSizeInput ? elements.marbleSizeInput.value : DEFAULT_MARBLE_SIZE_SCALE;
-  const parsed = toFinite(raw, DEFAULT_MARBLE_SIZE_SCALE);
-  const safe = clamp(parsed, MIN_MARBLE_SIZE_SCALE, MAX_MARBLE_SIZE_SCALE);
+  const safe = normalizeMarbleSizeScale(raw, DEFAULT_MARBLE_SIZE_SCALE);
   if (elements.marbleSizeInput) {
-    elements.marbleSizeInput.value = String(round2(safe));
+    elements.marbleSizeInput.value = String(safe);
   }
   return safe;
 }
@@ -302,8 +329,8 @@ function setMarbleSizeInput(scale) {
   if (!elements.marbleSizeInput) {
     return;
   }
-  const safe = clamp(toFinite(scale, DEFAULT_MARBLE_SIZE_SCALE), MIN_MARBLE_SIZE_SCALE, MAX_MARBLE_SIZE_SCALE);
-  elements.marbleSizeInput.value = String(round2(safe));
+  const safe = normalizeMarbleSizeScale(scale, DEFAULT_MARBLE_SIZE_SCALE);
+  elements.marbleSizeInput.value = String(safe);
 }
 
 function isJsonViewerOpen() {
@@ -562,6 +589,13 @@ function resolveCurrentMapId() {
   return 'v2_default';
 }
 
+function resolveWorkingMapId() {
+  if (workingMapJson && typeof workingMapJson.id === 'string' && workingMapJson.id.trim()) {
+    return workingMapJson.id.trim();
+  }
+  return '';
+}
+
 function readPayload() {
   const marbleCount = getCurrentMarbleCount();
   return {
@@ -580,6 +614,8 @@ function buildDefaultMapJson(mapId = 'v2_custom_map') {
     stage: {
       goalY: 210,
       zoomY: 200,
+      marbleSizeScale: DEFAULT_MARBLE_SIZE_SCALE,
+      marbleRadius: marbleRadiusFromScale(DEFAULT_MARBLE_SIZE_SCALE),
       topWallY: 2,
       leftWallX: 2.5,
       rightWallX: 21,
@@ -699,6 +735,8 @@ function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
     spacingX: Math.max(0.08, toFinite(spawn.spacingX, 0.6)),
     visibleRows: Math.max(1, Math.floor(toFinite(spawn.visibleRows, 5))),
   };
+  source.stage.marbleSizeScale = inferMarbleSizeScaleFromStage(source.stage);
+  source.stage.marbleRadius = marbleRadiusFromScale(source.stage.marbleSizeScale);
   if (!Array.isArray(source.objects)) {
     source.objects = [];
   }
@@ -1074,6 +1112,9 @@ function readSkillWarmupSecondsFromInput() {
 
 function syncStageInputsFromMap() {
   const mapJson = getMutableMap();
+  if (elements.marbleSizeInput) {
+    setMarbleSizeInput(inferMarbleSizeScaleFromStage(mapJson.stage));
+  }
   if (elements.stageZoomInput) {
     elements.stageZoomInput.value = String(round1(toFinite(mapJson.stage.zoomY, 206)));
   }
@@ -1167,6 +1208,14 @@ function selectedMapCatalogEntry() {
     return null;
   }
   return mapCatalog.find((entry) => entry && entry.id === mapId) || null;
+}
+
+function findMapCatalogEntryById(mapId) {
+  const safeMapId = String(mapId || '').trim();
+  if (!safeMapId) {
+    return null;
+  }
+  return mapCatalog.find((entry) => entry && entry.id === safeMapId) || null;
 }
 
 function renderMapCatalog(preferredMapId = '') {
@@ -3984,6 +4033,9 @@ function clearAllObjects() {
 
 function applyStageInputsToDraft() {
   const mapJson = getMutableMap();
+  const marbleSizeScale = getCurrentMarbleSizeScale();
+  mapJson.stage.marbleSizeScale = marbleSizeScale;
+  mapJson.stage.marbleRadius = marbleRadiusFromScale(marbleSizeScale);
   mapJson.stage.zoomY = Math.max(10, toFinite(elements.stageZoomInput ? elements.stageZoomInput.value : mapJson.stage.zoomY, mapJson.stage.zoomY));
   mapJson.stage.disableSkills = !!(elements.stageDisableSkillsInput && elements.stageDisableSkillsInput.checked);
   mapJson.stage.disableSkillsInSlowMotion = !!(elements.stageDisableSkillsSlowInput && elements.stageDisableSkillsSlowInput.checked);
@@ -8633,27 +8685,27 @@ function shouldResetOnObjectMutation() {
   return !!(elements.stageResetOnObjectChangeInput && elements.stageResetOnObjectChangeInput.checked);
 }
 
-function canAutoSaveSelectedMap() {
-  const selected = selectedMapCatalogEntry();
-  if (!selected || !selected.id) {
-    return false;
-  }
-  const currentMapId = resolveCurrentMapId();
-  return String(selected.id) === String(currentMapId);
+function canAutoSaveMapId(mapId) {
+  return !!findMapCatalogEntryById(mapId);
 }
 
-async function flushAutoSaveSelectedMap(reason = '') {
-  if (!canAutoSaveSelectedMap()) {
+async function flushAutoSaveSelectedMap(reason = '', targetMapId = '', targetMapJson = null) {
+  const mapId = String(targetMapId || resolveWorkingMapId() || resolveCurrentMapId()).trim();
+  if (!canAutoSaveMapId(mapId)) {
     return;
   }
+  const mapJsonPayload = targetMapJson && typeof targetMapJson === 'object'
+    ? deepClone(targetMapJson)
+    : getWorkingMapJson(mapId);
   if (autoSaveInFlight) {
     autoSavePending = true;
+    autoSavePendingMapId = mapId;
+    autoSavePendingMapJson = deepClone(mapJsonPayload);
     return;
   }
   autoSaveInFlight = true;
   try {
-    const mapId = resolveCurrentMapId();
-    const mapJson = await getCurrentMapJsonForSave();
+    const mapJson = deepClone(mapJsonPayload);
     mapJson.id = mapId;
     mapJson.title = mapId;
     await saveMapViaServer({
@@ -8667,23 +8719,32 @@ async function flushAutoSaveSelectedMap(reason = '') {
   } finally {
     autoSaveInFlight = false;
     if (autoSavePending) {
+      const pendingMapId = autoSavePendingMapId;
+      const pendingMapJson = autoSavePendingMapJson ? deepClone(autoSavePendingMapJson) : null;
       autoSavePending = false;
-      void flushAutoSaveSelectedMap('pending');
+      autoSavePendingMapId = '';
+      autoSavePendingMapJson = null;
+      void flushAutoSaveSelectedMap('pending', pendingMapId, pendingMapJson);
     }
   }
 }
 
 function scheduleAutoSaveSelectedMap(reason = '') {
-  if (FILE_PROTOCOL || !canAutoSaveSelectedMap()) {
+  if (FILE_PROTOCOL) {
     return;
   }
+  const mapId = resolveWorkingMapId() || resolveCurrentMapId();
+  if (!canAutoSaveMapId(mapId)) {
+    return;
+  }
+  const mapJsonSnapshot = getWorkingMapJson(mapId);
   if (autoSaveTimer) {
     window.clearTimeout(autoSaveTimer);
     autoSaveTimer = 0;
   }
   autoSaveTimer = window.setTimeout(() => {
     autoSaveTimer = 0;
-    void flushAutoSaveSelectedMap(reason);
+    void flushAutoSaveSelectedMap(reason, mapId, mapJsonSnapshot);
   }, AUTO_SAVE_DEBOUNCE_MS);
 }
 
@@ -9157,10 +9218,6 @@ function setupEvents() {
     scheduleLiveMarbleCountApply('테스트 공 개수 적용 완료');
   });
 
-  bindEvent(elements.marbleSizeInput, 'change', () => {
-    getCurrentMarbleSizeScale();
-  });
-
   bindEvent(elements.applyMarbleSizeButton, 'click', () => {
     const scale = getCurrentMarbleSizeScale();
     applyMarbleSizeToEngines(scale);
@@ -9193,6 +9250,15 @@ function setupEvents() {
   });
 
   bindEvent(elements.mapSelect, 'change', async () => {
+    const previousMapId = resolveWorkingMapId();
+    if (canAutoSaveMapId(previousMapId)) {
+      const previousMapJson = getWorkingMapJson(previousMapId);
+      if (autoSaveTimer) {
+        window.clearTimeout(autoSaveTimer);
+        autoSaveTimer = 0;
+      }
+      await flushAutoSaveSelectedMap('맵 전환 저장', previousMapId, previousMapJson);
+    }
     const selected = selectedMapCatalogEntry();
     if (!selected) {
       const fallbackId = 'v2_custom_map';
@@ -9501,10 +9567,18 @@ function setupEvents() {
     applyViewZoomRespectRunning();
   });
   bindEvent(elements.marbleSizeInput, 'input', () => {
-    applyMarbleSizeToEngines(getCurrentMarbleSizeScale(), { silent: true });
+    try {
+      runApplyStageValuesAction({
+        trackUndo: false,
+        liveReason: '스테이지 실시간 반영',
+        silentStatus: true,
+      });
+    } catch (error) {
+      setStatus(String(error && error.message ? error.message : error), 'error');
+    }
   });
   bindEvent(elements.marbleSizeInput, 'change', () => {
-    applyMarbleSizeToEngines(getCurrentMarbleSizeScale(), { silent: true });
+    scheduleAutoStageApply('스테이지 자동 반영');
   });
 
   bindEvent(elements.applyObjectButton, 'click', () => {
