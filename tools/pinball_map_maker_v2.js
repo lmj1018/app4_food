@@ -357,9 +357,29 @@ function getMagicWizardRenderMirror(obj, dirDegValue = null) {
       ? toFinite(obj && obj.dirDeg, toFinite(obj && obj.rotation, 0))
       : toFinite(dirDegValue, 0),
   );
-  const autoMirror = isDirectionFacingLeftDeg(dirDeg);
-  const manualFlip = !!(obj && obj.mirror === true);
-  return manualFlip ? !autoMirror : autoMirror;
+  // Wizard source image faces left; mirror only when shooting to right half-plane.
+  return !isDirectionFacingLeftDeg(dirDeg);
+}
+
+function getMagicWizardTravelDistance(obj, fallback = 7.4) {
+  const base = Math.max(
+    0.2,
+    toFinite(
+      obj && obj.fireballDistance,
+      toFinite(obj && obj.hitDistance, toFinite(obj && obj.fireballSpeed, fallback)),
+    ),
+  );
+  return round2(clamp(base, 0.2, 24));
+}
+
+function setMagicWizardTravelDistance(obj, distance) {
+  if (!obj || String(obj.type || '') !== 'magic_wizard') {
+    return 0;
+  }
+  const safe = round2(clamp(toFinite(distance, getMagicWizardTravelDistance(obj, 7.4)), 0.2, 24));
+  obj.fireballDistance = safe;
+  obj.hitDistance = safe;
+  return safe;
 }
 
 function snapAngleDeg(valueDeg, stepDeg = 45) {
@@ -929,9 +949,14 @@ function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
         obj.height = Math.max(0.08, toFinite(obj.height, 0.8));
         obj.dirDeg = round1(normalizeDeg(toFinite(obj.dirDeg, toFinite(obj.rotation, 0))));
         obj.rotation = obj.dirDeg;
-        obj.mirror = obj.mirror === true;
+        obj.mirror = false;
         obj.fireIntervalMs = Math.max(120, Math.floor(toFinite(obj.fireIntervalMs, toFinite(obj.intervalMs, 900))));
-        obj.fireballSpeed = Math.max(0.2, toFinite(obj.fireballSpeed, toFinite(obj.hitDistance, 7.4)));
+        obj.fireballSpeed = Math.max(0.2, toFinite(obj.fireballSpeed, 7.4));
+        obj.fireballDistance = Math.max(0.2, toFinite(
+          obj.fireballDistance,
+          toFinite(obj.hitDistance, obj.fireballSpeed),
+        ));
+        obj.hitDistance = obj.fireballDistance;
         obj.fireballRadius = Math.max(0.05, toFinite(obj.fireballRadius, toFinite(obj.radius, 0.2)));
         obj.force = Math.max(0.1, toFinite(obj.force, 2.8));
         obj.imageSrc = MAGIC_WIZARD_IMAGE_DEFAULT_SRC;
@@ -2417,6 +2442,7 @@ function createObjectByTool(tool, x, y) {
       mirror: false,
       fireIntervalMs: 900,
       fireballSpeed: 7.4,
+      fireballDistance: 7.4,
       fireballRadius: 0.2,
       force: 2.8,
       imageSrc: MAGIC_WIZARD_IMAGE_DEFAULT_SRC,
@@ -2726,10 +2752,10 @@ function populateObjectEditor() {
         elements.objHitDistanceLabel.textContent = '바람거리';
       }
     } else if (obj.type === 'magic_wizard') {
-      elements.objHitDistanceInput.value = String(round2(toFinite(obj.fireballSpeed, 7.4)));
+      elements.objHitDistanceInput.value = String(getMagicWizardTravelDistance(obj, 7.4));
       elements.objHitDistanceInput.disabled = false;
       if (elements.objHitDistanceLabel) {
-        elements.objHitDistanceLabel.textContent = '화염구 속도';
+        elements.objHitDistanceLabel.textContent = '화염구 도착거리';
       }
     } else if (obj.type === 'burst_bumper') {
       elements.objHitDistanceInput.value = String(Math.max(1, Math.floor(toFinite(obj.hpPerLayer, 1))));
@@ -2886,9 +2912,9 @@ function populateObjectEditor() {
     if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
     if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
     if (elements.objExtra1Input) elements.objExtra1Input.value = String(round2(toFinite(obj.fireballRadius, 0.2)));
-    if (elements.objExtra2Input) elements.objExtra2Input.value = String(obj.mirror === true ? '1' : '0');
-    if (elements.objExtra1Label) elements.objExtra1Label.textContent = '화염구 반경';
-    if (elements.objExtra2Label) elements.objExtra2Label.textContent = '좌우 반전(0/1)';
+    if (elements.objExtra2Input) elements.objExtra2Input.value = '0';
+    if (elements.objExtra1Label) elements.objExtra1Label.textContent = '화염구 크기';
+    if (elements.objExtra2Label) elements.objExtra2Label.textContent = '보조(미사용)';
   } else if (obj.type === 'sticky_pad') {
     const pathB = Array.isArray(obj.pathB) ? obj.pathB : [toFinite(obj.x, 0) + 2.4, toFinite(obj.y, 0)];
     if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
@@ -3341,7 +3367,7 @@ function sharedSyncKeysForType(type) {
     case 'fan':
       return ['color', 'width', 'height', 'dirDeg', 'force', 'triggerRadius', 'hitDistance', 'restitution', 'friction'];
     case 'magic_wizard':
-      return ['color', 'width', 'height', 'dirDeg', 'mirror', 'force', 'fireIntervalMs', 'fireballSpeed', 'fireballRadius', 'imageSrc', 'restitution', 'friction'];
+      return ['color', 'width', 'height', 'dirDeg', 'force', 'fireIntervalMs', 'fireballSpeed', 'fireballDistance', 'fireballRadius', 'imageSrc', 'restitution', 'friction'];
     case 'sticky_pad':
       return ['color', 'width', 'height', 'rotation', 'speed', 'pauseMs', 'stickyTopOnly', 'restitution', 'friction'];
     case 'burst_bumper':
@@ -3713,10 +3739,7 @@ function applyObjectEditorValues() {
       elements.objExtra1Input ? elements.objExtra1Input.value : obj.fireballRadius,
       toFinite(obj.fireballRadius, 0.2),
     )));
-    const rawMirror = elements.objExtra2Input ? String(elements.objExtra2Input.value ?? '').trim() : '';
-    if (rawMirror) {
-      obj.mirror = toFinite(rawMirror, obj.mirror === true ? 1 : 0) >= 1;
-    }
+    obj.mirror = false;
     const rawDir = elements.objDirInput ? String(elements.objDirInput.value ?? '').trim() : '';
     const rawRotation = elements.objRotationInput ? String(elements.objRotationInput.value ?? '').trim() : '';
     const fallbackDir = toFinite(obj.dirDeg, toFinite(obj.rotation, 0));
@@ -3734,9 +3757,16 @@ function applyObjectEditorValues() {
       toFinite(obj.fireIntervalMs, toFinite(obj.intervalMs, 900)),
     )));
     obj.fireballSpeed = round2(Math.max(0.2, toFinite(
-      elements.objHitDistanceInput ? elements.objHitDistanceInput.value : obj.fireballSpeed,
-      toFinite(obj.fireballSpeed, toFinite(obj.hitDistance, 7.4)),
+      obj.fireballSpeed,
+      7.4,
     )));
+    setMagicWizardTravelDistance(
+      obj,
+      toFinite(
+        elements.objHitDistanceInput ? elements.objHitDistanceInput.value : obj.fireballDistance,
+        getMagicWizardTravelDistance(obj, 7.4),
+      ),
+    );
     obj.imageSrc = MAGIC_WIZARD_IMAGE_DEFAULT_SRC;
     finalizeObjectEditorValues(obj);
     return;
@@ -3868,8 +3898,9 @@ function reverseSelectedObjectRotation() {
       continue;
     }
     if (obj.type === 'magic_wizard') {
-      obj.mirror = obj.mirror !== true;
-      lastMessage = `마법사 좌우 반전 완료 (mirror=${obj.mirror ? 1 : 0})`;
+      obj.dirDeg = round1(normalizeDeg(toFinite(obj.dirDeg, toFinite(obj.rotation, 0)) + 180));
+      obj.rotation = obj.dirDeg;
+      lastMessage = `마법사 발사 방향 반전 완료 (dirDeg=${obj.dirDeg})`;
       changedCount += 1;
       continue;
     }
@@ -5126,10 +5157,10 @@ function getHammerDirectionHandleWorld(obj) {
   const dir = (Math.PI / 180) * dirDeg;
   const defaultDistance = isBottomBumper
     ? getBottomBumperDirectionHandleDistance(obj)
-    : (obj.type === 'fan' ? 2.8 : (isMagicWizard ? toFinite(obj.fireballSpeed, 7.4) : 0.95));
+    : (obj.type === 'fan' ? 2.8 : (isMagicWizard ? getMagicWizardTravelDistance(obj, 7.4) : 0.95));
   const distance = isBottomBumper
     ? getBottomBumperDirectionHandleDistance(obj)
-    : Math.max(0.2, toFinite(isMagicWizard ? obj.fireballSpeed : obj.hitDistance, defaultDistance));
+    : Math.max(0.2, toFinite(isMagicWizard ? obj.fireballDistance : obj.hitDistance, defaultDistance));
   return {
     kind: 'hammer_dir',
     x: round1(anchor.x + Math.cos(dir) * distance),
@@ -6527,10 +6558,9 @@ function drawMakerCanvas() {
                 ? getBottomBumperDirectionHandleDistance(directional)
                 : Math.max(
                   0.2,
-                  toFinite(
-                    isMagicWizard ? directional.fireballSpeed : directional.hitDistance,
-                    isFan ? 2.8 : (isMagicWizard ? 7.4 : 1),
-                  ),
+                  isMagicWizard
+                    ? getMagicWizardTravelDistance(directional, 7.4)
+                    : toFinite(directional.hitDistance, isFan ? 2.8 : 1),
                 )
             ),
             y: anchorWorld.y + Math.sin(baseRad) * (
@@ -6538,10 +6568,9 @@ function drawMakerCanvas() {
                 ? getBottomBumperDirectionHandleDistance(directional)
                 : Math.max(
                   0.2,
-                  toFinite(
-                    isMagicWizard ? directional.fireballSpeed : directional.hitDistance,
-                    isFan ? 2.8 : (isMagicWizard ? 7.4 : 1),
-                  ),
+                  isMagicWizard
+                    ? getMagicWizardTravelDistance(directional, 7.4)
+                    : toFinite(directional.hitDistance, isFan ? 2.8 : 1),
                 )
             ),
           });
@@ -7069,6 +7098,7 @@ function createMagicWizardFromDrag(startWorld, endWorld) {
     mirror: false,
     fireIntervalMs: 900,
     fireballSpeed: 7.4,
+    fireballDistance: 7.4,
     fireballRadius: round2(Math.max(0.08, Math.min(0.42, halfSize * 0.22))),
     force: 2.8,
     imageSrc: MAGIC_WIZARD_IMAGE_DEFAULT_SRC,
@@ -7168,10 +7198,15 @@ function setHammerDirectionAndDistance(obj, point, shiftKey = false) {
   if (distance < 0.05) {
     const fallbackDistance = obj.type === 'fan'
       ? 2.8
-      : (isMagicWizard ? toFinite(obj.fireballSpeed, 7.4) : 1.1);
-    distance = Math.max(0.2, toFinite(isMagicWizard ? obj.fireballSpeed : obj.hitDistance, fallbackDistance));
-    dx = distance;
-    dy = 0;
+      : (isMagicWizard ? getMagicWizardTravelDistance(obj, 7.4) : 1.1);
+    const safeDistance = Math.max(0.2, toFinite(isMagicWizard ? obj.fireballDistance : obj.hitDistance, fallbackDistance));
+    const fallbackDirDeg = obj.type === 'fan'
+      ? toFinite(obj.dirDeg, 0)
+      : toFinite(obj.dirDeg, toFinite(obj.rotation, isMagicWizard ? 0 : 90));
+    const fallbackRad = (Math.PI / 180) * normalizeDeg(fallbackDirDeg);
+    distance = safeDistance;
+    dx = Math.cos(fallbackRad) * distance;
+    dy = Math.sin(fallbackRad) * distance;
   }
   let angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
   if (shiftKey) {
@@ -7184,7 +7219,7 @@ function setHammerDirectionAndDistance(obj, point, shiftKey = false) {
   obj.rotation = obj.dirDeg;
   const resolvedDistance = round1(clamp(Math.hypot(dx, dy), 0.2, 24));
   if (isMagicWizard) {
-    obj.fireballSpeed = resolvedDistance;
+    setMagicWizardTravelDistance(obj, resolvedDistance);
   } else {
     obj.hitDistance = resolvedDistance;
   }
@@ -7520,11 +7555,12 @@ function applyMultiResizeFromPrimary(primaryIndex, dragType, beforeValue, afterV
       const fallbackDir = obj.type === 'fan' ? 0 : (isMagicWizard ? 0 : 90);
       const fallbackDistance = obj.type === 'fan'
         ? 2.8
-        : (isMagicWizard ? toFinite(obj.fireballSpeed, 7.4) : 0.95);
+        : (isMagicWizard ? getMagicWizardTravelDistance(obj, 7.4) : 0.95);
       obj.dirDeg = round1(normalizeDeg(toFinite(obj.dirDeg, fallbackDir) + dirDelta));
       obj.rotation = obj.dirDeg;
       if (isMagicWizard) {
-        obj.fireballSpeed = round1(clamp(toFinite(obj.fireballSpeed, fallbackDistance) * distanceScale, 0.2, 24));
+        const nextDistance = round1(clamp(getMagicWizardTravelDistance(obj, fallbackDistance) * distanceScale, 0.2, 24));
+        setMagicWizardTravelDistance(obj, nextDistance);
       } else {
         obj.hitDistance = round1(clamp(toFinite(obj.hitDistance, fallbackDistance) * distanceScale, 0.2, 24));
       }
@@ -7775,11 +7811,11 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
       ? 2.8
       : (isBottomBumper
         ? getBottomBumperDirectionHandleDistance(obj)
-        : (isMagicWizard ? toFinite(obj.fireballSpeed, 7.4) : 0.95));
+        : (isMagicWizard ? getMagicWizardTravelDistance(obj, 7.4) : 0.95));
     const beforeDir = toFinite(obj.dirDeg, fallbackDir);
     const beforeDistance = isBottomBumper
       ? getBottomBumperDirectionHandleDistance(obj)
-      : Math.max(0.2, toFinite(isMagicWizard ? obj.fireballSpeed : obj.hitDistance, fallbackDistance));
+      : Math.max(0.2, toFinite(isMagicWizard ? obj.fireballDistance : obj.hitDistance, fallbackDistance));
     const updated = setHammerDirectionAndDistance(obj, point, !!(event && event.shiftKey));
     if (!updated) {
       return false;
@@ -7787,7 +7823,7 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
     const dirDelta = normalizeSignedDeg(toFinite(obj.dirDeg, beforeDir) - beforeDir);
     const afterDistance = isBottomBumper
       ? getBottomBumperDirectionHandleDistance(obj)
-      : Math.max(0.2, toFinite(isMagicWizard ? obj.fireballSpeed : obj.hitDistance, fallbackDistance));
+      : Math.max(0.2, toFinite(isMagicWizard ? obj.fireballDistance : obj.hitDistance, fallbackDistance));
     const distanceScale = Math.max(0.01, afterDistance / Math.max(0.01, beforeDistance));
     applyMultiResizeFromPrimary(index, 'hammer_dir', beforeDistance, afterDistance, {
       dirDelta,
@@ -7984,7 +8020,7 @@ function finishDrag() {
         } else if (tool === 'sticky_pad') {
           createdHint = '점착패드 생성 완료: 드래그/클릭으로 이동 목표점(B) 지정';
         } else if (tool === 'magic_wizard') {
-          createdHint = '마법사 생성 완료: 드래그/클릭으로 화염 발사 방향 설정';
+          createdHint = '마법사 생성 완료: 드래그/클릭으로 화염 발사 방향·도착거리 설정';
         }
         updateMakerHint(createdHint);
       } else {
@@ -8037,7 +8073,7 @@ function finishDrag() {
         updateMakerHint('점착패드 A↔B 이동 경로 설정 완료');
       } else if (type === 'magic_wizard') {
         queueObjectLiveDraftApply('마법사 발사 방향 설정');
-        updateMakerHint('마법사 화염 발사 방향 설정 완료');
+        updateMakerHint('마법사 화염 발사 방향·도착거리 설정 완료');
       } else {
         queueObjectLiveDraftApply('해머 타격 방향/거리 설정');
         updateMakerHint('해머 타격 방향 설정 완료');
@@ -8149,7 +8185,7 @@ function handleMakerCanvasPointerDown(event) {
       } else if (directionalType === 'sticky_pad') {
         directionalHint = '점착패드 이동 목표점 설정중';
       } else if (directionalType === 'magic_wizard') {
-        directionalHint = '마법사 화염 발사 방향 설정중';
+        directionalHint = '마법사 화염 발사 방향·도착거리 설정중';
       }
       updateMakerHint(directionalHint);
       drawMakerCanvas();
@@ -8502,7 +8538,7 @@ function addObjectAt(tool, x, y, options = {}) {
       } else if (tool === 'sticky_pad') {
         createHint = '점착패드 생성 완료: 드래그/클릭으로 이동 목표점(B) 지정';
       } else if (tool === 'magic_wizard') {
-        createHint = '마법사 생성 완료: 드래그/클릭으로 화염 발사 방향 설정';
+        createHint = '마법사 생성 완료: 드래그/클릭으로 화염 발사 방향·도착거리 설정';
       }
       updateMakerHint(createHint);
     } else {
@@ -9447,8 +9483,8 @@ function setupEvents() {
       updateMakerHint('물리 공 모드: 드래그로 반지름 생성 (동적 물리)');
     } else if (tool === 'magic_wizard') {
       updateMakerHint(editorState.pendingHammerOid
-        ? '마법사 발사 방향 설정 대기: 드래그/클릭으로 화염 방향 지정'
-        : '마법사 화염 모드: 드래그로 비율 고정 크기 생성 후, 점선 단계에서 발사 방향 지정');
+        ? '마법사 발사 방향 설정 대기: 드래그/클릭으로 화염 방향·도착거리 지정'
+        : '마법사 화염 모드: 드래그로 비율 고정 크기 생성 후, 점선 단계에서 발사 방향·도착거리 지정');
     } else if (tool === 'goal_marker_image') {
       updateMakerHint('골라인 이미지 모드: 드래그로 크기 지정 생성 (배경 마커)');
     } else if (tool === 'rotor') {

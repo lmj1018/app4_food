@@ -1257,7 +1257,7 @@ function compileObject(rawObject, entityId) {
           width: Math.max(0.08, toFiniteNumber(rawObject.width, 0.72)),
           height: Math.max(0.08, toFiniteNumber(rawObject.height, 0.9)),
           dirDeg: toFiniteNumber(rawObject.dirDeg, toFiniteNumber(rawObject.rotation, 0)),
-          mirror: toBoolean(rawObject.mirror, false),
+          mirror: false,
           force: Math.max(0.1, toFiniteNumber(rawObject.force, 2.8)),
           fireIntervalMs: Math.max(
             120,
@@ -1267,6 +1267,17 @@ function compileObject(rawObject, entityId) {
             0.2,
             toFiniteNumber(rawObject.fireballSpeed, toFiniteNumber(rawObject.hitDistance, 7.4)),
           ),
+          fireballDistance: (() => {
+            const direct = toFiniteNumber(rawObject.fireballDistance, NaN);
+            if (Number.isFinite(direct) && direct > 0) {
+              return Math.max(0.2, direct);
+            }
+            const legacyDistance = toFiniteNumber(rawObject.hitDistance, NaN);
+            if (Number.isFinite(legacyDistance) && legacyDistance > 0) {
+              return Math.max(0.2, legacyDistance);
+            }
+            return NaN;
+          })(),
           fireballRadius: Math.max(0.05, toFiniteNumber(rawObject.fireballRadius, toFiniteNumber(rawObject.radius, 0.2))),
           fireballLifeMs: Math.max(260, toFiniteNumber(rawObject.fireballLifeMs, 900)),
           imageSrc: normalizeMagicWizardImageSrc(rawObject.imageSrc),
@@ -3572,9 +3583,8 @@ function createMagicWizardBehavior(def, env) {
 
   function getVisualMirrorByDirection() {
     const dirDeg = normalizeDegLocal(def.dirDeg);
-    const autoMirror = dirDeg > 90 && dirDeg < 270;
-    const manualFlip = def.mirror === true;
-    return manualFlip ? !autoMirror : autoMirror;
+    // Wizard source image faces left; flip only for rightward directions.
+    return !(dirDeg > 90 && dirDeg < 270);
   }
 
   function ensureWizardVisualEffect() {
@@ -3750,9 +3760,13 @@ function createMagicWizardBehavior(def, env) {
     const originX = toFiniteNumber(def.x, 0);
     const originY = toFiniteNumber(def.y, 0);
     const muzzleDistance = Math.max(0.12, Math.max(width, height) * 0.62);
-    const speed = Math.max(0.2, toFiniteNumber(def.fireballSpeed, 7.4));
+    const legacySpeed = Math.max(0.2, toFiniteNumber(def.fireballSpeed, 7.4));
     const radius = Math.max(0.05, toFiniteNumber(def.fireballRadius, 0.2));
     const lifeMs = Math.max(260, toFiniteNumber(def.fireballLifeMs, 900));
+    const travelDistance = toFiniteNumber(def.fireballDistance, NaN);
+    const speed = Number.isFinite(travelDistance) && travelDistance > 0
+      ? Math.max(0.2, travelDistance / Math.max(0.05, lifeMs / 1000))
+      : legacySpeed;
     const startX = originX + Math.cos(dirRad) * muzzleDistance;
     const startY = originY + Math.sin(dirRad) * muzzleDistance;
     fireballs.push({
