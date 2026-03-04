@@ -558,6 +558,7 @@ function buildDefaultMapJson(mapId = 'v2_custom_map') {
     stage: {
       goalY: 210,
       zoomY: 200,
+      topWallY: 2,
       leftWallX: 2.5,
       rightWallX: 21,
       disableSkills: false,
@@ -660,6 +661,7 @@ function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
     source.stage = {};
   }
   source.stage.goalY = Math.max(20, toFinite(source.stage.goalY, 210));
+  source.stage.topWallY = round1(clamp(toFinite(source.stage.topWallY, 2), 0, Math.max(2, source.stage.goalY - 8)));
   source.stage.zoomY = Math.max(10, toFinite(source.stage.zoomY, source.stage.goalY - 4));
   const spawn = source.stage.spawn && typeof source.stage.spawn === 'object' && !Array.isArray(source.stage.spawn)
     ? source.stage.spawn
@@ -1032,7 +1034,7 @@ function upsertStageBoundaryWall(oid, x) {
     };
     objects.push(wall);
   }
-  const topY = 2;
+  const topY = round1(clamp(toFinite(mapJson.stage && mapJson.stage.topWallY, 2), 0, Math.max(2, toFinite(mapJson.stage && mapJson.stage.goalY, 210) - 8)));
   const bottomY = round1(Math.max(30, toFinite(mapJson.stage && mapJson.stage.goalY, 210) + 2));
   wall.points = [
     [round1(x), topY],
@@ -4270,7 +4272,7 @@ function getSpawnPointWorld() {
 function setSpawnPointWorld(point) {
   const mapJson = getMutableMap();
   if (!mapJson.stage || typeof mapJson.stage !== 'object') {
-    mapJson.stage = { goalY: 210, zoomY: 200, spawn: { x: 10.25, y: 0, columns: 10, spacingX: 0.6, visibleRows: 5 } };
+    mapJson.stage = { goalY: 210, zoomY: 200, topWallY: 2, spawn: { x: 10.25, y: 0, columns: 10, spacingX: 0.6, visibleRows: 5 } };
   }
   const spawn = mapJson.stage.spawn && typeof mapJson.stage.spawn === 'object'
     ? mapJson.stage.spawn
@@ -4287,30 +4289,32 @@ function getGoalYWorld() {
   return round1(Math.max(20, toFinite(mapJson.stage.goalY, 210)));
 }
 
+function getTopWallYWorld() {
+  const mapJson = getMutableMap();
+  const goalY = Math.max(20, toFinite(mapJson.stage && mapJson.stage.goalY, 210));
+  return round1(clamp(toFinite(mapJson.stage && mapJson.stage.topWallY, 2), 0, Math.max(2, goalY - 8)));
+}
+
+function setTopWallYWorld(nextTopWallY) {
+  const mapJson = getMutableMap();
+  const goalY = Math.max(20, toFinite(mapJson.stage && mapJson.stage.goalY, 210));
+  mapJson.stage.topWallY = round1(clamp(toFinite(nextTopWallY, getTopWallYWorld()), 0, Math.max(2, goalY - 8)));
+  applyStageWallBoundsToMap();
+}
+
 function setGoalYWorld(nextGoalY) {
   const mapJson = getMutableMap();
   mapJson.stage.goalY = round1(clamp(toFinite(nextGoalY, mapJson.stage.goalY), 20, 2000));
+  mapJson.stage.topWallY = round1(clamp(
+    toFinite(mapJson.stage.topWallY, 2),
+    0,
+    Math.max(2, mapJson.stage.goalY - 8),
+  ));
   mapJson.stage.zoomY = round1(clamp(toFinite(mapJson.stage.zoomY, mapJson.stage.goalY - 4), 10, 2000));
   if (Number.isFinite(toFinite(mapJson.stage.leftWallX, NaN)) && Number.isFinite(toFinite(mapJson.stage.rightWallX, NaN))) {
     upsertStageBoundaryWall('wall-left', toFinite(mapJson.stage.leftWallX, 2.5));
     upsertStageBoundaryWall('wall-right', toFinite(mapJson.stage.rightWallX, 21));
   }
-}
-
-function setStageWallBoundsWorld(nextLeftX, nextRightX) {
-  const mapJson = getMutableMap();
-  const inferred = inferStageWallBounds(mapJson);
-  const baseLeft = toFinite(mapJson.stage && mapJson.stage.leftWallX, inferred.leftX);
-  const baseRight = toFinite(mapJson.stage && mapJson.stage.rightWallX, inferred.rightX);
-  let safeLeft = round1(clamp(toFinite(nextLeftX, baseLeft), 0.1, WORLD_WIDTH - 2.1));
-  let safeRight = round1(clamp(toFinite(nextRightX, baseRight), safeLeft + 2, WORLD_WIDTH - 0.1));
-  if (safeRight <= safeLeft + 2) {
-    safeRight = round1(clamp(safeLeft + 2, safeLeft + 2, WORLD_WIDTH - 0.1));
-    safeLeft = round1(clamp(safeRight - 2, 0.1, safeRight - 2));
-  }
-  mapJson.stage.leftWallX = safeLeft;
-  mapJson.stage.rightWallX = safeRight;
-  applyStageWallBoundsToMap();
 }
 
 function getObjectAnchorWorld(obj) {
@@ -4558,13 +4562,13 @@ function isDragHandleActive(kind, options = {}) {
     return drag.type === 'goal_move';
   }
   if (kind === 'stage_wall_left') {
-    return drag.type === 'stage_wall_side' && drag.side === 'left';
+    return drag.type === 'stage_top_move' && drag.handleKind === 'stage_wall_left';
   }
   if (kind === 'stage_wall_right') {
-    return drag.type === 'stage_wall_side' && drag.side === 'right';
+    return drag.type === 'stage_top_move' && drag.handleKind === 'stage_wall_right';
   }
   if (kind === 'stage_wall_span') {
-    return drag.type === 'stage_wall_span';
+    return drag.type === 'stage_top_move' && drag.handleKind === 'stage_wall_span';
   }
   const selectedIndex = Math.floor(toFinite(editorState.selectedIndex, -1));
   const dragIndex = Math.floor(toFinite(drag.index, selectedIndex));
@@ -4700,7 +4704,7 @@ function findStageHandle(point, layout) {
   }
   const thresholdWorld = Math.max(0.1, 10 / Math.max(0.001, layout.scale));
   const stageBounds = inferStageWallBounds(getMutableMap());
-  const topY = 2;
+  const topY = getTopWallYWorld();
   const leftTop = { x: stageBounds.leftX, y: topY };
   const rightTop = { x: stageBounds.rightX, y: topY };
   const leftDist = Math.hypot(point.x - leftTop.x, point.y - leftTop.y);
@@ -4713,12 +4717,8 @@ function findStageHandle(point, layout) {
   }
   const minX = Math.min(leftTop.x, rightTop.x);
   const maxX = Math.max(leftTop.x, rightTop.x);
-  const centerX = (leftTop.x + rightTop.x) / 2;
   if (point.x >= minX && point.x <= maxX && Math.abs(point.y - topY) <= thresholdWorld * 0.9) {
-    return {
-      kind: 'stage_wall_span',
-      side: point.x <= centerX ? 'left' : 'right',
-    };
+    return { kind: 'stage_wall_span' };
   }
   const spawn = getSpawnPointWorld();
   const spawnDist = Math.hypot(point.x - spawn.x, point.y - spawn.y);
@@ -5525,7 +5525,7 @@ function drawMakerCanvas() {
   const leftGuideBottom = worldToCanvas(layout, stageBounds.leftX, layout.stageGoalY);
   const rightGuide = worldToCanvas(layout, stageBounds.rightX, 0);
   const rightGuideBottom = worldToCanvas(layout, stageBounds.rightX, layout.stageGoalY);
-  const topGuideY = 2;
+  const topGuideY = getTopWallYWorld();
   const topLeftGuide = worldToCanvas(layout, stageBounds.leftX, topGuideY);
   const topRightGuide = worldToCanvas(layout, stageBounds.rightX, topGuideY);
   ctx.strokeStyle = 'rgba(255, 124, 200, 0.98)';
@@ -6100,23 +6100,17 @@ function beginStageHandleDrag(handle, options = {}) {
     return false;
   }
   if (handle.kind === 'stage_wall_left' || handle.kind === 'stage_wall_right') {
-    const bounds = inferStageWallBounds(getMutableMap());
     editorState.dragState = {
-      type: 'stage_wall_side',
-      side: handle.kind === 'stage_wall_left' ? 'left' : 'right',
-      startLeftX: bounds.leftX,
-      startRightX: bounds.rightX,
+      type: 'stage_top_move',
+      handleKind: handle.kind,
       moved: false,
     };
     return true;
   }
   if (handle.kind === 'stage_wall_span') {
-    const bounds = inferStageWallBounds(getMutableMap());
     editorState.dragState = {
-      type: 'stage_wall_span',
-      startX: toFinite(options.startWorldX, (bounds.leftX + bounds.rightX) / 2),
-      startLeftX: bounds.leftX,
-      startRightX: bounds.rightX,
+      type: 'stage_top_move',
+      handleKind: 'stage_wall_span',
       moved: false,
     };
     return true;
@@ -6696,25 +6690,8 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
     syncStageInputsFromMap();
     return true;
   }
-  if (drag.type === 'stage_wall_side') {
-    const bounds = inferStageWallBounds(getMutableMap());
-    const side = drag.side === 'right' ? 'right' : 'left';
-    if (side === 'left') {
-      setStageWallBoundsWorld(point.x, toFinite(drag.startRightX, bounds.rightX));
-    } else {
-      setStageWallBoundsWorld(toFinite(drag.startLeftX, bounds.leftX), point.x);
-    }
-    drag.moved = true;
-    syncStageInputsFromMap();
-    return true;
-  }
-  if (drag.type === 'stage_wall_span') {
-    const bounds = inferStageWallBounds(getMutableMap());
-    const startLeft = toFinite(drag.startLeftX, bounds.leftX);
-    const startRight = toFinite(drag.startRightX, bounds.rightX);
-    const startX = toFinite(drag.startX, (startLeft + startRight) / 2);
-    const delta = toFinite(point.x, startX) - startX;
-    setStageWallBoundsWorld(startLeft - delta, startRight + delta);
+  if (drag.type === 'stage_top_move') {
+    setTopWallYWorld(point.y);
     drag.moved = true;
     syncStageInputsFromMap();
     return true;
@@ -7039,8 +7016,8 @@ function finishDrag() {
       queueLiveDraftApply('골라인 이동');
     } else if (dragType === 'spawn_move') {
       queueLiveDraftApply('공 시작점 이동');
-    } else if (dragType === 'stage_wall_side' || dragType === 'stage_wall_span') {
-      queueLiveDraftApply('상단 경계 폭 조절');
+    } else if (dragType === 'stage_top_move') {
+      queueLiveDraftApply('상단 하늘색선 높이 조절');
     } else if (dragType === 'hammer_target') {
       const type = draggedObject && draggedObject.type;
       if (type === 'fan') {
@@ -7093,25 +7070,24 @@ function handleMakerCanvasPointerDown(event) {
     if (stageHandle.kind === 'goal') {
       undoLabel = '골라인 이동 시작';
     } else if (stageHandle.kind === 'stage_wall_left' || stageHandle.kind === 'stage_wall_right') {
-      undoLabel = '상단 경계 폭 조절 시작';
+      undoLabel = '상단 하늘색선 높이 조절 시작';
     } else if (stageHandle.kind === 'stage_wall_span') {
-      undoLabel = '상단 경계선 확장 시작';
+      undoLabel = '상단 하늘색선 높이 조절 시작';
     }
     rememberUndoState(undoLabel);
     beginStageHandleDrag(stageHandle, {
       startClientY: event.clientY,
       startScale: layout ? layout.scale : null,
       startDpr: layout ? layout.dpr : null,
-      startWorldX: point.x,
     });
     editorState.suppressClickOnce = true;
     let hint = '공 시작점 드래그 이동중';
     if (stageHandle.kind === 'goal') {
       hint = '골라인 드래그 이동중';
     } else if (stageHandle.kind === 'stage_wall_left' || stageHandle.kind === 'stage_wall_right') {
-      hint = '상단 경계 끝점 드래그로 맵 폭 조절중';
+      hint = '상단 하늘색선 드래그로 상하 위치 조절중';
     } else if (stageHandle.kind === 'stage_wall_span') {
-      hint = '상단 하늘색선 드래그로 맵 폭 확장/축소중';
+      hint = '상단 하늘색선 드래그로 상하 위치 조절중';
     }
     updateMakerHint(hint);
     drawMakerCanvas();
