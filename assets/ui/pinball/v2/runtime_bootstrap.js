@@ -240,21 +240,6 @@ function resolveConfiguredMarbleRadiusFromMap(mapJson) {
     ? stage.spawn
     : null;
 
-  const directCandidates = [
-    stage && stage.marbleRadius,
-    stage && stage.ballRadius,
-    stage && stage.ballSize,
-    spawn && spawn.marbleRadius,
-    spawn && spawn.ballRadius,
-    spawn && spawn.ballSize,
-  ];
-  for (let index = 0; index < directCandidates.length; index += 1) {
-    const value = toFiniteNumber(directCandidates[index], NaN);
-    if (Number.isFinite(value) && value > 0) {
-      return normalizeMarbleRadius(value);
-    }
-  }
-
   const objects = Array.isArray(safeMap && safeMap.objects) ? safeMap.objects : [];
   let firstPhysicsBallRadius = NaN;
   for (let index = 0; index < objects.length; index += 1) {
@@ -281,6 +266,31 @@ function resolveConfiguredMarbleRadiusFromMap(mapJson) {
   }
   if (Number.isFinite(firstPhysicsBallRadius)) {
     return firstPhysicsBallRadius;
+  }
+
+  const directRadiusCandidates = [
+    stage && stage.marbleRadius,
+    stage && stage.ballRadius,
+    spawn && spawn.marbleRadius,
+    spawn && spawn.ballRadius,
+  ];
+  for (let index = 0; index < directRadiusCandidates.length; index += 1) {
+    const value = toFiniteNumber(directRadiusCandidates[index], NaN);
+    if (Number.isFinite(value) && value > 0) {
+      return normalizeMarbleRadius(value);
+    }
+  }
+
+  // Some map-maker exports store diameter as ballSize; convert to radius as fallback only.
+  const diameterCandidates = [
+    stage && stage.ballSize,
+    spawn && spawn.ballSize,
+  ];
+  for (let index = 0; index < diameterCandidates.length; index += 1) {
+    const diameter = toFiniteNumber(diameterCandidates[index], NaN);
+    if (Number.isFinite(diameter) && diameter > 0) {
+      return normalizeMarbleRadius(diameter * 0.5);
+    }
   }
   return DEFAULT_MARBLE_RADIUS;
 }
