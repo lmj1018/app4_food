@@ -4240,6 +4240,217 @@ function buildCorridorSides(pointsInput, gap) {
   return { left, right };
 }
 
+function getRectLikeGeometryWorld(obj) {
+  if (!obj || typeof obj !== 'object') {
+    return null;
+  }
+  const type = String(obj.type || '');
+  let halfW = NaN;
+  let halfH = NaN;
+  if (type === 'rotor') {
+    halfW = Math.max(0.08, toFinite(obj.width, 3.2));
+    halfH = Math.max(0.05, toFinite(obj.height, 0.12));
+  } else if (canResizeByBoxHandle(obj)) {
+    halfW = Math.max(0.08, toFinite(obj.width, 1.2));
+    halfH = Math.max(0.05, toFinite(obj.height, 0.2));
+  } else {
+    return null;
+  }
+  let angleDeg = normalizeDeg(toFinite(obj.rotation, 0));
+  if (type === 'hammer' || type === 'bottom_bumper' || type === 'fan') {
+    angleDeg = normalizeDeg(toFinite(obj.dirDeg, angleDeg));
+  }
+  const rad = (Math.PI / 180) * angleDeg;
+  return {
+    cx: toFinite(obj.x, 0),
+    cy: toFinite(obj.y, 0),
+    halfW,
+    halfH,
+    axisX: { x: Math.cos(rad), y: Math.sin(rad) },
+    axisY: { x: -Math.sin(rad), y: Math.cos(rad) },
+  };
+}
+
+function worldToRectLocal(geom, x, y) {
+  const dx = x - geom.cx;
+  const dy = y - geom.cy;
+  return {
+    x: dx * geom.axisX.x + dy * geom.axisX.y,
+    y: dx * geom.axisY.x + dy * geom.axisY.y,
+  };
+}
+
+function distanceToRectLikeWorld(geom, x, y) {
+  if (!geom) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const local = worldToRectLocal(geom, x, y);
+  const dx = Math.abs(local.x) - geom.halfW;
+  const dy = Math.abs(local.y) - geom.halfH;
+  const outsideX = Math.max(0, dx);
+  const outsideY = Math.max(0, dy);
+  if (outsideX > 0 || outsideY > 0) {
+    return Math.hypot(outsideX, outsideY);
+  }
+  return 0;
+}
+
+function getRectLikeCornersWorld(geom) {
+  if (!geom) {
+    return [];
+  }
+  const signs = [
+    [-1, -1],
+    [1, -1],
+    [1, 1],
+    [-1, 1],
+  ];
+  const corners = [];
+  for (let index = 0; index < signs.length; index += 1) {
+    const sx = signs[index][0];
+    const sy = signs[index][1];
+    corners.push({
+      x: geom.cx + geom.axisX.x * geom.halfW * sx + geom.axisY.x * geom.halfH * sy,
+      y: geom.cy + geom.axisX.y * geom.halfW * sx + geom.axisY.y * geom.halfH * sy,
+    });
+  }
+  return corners;
+}
+
+function buildSelectionRectWorld(a, b) {
+  if (!a || !b) {
+    return null;
+  }
+  return {
+    minX: Math.min(toFinite(a.x, 0), toFinite(b.x, 0)),
+    maxX: Math.max(toFinite(a.x, 0), toFinite(b.x, 0)),
+    minY: Math.min(toFinite(a.y, 0), toFinite(b.y, 0)),
+    maxY: Math.max(toFinite(a.y, 0), toFinite(b.y, 0)),
+  };
+}
+
+function pointInRectWorld(x, y, rect) {
+  if (!rect) {
+    return false;
+  }
+  return x >= rect.minX && x <= rect.maxX && y >= rect.minY && y <= rect.maxY;
+}
+
+function onSegmentWorld(ax, ay, bx, by, px, py) {
+  const minX = Math.min(ax, bx) - 1e-9;
+  const maxX = Math.max(ax, bx) + 1e-9;
+  const minY = Math.min(ay, by) - 1e-9;
+  const maxY = Math.max(ay, by) + 1e-9;
+  return px >= minX && px <= maxX && py >= minY && py <= maxY;
+}
+
+function orientationWorld(ax, ay, bx, by, cx, cy) {
+  const value = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+  if (Math.abs(value) <= 1e-9) {
+    return 0;
+  }
+  return value > 0 ? 1 : -1;
+}
+
+function segmentsIntersectWorld(ax, ay, bx, by, cx, cy, dx, dy) {
+  const o1 = orientationWorld(ax, ay, bx, by, cx, cy);
+  const o2 = orientationWorld(ax, ay, bx, by, dx, dy);
+  const o3 = orientationWorld(cx, cy, dx, dy, ax, ay);
+  const o4 = orientationWorld(cx, cy, dx, dy, bx, by);
+  if (o1 !== o2 && o3 !== o4) {
+    return true;
+  }
+  if (o1 === 0 && onSegmentWorld(ax, ay, bx, by, cx, cy)) return true;
+  if (o2 === 0 && onSegmentWorld(ax, ay, bx, by, dx, dy)) return true;
+  if (o3 === 0 && onSegmentWorld(cx, cy, dx, dy, ax, ay)) return true;
+  if (o4 === 0 && onSegmentWorld(cx, cy, dx, dy, bx, by)) return true;
+  return false;
+}
+
+function segmentIntersectsRectWorld(ax, ay, bx, by, rect) {
+  if (!rect) {
+    return false;
+  }
+  if (pointInRectWorld(ax, ay, rect) || pointInRectWorld(bx, by, rect)) {
+    return true;
+  }
+  const { minX, minY, maxX, maxY } = rect;
+  return segmentsIntersectWorld(ax, ay, bx, by, minX, minY, maxX, minY)
+    || segmentsIntersectWorld(ax, ay, bx, by, maxX, minY, maxX, maxY)
+    || segmentsIntersectWorld(ax, ay, bx, by, maxX, maxY, minX, maxY)
+    || segmentsIntersectWorld(ax, ay, bx, by, minX, maxY, minX, minY);
+}
+
+function objectIntersectsSelectionRect(obj, rect) {
+  if (!obj || typeof obj !== 'object' || !rect) {
+    return false;
+  }
+  if (isPolylineObject(obj)) {
+    const points = Array.isArray(obj.points) ? obj.points : [];
+    if (points.length === 0) {
+      return false;
+    }
+    for (let index = 0; index < points.length; index += 1) {
+      const px = toFinite(points[index] && points[index][0], NaN);
+      const py = toFinite(points[index] && points[index][1], NaN);
+      if (Number.isFinite(px) && Number.isFinite(py) && pointInRectWorld(px, py, rect)) {
+        return true;
+      }
+    }
+    for (let index = 1; index < points.length; index += 1) {
+      const p0 = points[index - 1];
+      const p1 = points[index];
+      if (segmentIntersectsRectWorld(
+        toFinite(p0 && p0[0], 0),
+        toFinite(p0 && p0[1], 0),
+        toFinite(p1 && p1[0], 0),
+        toFinite(p1 && p1[1], 0),
+        rect,
+      )) {
+        return true;
+      }
+    }
+    return false;
+  }
+  if (canResizeByCircleHandle(obj)) {
+    const cx = toFinite(obj.x, 0);
+    const cy = toFinite(obj.y, 0);
+    const radius = Math.max(0.08, toFinite(obj.radius, 0.6));
+    const nearestX = clamp(cx, rect.minX, rect.maxX);
+    const nearestY = clamp(cy, rect.minY, rect.maxY);
+    return Math.hypot(cx - nearestX, cy - nearestY) <= radius;
+  }
+  const rectLike = getRectLikeGeometryWorld(obj);
+  if (rectLike) {
+    const corners = getRectLikeCornersWorld(rectLike);
+    for (let index = 0; index < corners.length; index += 1) {
+      if (pointInRectWorld(corners[index].x, corners[index].y, rect)) {
+        return true;
+      }
+    }
+    const rectCorners = [
+      { x: rect.minX, y: rect.minY },
+      { x: rect.maxX, y: rect.minY },
+      { x: rect.maxX, y: rect.maxY },
+      { x: rect.minX, y: rect.maxY },
+    ];
+    for (let index = 0; index < rectCorners.length; index += 1) {
+      if (distanceToRectLikeWorld(rectLike, rectCorners[index].x, rectCorners[index].y) <= 0.0001) {
+        return true;
+      }
+    }
+    for (let index = 0; index < corners.length; index += 1) {
+      const p0 = corners[index];
+      const p1 = corners[(index + 1) % corners.length];
+      if (segmentIntersectsRectWorld(p0.x, p0.y, p1.x, p1.y, rect)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  return pointInRectWorld(toFinite(obj.x, 0), toFinite(obj.y, 0), rect);
+}
+
 function objectDistanceWorld(obj, x, y) {
   if (!obj || typeof obj !== 'object') {
     return Number.POSITIVE_INFINITY;
@@ -4267,10 +4478,20 @@ function objectDistanceWorld(obj, x, y) {
     }
     return best;
   }
+  if (canResizeByCircleHandle(obj)) {
+    const cx = toFinite(obj.x, 0);
+    const cy = toFinite(obj.y, 0);
+    const radius = Math.max(0.08, toFinite(obj.radius, 0.6));
+    return Math.max(0, Math.hypot(x - cx, y - cy) - radius);
+  }
+  const rectLike = getRectLikeGeometryWorld(obj);
+  if (rectLike) {
+    return distanceToRectLikeWorld(rectLike, x, y);
+  }
   return Math.hypot(x - toFinite(obj.x, 0), y - toFinite(obj.y, 0));
 }
 
-function findNearestObjectIndex(x, y) {
+function findNearestObjectIndex(x, y, maxDistance = 0.9) {
   const objects = getObjects();
   let bestIndex = -1;
   let bestDistance = Number.POSITIVE_INFINITY;
@@ -4281,7 +4502,7 @@ function findNearestObjectIndex(x, y) {
       bestIndex = index;
     }
   }
-  if (bestDistance > 0.9) {
+  if (bestDistance > Math.max(0.2, toFinite(maxDistance, 0.9))) {
     return -1;
   }
   return bestIndex;
@@ -4509,14 +4730,24 @@ function getBoxResizeHandlesWorld(obj) {
   const axisY = { x: -Math.sin(rad), y: Math.cos(rad) };
   return [
     {
-      kind: 'size_x',
+      kind: 'size_x_pos',
       x: round1(cx + axisX.x * width),
       y: round1(cy + axisX.y * width),
     },
     {
-      kind: 'size_y',
+      kind: 'size_x_neg',
+      x: round1(cx - axisX.x * width),
+      y: round1(cy - axisX.y * width),
+    },
+    {
+      kind: 'size_y_pos',
       x: round1(cx + axisY.x * height),
       y: round1(cy + axisY.y * height),
+    },
+    {
+      kind: 'size_y_neg',
+      x: round1(cx - axisY.x * height),
+      y: round1(cy - axisY.y * height),
     },
   ];
 }
@@ -5330,7 +5561,33 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
 }
 
 function drawCreateDragPreview(ctx, layout, drag) {
-  if (!drag || drag.type !== 'create') {
+  if (!drag) {
+    return;
+  }
+  if (drag.type === 'marquee_select') {
+    const start = drag.startWorld;
+    const current = drag.currentWorld || start;
+    if (!start || !current) {
+      return;
+    }
+    const p1 = worldToCanvas(layout, start.x, start.y);
+    const p2 = worldToCanvas(layout, current.x, current.y);
+    const left = Math.min(p1.x, p2.x);
+    const top = Math.min(p1.y, p2.y);
+    const width = Math.abs(p2.x - p1.x);
+    const height = Math.abs(p2.y - p1.y);
+    ctx.save();
+    ctx.fillStyle = 'rgba(106, 202, 255, 0.18)';
+    ctx.strokeStyle = 'rgba(162, 228, 255, 0.95)';
+    ctx.lineWidth = 1.8;
+    ctx.setLineDash([7, 5]);
+    ctx.fillRect(left, top, width, height);
+    ctx.strokeRect(left, top, width, height);
+    ctx.setLineDash([]);
+    ctx.restore();
+    return;
+  }
+  if (drag.type !== 'create') {
     return;
   }
   const start = drag.startWorld;
@@ -6064,6 +6321,22 @@ function beginMoveDrag(index, point) {
   return true;
 }
 
+function beginMarqueeSelectDrag(point, options = {}) {
+  if (!point) {
+    return false;
+  }
+  const additive = options.additive === true;
+  editorState.dragState = {
+    type: 'marquee_select',
+    startWorld: { x: round1(toFinite(point.x, 0)), y: round1(toFinite(point.y, 0)) },
+    currentWorld: { x: round1(toFinite(point.x, 0)), y: round1(toFinite(point.y, 0)) },
+    moved: false,
+    additive,
+    baseSelectedIndexes: additive ? getSelectedIndexes() : [],
+  };
+  return true;
+}
+
 function beginHandleDrag(index, handle) {
   if (!handle || !Number.isFinite(index)) {
     return false;
@@ -6103,7 +6376,12 @@ function beginHandleDrag(index, handle) {
     };
     return true;
   }
-  if (handle.kind === 'size_x' || handle.kind === 'size_y') {
+  if (handle.kind === 'size_x'
+    || handle.kind === 'size_y'
+    || handle.kind === 'size_x_pos'
+    || handle.kind === 'size_x_neg'
+    || handle.kind === 'size_y_pos'
+    || handle.kind === 'size_y_neg') {
     editorState.dragState = {
       type: handle.kind,
       index,
@@ -6643,11 +6921,17 @@ function applyMultiResizeFromPrimary(primaryIndex, dragType, beforeValue, afterV
       obj.triggerRadius = round1(Math.max(minRadius, prevTrigger * scale));
       continue;
     }
-    if (dragType === 'size_x' || dragType === 'size_y') {
+    if (dragType === 'size_x'
+      || dragType === 'size_y'
+      || dragType === 'size_x_pos'
+      || dragType === 'size_x_neg'
+      || dragType === 'size_y_pos'
+      || dragType === 'size_y_neg') {
       if (!canResizeByBoxHandle(obj)) {
         continue;
       }
-      if (dragType === 'size_x') {
+      const isSizeX = dragType === 'size_x' || dragType === 'size_x_pos' || dragType === 'size_x_neg';
+      if (isSizeX) {
         obj.width = round1(Math.max(0.08, toFinite(obj.width, 1.2) * scale));
       } else {
         obj.height = round1(Math.max(0.05, toFinite(obj.height, 0.2) * scale));
@@ -6702,6 +6986,14 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
     drag.moved = true;
     drawMakerCanvas();
     return false;
+  }
+  if (drag.type === 'marquee_select') {
+    const start = drag.startWorld || point;
+    drag.currentWorld = { x: point.x, y: point.y };
+    drag.moved = drag.moved === true
+      || Math.abs(toFinite(point.x, 0) - toFinite(start.x, 0)) >= 0.12
+      || Math.abs(toFinite(point.y, 0) - toFinite(start.y, 0)) >= 0.12;
+    return true;
   }
   if (drag.type === 'hammer_target') {
     const objects = getObjects();
@@ -6826,7 +7118,12 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
     }
     return false;
   }
-  if (drag.type === 'size_x' || drag.type === 'size_y') {
+  if (drag.type === 'size_x'
+    || drag.type === 'size_y'
+    || drag.type === 'size_x_pos'
+    || drag.type === 'size_x_neg'
+    || drag.type === 'size_y_pos'
+    || drag.type === 'size_y_neg') {
     const type = String(obj.type || '');
     if (type === 'box_block'
       || type === 'diamond_block'
@@ -6846,19 +7143,46 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
       const axisY = { x: -Math.sin(rad), y: Math.cos(rad) };
       const vx = point.x - cx;
       const vy = point.y - cy;
-      if (drag.type === 'size_x') {
+      const isSizeX = drag.type === 'size_x' || drag.type === 'size_x_pos' || drag.type === 'size_x_neg';
+      const hasSideSign = drag.type.endsWith('_pos') || drag.type.endsWith('_neg');
+      const sideSign = drag.type.endsWith('_neg') ? -1 : 1;
+      if (isSizeX) {
         const beforeWidth = Math.max(0.08, toFinite(obj.width, 1.2));
-        const proj = Math.abs(vx * axisX.x + vy * axisX.y);
-        obj.width = round1(Math.max(0.08, proj));
+        if (hasSideSign) {
+          const stageGoalY = Math.max(25, toFinite(getMutableMap().stage && getMutableMap().stage.goalY, 210) + 4);
+          const stageMinY = getStageMinYWorld();
+          const anchorX = cx - axisX.x * beforeWidth * sideSign;
+          const anchorY = cy - axisX.y * beforeWidth * sideSign;
+          const projected = ((point.x - anchorX) * axisX.x + (point.y - anchorY) * axisX.y) * sideSign;
+          const nextWidth = Math.max(0.08, projected / 2);
+          obj.width = round1(nextWidth);
+          obj.x = round1(clamp(anchorX + axisX.x * nextWidth * sideSign, 0, WORLD_WIDTH));
+          obj.y = round1(clamp(anchorY + axisX.y * nextWidth * sideSign, stageMinY, stageGoalY));
+        } else {
+          const proj = Math.abs(vx * axisX.x + vy * axisX.y);
+          obj.width = round1(Math.max(0.08, proj));
+        }
         applyMultiResizeFromPrimary(index, 'size_x', beforeWidth, obj.width);
       } else {
         const beforeHeight = Math.max(0.05, toFinite(obj.height, 0.2));
-        const proj = Math.abs(vx * axisY.x + vy * axisY.y);
-        obj.height = round1(Math.max(0.05, proj));
+        if (hasSideSign) {
+          const stageGoalY = Math.max(25, toFinite(getMutableMap().stage && getMutableMap().stage.goalY, 210) + 4);
+          const stageMinY = getStageMinYWorld();
+          const anchorX = cx - axisY.x * beforeHeight * sideSign;
+          const anchorY = cy - axisY.y * beforeHeight * sideSign;
+          const projected = ((point.x - anchorX) * axisY.x + (point.y - anchorY) * axisY.y) * sideSign;
+          const nextHeight = Math.max(0.05, projected / 2);
+          obj.height = round1(nextHeight);
+          obj.x = round1(clamp(anchorX + axisY.x * nextHeight * sideSign, 0, WORLD_WIDTH));
+          obj.y = round1(clamp(anchorY + axisY.y * nextHeight * sideSign, stageMinY, stageGoalY));
+        } else {
+          const proj = Math.abs(vx * axisY.x + vy * axisY.y);
+          obj.height = round1(Math.max(0.05, proj));
+        }
         applyMultiResizeFromPrimary(index, 'size_y', beforeHeight, obj.height);
       }
       if (type === 'diamond_block') {
-        const half = drag.type === 'size_x'
+        const half = isSizeX
           ? round1(Math.max(0.12, toFinite(obj.width, 0.12)))
           : round1(Math.max(0.12, toFinite(obj.height, 0.12)));
         obj.width = half;
@@ -6996,6 +7320,39 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
 function finishDrag() {
   const drag = editorState.dragState;
   if (!drag) {
+    return;
+  }
+  if (drag.type === 'marquee_select') {
+    const start = drag.startWorld || drag.currentWorld;
+    const end = drag.currentWorld || start;
+    const selectionRect = buildSelectionRectWorld(start, end);
+    const moved = drag.moved === true;
+    let selected = Array.isArray(drag.baseSelectedIndexes) ? drag.baseSelectedIndexes.slice() : [];
+    if (moved && selectionRect) {
+      const objects = getObjects();
+      for (let index = 0; index < objects.length; index += 1) {
+        if (!objectIntersectsSelectionRect(objects[index], selectionRect)) {
+          continue;
+        }
+        if (!selected.includes(index)) {
+          selected.push(index);
+        }
+      }
+    } else if (!drag.additive) {
+      selected = [];
+    }
+    setSelectedIndexes(selected, {
+      primaryIndex: selected.length > 0 ? selected[selected.length - 1] : -1,
+      keepFloatingHidden: selected.length === 0,
+    });
+    syncObjectList({ preserveNoSelection: true });
+    if (selected.length === 0) {
+      updateMakerHint('선택 해제됨');
+    } else {
+      updateMakerHint(selected.length === 1 ? '오브젝트 1개 선택됨' : `${selected.length}개 오브젝트 선택됨`);
+    }
+    resetActiveDrag();
+    drawMakerCanvas();
     return;
   }
   if (drag.type === 'create') {
@@ -7223,7 +7580,12 @@ function handleMakerCanvasPointerDown(event) {
       updateMakerHint('반지름 핸들 드래그 편집중');
     } else if (selectedHandle.kind === 'trigger_radius') {
       updateMakerHint('트리거 반경 핸들 드래그 편집중');
-    } else if (selectedHandle.kind === 'size_x' || selectedHandle.kind === 'size_y') {
+    } else if (selectedHandle.kind === 'size_x'
+      || selectedHandle.kind === 'size_y'
+      || selectedHandle.kind === 'size_x_pos'
+      || selectedHandle.kind === 'size_x_neg'
+      || selectedHandle.kind === 'size_y_pos'
+      || selectedHandle.kind === 'size_y_neg') {
       updateMakerHint('크기 핸들 드래그 편집중');
     } else if (selectedHandle.kind === 'move_anchor') {
       updateMakerHint('중심 핸들 드래그 이동중');
@@ -7234,7 +7596,8 @@ function handleMakerCanvasPointerDown(event) {
     return;
   }
   if (tool === 'select') {
-    const nearestIndex = findNearestObjectIndex(point.x, point.y);
+    const hitDistance = Math.max(0.55, layout ? (13 / Math.max(0.001, layout.scale)) : 0.9);
+    const nearestIndex = findNearestObjectIndex(point.x, point.y, hitDistance);
     if (nearestIndex >= 0) {
       if (event.shiftKey) {
         const selected = getSelectedIndexes();
@@ -7257,9 +7620,9 @@ function handleMakerCanvasPointerDown(event) {
       const selectedCount = getSelectedIndexes().length;
       updateMakerHint(selectedCount > 1 ? `${selectedCount}개 오브젝트 그룹 이동중` : '오브젝트 드래그 이동중');
     } else {
-      if (!event.shiftKey) {
-        updateMakerHint('선택 해제됨');
-      }
+      beginMarqueeSelectDrag(point, { additive: event.shiftKey === true });
+      editorState.suppressClickOnce = true;
+      updateMakerHint(event.shiftKey ? '영역 추가 선택 드래그중' : '영역 선택 드래그중');
     }
     drawMakerCanvas();
     return;
@@ -7289,9 +7652,12 @@ function handleMakerCanvasPointerMove(event) {
   }
   const updated = updateObjectByDrag(point, event, rawPoint);
   if (updated) {
-    refreshCurrentJsonViewer();
-    populateObjectEditor();
-    queueLiveDraftApply('드래그 편집');
+    const dragType = String(editorState.dragState && editorState.dragState.type ? editorState.dragState.type : '');
+    if (dragType !== 'marquee_select') {
+      refreshCurrentJsonViewer();
+      populateObjectEditor();
+      queueLiveDraftApply('드래그 편집');
+    }
   }
   drawMakerCanvas();
 }
@@ -7521,7 +7887,9 @@ function handleMakerCanvasClick(event) {
   }
   const tool = selectedTool();
   if (tool === 'select') {
-    const nearestIndex = findNearestObjectIndex(point.x, point.y);
+    const layout = getCanvasLayout();
+    const hitDistance = Math.max(0.55, layout ? (13 / Math.max(0.001, layout.scale)) : 0.9);
+    const nearestIndex = findNearestObjectIndex(point.x, point.y, hitDistance);
     if (nearestIndex >= 0) {
       if (event.shiftKey) {
         const selected = getSelectedIndexes();
