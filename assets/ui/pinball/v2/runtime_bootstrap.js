@@ -684,7 +684,8 @@ function patchPhysicsCreateEntities() {
       bodyDef.set_type(resolveBodyType(rawEntity.type));
       const body = physics.world.CreateBody(bodyDef);
       const fixtureDef = new box2d.b2FixtureDef();
-      fixtureDef.set_density(Math.max(0.001, toFiniteNumber(props.density, 1)));
+      const safeDensity = Math.max(0.001, toFiniteNumber(props.density, 1));
+      fixtureDef.set_density(safeDensity);
       fixtureDef.set_restitution(Math.max(0, toFiniteNumber(props.restitution, 0)));
       if (typeof fixtureDef.set_friction === 'function') {
         fixtureDef.set_friction(Math.max(0, toFiniteNumber(props.friction, 0.2)));
@@ -711,22 +712,68 @@ function patchPhysicsCreateEntities() {
         createdFixture = body.CreateFixture(fixtureDef);
       } else if (shape.type === 'polyline') {
         const points = Array.isArray(shape.points) ? shape.points : [];
+        let colliderThickness = toFiniteNumber(props.colliderThickness, NaN);
+        if (!Number.isFinite(colliderThickness)) {
+          colliderThickness = toFiniteNumber(shape.colliderThickness, 0);
+        }
+        const useSegmentBoxes = colliderThickness > 0.0001 && typeof box2d.b2PolygonShape === 'function';
         for (let pointIndex = 0; pointIndex < points.length - 1; pointIndex += 1) {
           const pointA = points[pointIndex];
           const pointB = points[pointIndex + 1];
           if (!Array.isArray(pointA) || !Array.isArray(pointB)) {
             continue;
           }
+          const ax = toFiniteNumber(pointA[0], 0);
+          const ay = toFiniteNumber(pointA[1], 0);
+          const bx = toFiniteNumber(pointB[0], 0);
+          const by = toFiniteNumber(pointB[1], 0);
+          if (useSegmentBoxes) {
+            const dx = bx - ax;
+            const dy = by - ay;
+            const length = Math.hypot(dx, dy);
+            if (!(length > 0.0001)) {
+              continue;
+            }
+            try {
+              const segment = new box2d.b2PolygonShape();
+              segment.SetAsBox(
+                Math.max(0.0005, length / 2),
+                Math.max(0.0005, colliderThickness / 2),
+                new box2d.b2Vec2((ax + bx) / 2, (ay + by) / 2),
+                Math.atan2(dy, dx),
+              );
+              if (typeof fixtureDef.set_shape === 'function') {
+                fixtureDef.set_shape(segment);
+                const nextFixture = body.CreateFixture(fixtureDef);
+                if (!createdFixture && nextFixture) {
+                  createdFixture = nextFixture;
+                }
+              } else {
+                const nextFixture = body.CreateFixture(segment, safeDensity);
+                if (!createdFixture && nextFixture) {
+                  createdFixture = nextFixture;
+                }
+              }
+              continue;
+            } catch (_) {
+            }
+          }
           const edge = new box2d.b2EdgeShape();
           edge.SetTwoSided(
-            new box2d.b2Vec2(toFiniteNumber(pointA[0], 0), toFiniteNumber(pointA[1], 0)),
-            new box2d.b2Vec2(toFiniteNumber(pointB[0], 0), toFiniteNumber(pointB[1], 0)),
+            new box2d.b2Vec2(ax, ay),
+            new box2d.b2Vec2(bx, by),
           );
           if (typeof fixtureDef.set_shape === 'function') {
             fixtureDef.set_shape(edge);
-            body.CreateFixture(fixtureDef);
+            const nextFixture = body.CreateFixture(fixtureDef);
+            if (!createdFixture && nextFixture) {
+              createdFixture = nextFixture;
+            }
           } else {
-            body.CreateFixture(edge, Math.max(0.001, toFiniteNumber(props.density, 1)));
+            const nextFixture = body.CreateFixture(edge, safeDensity);
+            if (!createdFixture && nextFixture) {
+              createdFixture = nextFixture;
+            }
           }
         }
       }

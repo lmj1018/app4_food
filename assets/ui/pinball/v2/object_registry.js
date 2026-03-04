@@ -440,7 +440,7 @@ function extractPolylinePoints(raw) {
       ].filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]));
 }
 
-function ensureClosedPolylinePoints(pointsInput, threshold = 0.0001) {
+function ensureClosedPolylinePoints(pointsInput, threshold = 0.0001, forceClose = false) {
   const points = Array.isArray(pointsInput)
     ? pointsInput
         .map((point) => {
@@ -466,6 +466,10 @@ function ensureClosedPolylinePoints(pointsInput, threshold = 0.0001) {
   const closeDistance = Math.hypot(dx, dy);
   if (Number.isFinite(closeDistance) && closeDistance <= Math.max(0, toFiniteNumber(threshold, 0.0001))) {
     points[points.length - 1] = [first[0], first[1]];
+    return points;
+  }
+  if (forceClose === true) {
+    points.push([first[0], first[1]]);
   }
   return points;
 }
@@ -480,6 +484,16 @@ function compileWallPolyline(raw, entityId) {
   const fillOpacity = clamp(toFiniteNumber(raw && raw.fillOpacity, isFilled ? 1 : 0), 0, 1);
   const restitution = clamp(toFiniteNumber(raw && raw.restitution, 0), 0, 8);
   const friction = clamp(toFiniteNumber(raw && raw.friction, 0.35), 0, 8);
+  let colliderThicknessValue = toFiniteNumber(raw && raw.colliderThickness, NaN);
+  if (!Number.isFinite(colliderThicknessValue)) {
+    colliderThicknessValue = toFiniteNumber(raw && raw.collisionThickness, NaN);
+  }
+  if (!Number.isFinite(colliderThicknessValue)) {
+    colliderThicknessValue = toFiniteNumber(raw && raw.thickness, isFilled ? 0.18 : 0);
+  }
+  const colliderThickness = Number.isFinite(colliderThicknessValue)
+    ? clamp(colliderThicknessValue, 0, 6)
+    : 0;
   const sensor = toBoolean(raw && raw.sensor, false) || toBoolean(raw && raw.noCollision, false);
   const props = {
     density: 1,
@@ -489,6 +503,9 @@ function compileWallPolyline(raw, entityId) {
   };
   if (sensor) {
     props.sensor = true;
+  }
+  if (colliderThickness > 0.0001) {
+    props.colliderThickness = colliderThickness;
   }
   return withEntityId(
     {
@@ -768,7 +785,7 @@ function compileObject(rawObject, entityId) {
         behavior: null,
       };
     case 'wall_filled_polyline': {
-      const closedPoints = ensureClosedPolylinePoints(extractPolylinePoints(rawObject), 0.2);
+      const closedPoints = ensureClosedPolylinePoints(extractPolylinePoints(rawObject), 0.2, true);
       const color = DEFAULT_OBJECT_COLORS.box;
       return {
         entity: compileWallPolyline(
