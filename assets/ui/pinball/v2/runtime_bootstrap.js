@@ -453,6 +453,85 @@ function patchRendererMarbleImages() {
   return true;
 }
 
+function patchRendererEntityVisuals() {
+  const roulette = getRoulette();
+  const renderer = roulette && roulette._renderer && typeof roulette._renderer === 'object'
+    ? roulette._renderer
+    : null;
+  if (!renderer || typeof renderer.renderEntities !== 'function') {
+    return false;
+  }
+  if (renderer.__v2EntityVisualsPatched === true) {
+    return true;
+  }
+  renderer.__v2OriginalRenderEntities = renderer.renderEntities.bind(renderer);
+  renderer.renderEntities = (entitiesInput) => {
+    const entities = Array.isArray(entitiesInput) ? entitiesInput : [];
+    const entityTypeMap = buildEntityTypeMapFromCompiled();
+    if (entityTypeMap.size <= 0) {
+      return renderer.__v2OriginalRenderEntities(entitiesInput);
+    }
+    const ctx = renderer.ctx;
+    const theme = renderer._theme && typeof renderer._theme === 'object'
+      ? renderer._theme
+      : null;
+    if (!ctx || !theme || !theme.entity) {
+      return renderer.__v2OriginalRenderEntities(entitiesInput);
+    }
+    ctx.save();
+    for (let index = 0; index < entities.length; index += 1) {
+      const entry = entities[index];
+      if (!entry || !entry.shape || typeof entry.shape.type !== 'string') {
+        continue;
+      }
+      const shape = entry.shape;
+      const themeEntity = theme.entity[shape.type] && typeof theme.entity[shape.type] === 'object'
+        ? theme.entity[shape.type]
+        : { fill: 'white', outline: 'white', bloom: 'white', bloomRadius: 0 };
+      const transform = ctx.getTransform();
+      ctx.translate(toFiniteNumber(entry.x, 0), toFiniteNumber(entry.y, 0));
+      ctx.rotate(toFiniteNumber(entry.angle, 0));
+      ctx.fillStyle = shape.color ?? themeEntity.fill;
+      ctx.strokeStyle = shape.color ?? themeEntity.outline;
+      ctx.shadowBlur = toFiniteNumber(themeEntity.bloomRadius, 0);
+      ctx.shadowColor = shape.bloomColor ?? shape.color ?? themeEntity.bloom;
+      if (shape.type === 'polyline') {
+        const points = Array.isArray(shape.points) ? shape.points : [];
+        if (points.length > 0) {
+          ctx.beginPath();
+          ctx.moveTo(toFiniteNumber(points[0] && points[0][0], 0), toFiniteNumber(points[0] && points[0][1], 0));
+          for (let pointIndex = 1; pointIndex < points.length; pointIndex += 1) {
+            ctx.lineTo(
+              toFiniteNumber(points[pointIndex] && points[pointIndex][0], 0),
+              toFiniteNumber(points[pointIndex] && points[pointIndex][1], 0),
+            );
+          }
+          ctx.stroke();
+        }
+      } else if (shape.type === 'box') {
+        const width = Math.max(0.001, toFiniteNumber(shape.width, 0.2)) * 2;
+        const height = Math.max(0.001, toFiniteNumber(shape.height, 0.2)) * 2;
+        ctx.rotate(toFiniteNumber(shape.rotation, 0));
+        ctx.fillRect(-width / 2, -height / 2, width, height);
+        ctx.strokeRect(-width / 2, -height / 2, width, height);
+      } else if (shape.type === 'circle') {
+        ctx.beginPath();
+        ctx.arc(0, 0, Math.max(0.001, toFiniteNumber(shape.radius, 0.2)), 0, Math.PI * 2, false);
+        const eid = Math.floor(toFiniteNumber(shape.__v2eid, NaN));
+        const objectType = Number.isFinite(eid) ? entityTypeMap.get(eid) : '';
+        if (objectType === 'physics_ball') {
+          ctx.fill();
+        }
+        ctx.stroke();
+      }
+      ctx.setTransform(transform);
+    }
+    ctx.restore();
+  };
+  renderer.__v2EntityVisualsPatched = true;
+  return true;
+}
+
 function getPhysics() {
   const roulette = getRoulette();
   return roulette && roulette.physics ? roulette.physics : null;
@@ -1144,6 +1223,7 @@ async function applyMapJson(rawMapJson) {
   patchPhysicsStep();
   patchPhysicsCreateEntities();
   patchPhysicsGetEntities();
+  patchRendererEntityVisuals();
   wireGoalEvent();
 
   const mapJson = rawMapJson && typeof rawMapJson === 'object'
@@ -1195,6 +1275,7 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
   patchPhysicsStep();
   patchPhysicsCreateEntities();
   patchPhysicsGetEntities();
+  patchRendererEntityVisuals();
   wireGoalEvent();
 
   const mapJson = rawMapJson && typeof rawMapJson === 'object'
