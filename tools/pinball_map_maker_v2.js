@@ -4702,21 +4702,7 @@ function findStageHandle(point, layout) {
   if (!layout) {
     return null;
   }
-  const thresholdWorld = Math.max(0.1, 10 / Math.max(0.001, layout.scale));
-  const topY = getTopWallYWorld();
-  const leftTop = { x: 0, y: topY };
-  const rightTop = { x: WORLD_WIDTH, y: topY };
-  const leftDist = Math.hypot(point.x - leftTop.x, point.y - leftTop.y);
-  const rightDist = Math.hypot(point.x - rightTop.x, point.y - rightTop.y);
-  if (leftDist <= thresholdWorld * 1.8) {
-    return { kind: 'stage_wall_left' };
-  }
-  if (rightDist <= thresholdWorld * 1.8) {
-    return { kind: 'stage_wall_right' };
-  }
-  if (point.x >= -0.5 && point.x <= WORLD_WIDTH + 0.5 && Math.abs(point.y - topY) <= thresholdWorld * 1.6) {
-    return { kind: 'stage_wall_span' };
-  }
+  const thresholdWorld = Math.max(0.35, 12 / Math.max(0.001, layout.scale));
   const spawn = getSpawnPointWorld();
   const spawnDist = Math.hypot(point.x - spawn.x, point.y - spawn.y);
   if (spawnDist <= thresholdWorld) {
@@ -4725,8 +4711,22 @@ function findStageHandle(point, layout) {
   const goalY = getGoalYWorld();
   const goalHandleX = WORLD_WIDTH;
   const goalHandleDist = Math.hypot(point.x - goalHandleX, point.y - goalY);
-  if (goalHandleDist <= thresholdWorld * 1.2 || (point.x >= WORLD_WIDTH - 1.4 && Math.abs(point.y - goalY) <= thresholdWorld * 0.8)) {
+  if (goalHandleDist <= thresholdWorld * 1.35 || (point.x >= WORLD_WIDTH - 1.6 && Math.abs(point.y - goalY) <= thresholdWorld)) {
     return { kind: 'goal' };
+  }
+  const topY = getTopWallYWorld();
+  const leftTop = { x: 0, y: topY };
+  const rightTop = { x: WORLD_WIDTH, y: topY };
+  const leftDist = Math.hypot(point.x - leftTop.x, point.y - leftTop.y);
+  const rightDist = Math.hypot(point.x - rightTop.x, point.y - rightTop.y);
+  if (leftDist <= Math.max(0.7, thresholdWorld * 2.4)) {
+    return { kind: 'stage_wall_left' };
+  }
+  if (rightDist <= Math.max(0.7, thresholdWorld * 2.4)) {
+    return { kind: 'stage_wall_right' };
+  }
+  if (point.x >= -0.5 && point.x <= WORLD_WIDTH + 0.5 && Math.abs(point.y - topY) <= Math.max(0.55, thresholdWorld * 2.2)) {
+    return { kind: 'stage_wall_span' };
   }
   return null;
 }
