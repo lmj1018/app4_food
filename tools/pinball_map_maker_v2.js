@@ -5114,6 +5114,56 @@ function getBoxResizeHandlesWorld(obj) {
   ];
 }
 
+function resolveBoxResizeAxes(obj) {
+  if (!obj || typeof obj !== 'object' || !canResizeByBoxHandle(obj)) {
+    return null;
+  }
+  const type = String(obj.type || '');
+  const cx = toFinite(obj.x, 0);
+  const cy = toFinite(obj.y, 0);
+  const angleDeg = type === 'hammer' || type === 'bottom_bumper' || type === 'fan' || type === 'magic_wizard'
+    ? normalizeDeg(toFinite(obj.dirDeg, toFinite(obj.rotation, 0)))
+    : normalizeDeg(toFinite(obj.rotation, 0));
+  const rad = (Math.PI / 180) * angleDeg;
+  const axisX = { x: Math.cos(rad), y: Math.sin(rad) };
+  const axisY = { x: -Math.sin(rad), y: Math.cos(rad) };
+  return { cx, cy, axisX, axisY };
+}
+
+function resolveSingleEdgeResizeState(obj, dragKind, pointer = null) {
+  const basis = resolveBoxResizeAxes(obj);
+  if (!basis) {
+    return null;
+  }
+  const kind = String(dragKind || '');
+  const isSizeY = kind.startsWith('size_y');
+  const axisKey = isSizeY ? 'y' : 'x';
+  const axis = isSizeY ? basis.axisY : basis.axisX;
+  const minHalf = isSizeY ? 0.05 : 0.08;
+  const currentHalf = isSizeY
+    ? Math.max(0.05, toFinite(obj.height, 0.2))
+    : Math.max(0.08, toFinite(obj.width, 1.2));
+  let sideSign = 0;
+  if (kind.endsWith('_neg')) {
+    sideSign = -1;
+  } else if (kind.endsWith('_pos')) {
+    sideSign = 1;
+  }
+  if (sideSign === 0) {
+    const px = toFinite(pointer && pointer.x, basis.cx);
+    const py = toFinite(pointer && pointer.y, basis.cy);
+    const projected = (px - basis.cx) * axis.x + (py - basis.cy) * axis.y;
+    sideSign = projected < 0 ? -1 : 1;
+  }
+  return {
+    axisKey,
+    sideSign,
+    minHalf,
+    anchorX: basis.cx - axis.x * currentHalf * sideSign,
+    anchorY: basis.cy - axis.y * currentHalf * sideSign,
+  };
+}
+
 function getCircleHandlesWorld(obj) {
   if (!obj || typeof obj !== 'object') {
     return [];
@@ -6916,11 +6966,22 @@ function beginHandleDrag(index, handle) {
     || handle.kind === 'size_x_neg'
     || handle.kind === 'size_y_pos'
     || handle.kind === 'size_y_neg') {
-    editorState.dragState = {
+    const objects = getObjects();
+    const obj = objects[index];
+    const dragState = {
       type: handle.kind,
       index,
       moved: false,
     };
+    const resizeState = resolveSingleEdgeResizeState(obj, handle.kind);
+    if (resizeState) {
+      dragState.resizeAxis = resizeState.axisKey;
+      dragState.resizeSideSign = resizeState.sideSign;
+      dragState.resizeMinHalf = resizeState.minHalf;
+      dragState.resizeAnchorX = resizeState.anchorX;
+      dragState.resizeAnchorY = resizeState.anchorY;
+    }
+    editorState.dragState = dragState;
     return true;
   }
   if (handle.kind === 'rotation') {
@@ -7512,12 +7573,31 @@ function applyMultiResizeFromPrimary(primaryIndex, dragType, beforeValue, afterV
       if (!canResizeByBoxHandle(obj)) {
         continue;
       }
-      const isSizeX = dragType === 'size_x' || dragType === 'size_x_pos' || dragType === 'size_x_neg';
-      if (isSizeX) {
-        obj.width = round1(Math.max(0.08, toFinite(obj.width, 1.2) * scale));
-      } else {
-        obj.height = round1(Math.max(0.05, toFinite(obj.height, 0.2) * scale));
+      const basis = resolveBoxResizeAxes(obj);
+      if (!basis) {
+        continue;
       }
+      const isSizeX = dragType === 'size_x' || dragType === 'size_x_pos' || dragType === 'size_x_neg';
+      const axis = isSizeX ? basis.axisX : basis.axisY;
+      const minHalf = isSizeX ? 0.08 : 0.05;
+      const beforeHalf = isSizeX
+        ? Math.max(0.08, toFinite(obj.width, 1.2))
+        : Math.max(0.05, toFinite(obj.height, 0.2));
+      const sideSign = dragType.endsWith('_neg')
+        ? -1
+        : 1;
+      const anchorX = basis.cx - axis.x * beforeHalf * sideSign;
+      const anchorY = basis.cy - axis.y * beforeHalf * sideSign;
+      const nextHalf = round1(Math.max(minHalf, beforeHalf * scale));
+      const stageGoalY = Math.max(25, toFinite(getMutableMap().stage && getMutableMap().stage.goalY, 210) + 4);
+      const stageMinY = getStageMinYWorld();
+      if (isSizeX) {
+        obj.width = nextHalf;
+      } else {
+        obj.height = nextHalf;
+      }
+      obj.x = round1(clamp(anchorX + axis.x * nextHalf * sideSign, 0, WORLD_WIDTH));
+      obj.y = round1(clamp(anchorY + axis.y * nextHalf * sideSign, stageMinY, stageGoalY));
       if (obj.type === 'diamond_block') {
         const half = round1(Math.max(0.12, Math.max(toFinite(obj.width, 0.12), toFinite(obj.height, 0.12))));
         obj.width = half;
@@ -7737,44 +7817,47 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
       const axisY = { x: -Math.sin(rad), y: Math.cos(rad) };
       const vx = point.x - cx;
       const vy = point.y - cy;
-      const isSizeX = drag.type === 'size_x' || drag.type === 'size_x_pos' || drag.type === 'size_x_neg';
-      const hasSideSign = drag.type.endsWith('_pos') || drag.type.endsWith('_neg');
-      const sideSign = drag.type.endsWith('_neg') ? -1 : 1;
-      if (isSizeX) {
-        const beforeWidth = Math.max(0.08, toFinite(obj.width, 1.2));
-        if (hasSideSign) {
-          const stageGoalY = Math.max(25, toFinite(getMutableMap().stage && getMutableMap().stage.goalY, 210) + 4);
-          const stageMinY = getStageMinYWorld();
-          const anchorX = cx - axisX.x * beforeWidth * sideSign;
-          const anchorY = cy - axisX.y * beforeWidth * sideSign;
-          const projected = ((point.x - anchorX) * axisX.x + (point.y - anchorY) * axisX.y) * sideSign;
-          const nextWidth = Math.max(0.08, projected / 2);
-          obj.width = round1(nextWidth);
-          obj.x = round1(clamp(anchorX + axisX.x * nextWidth * sideSign, 0, WORLD_WIDTH));
-          obj.y = round1(clamp(anchorY + axisX.y * nextWidth * sideSign, stageMinY, stageGoalY));
-        } else {
-          const proj = Math.abs(vx * axisX.x + vy * axisX.y);
-          obj.width = round1(Math.max(0.08, proj));
-        }
-        applyMultiResizeFromPrimary(index, 'size_x', beforeWidth, obj.width);
-      } else {
-        const beforeHeight = Math.max(0.05, toFinite(obj.height, 0.2));
-        if (hasSideSign) {
-          const stageGoalY = Math.max(25, toFinite(getMutableMap().stage && getMutableMap().stage.goalY, 210) + 4);
-          const stageMinY = getStageMinYWorld();
-          const anchorX = cx - axisY.x * beforeHeight * sideSign;
-          const anchorY = cy - axisY.y * beforeHeight * sideSign;
-          const projected = ((point.x - anchorX) * axisY.x + (point.y - anchorY) * axisY.y) * sideSign;
-          const nextHeight = Math.max(0.05, projected / 2);
-          obj.height = round1(nextHeight);
-          obj.x = round1(clamp(anchorX + axisY.x * nextHeight * sideSign, 0, WORLD_WIDTH));
-          obj.y = round1(clamp(anchorY + axisY.y * nextHeight * sideSign, stageMinY, stageGoalY));
-        } else {
-          const proj = Math.abs(vx * axisY.x + vy * axisY.y);
-          obj.height = round1(Math.max(0.05, proj));
-        }
-        applyMultiResizeFromPrimary(index, 'size_y', beforeHeight, obj.height);
+      const axisFromDrag = String(drag.resizeAxis || '');
+      const isSizeX = axisFromDrag
+        ? axisFromDrag !== 'y'
+        : (drag.type === 'size_x' || drag.type === 'size_x_pos' || drag.type === 'size_x_neg');
+      if (!axisFromDrag) {
+        drag.resizeAxis = isSizeX ? 'x' : 'y';
       }
+      const axis = isSizeX ? axisX : axisY;
+      const minHalf = Math.max(
+        isSizeX ? 0.08 : 0.05,
+        toFinite(drag.resizeMinHalf, isSizeX ? 0.08 : 0.05),
+      );
+      const beforeHalf = isSizeX
+        ? Math.max(0.08, toFinite(obj.width, 1.2))
+        : Math.max(0.05, toFinite(obj.height, 0.2));
+      let sideSign = Math.round(toFinite(drag.resizeSideSign, 0));
+      if (sideSign !== -1 && sideSign !== 1) {
+        const projectedFromCenter = vx * axis.x + vy * axis.y;
+        sideSign = projectedFromCenter < 0 ? -1 : 1;
+        drag.resizeSideSign = sideSign;
+      }
+      let anchorX = toFinite(drag.resizeAnchorX, NaN);
+      let anchorY = toFinite(drag.resizeAnchorY, NaN);
+      if (!Number.isFinite(anchorX) || !Number.isFinite(anchorY)) {
+        anchorX = cx - axis.x * beforeHalf * sideSign;
+        anchorY = cy - axis.y * beforeHalf * sideSign;
+        drag.resizeAnchorX = anchorX;
+        drag.resizeAnchorY = anchorY;
+      }
+      const projected = ((point.x - anchorX) * axis.x + (point.y - anchorY) * axis.y) * sideSign;
+      const nextHalf = round1(Math.max(minHalf, projected / 2));
+      const stageGoalY = Math.max(25, toFinite(getMutableMap().stage && getMutableMap().stage.goalY, 210) + 4);
+      const stageMinY = getStageMinYWorld();
+      if (isSizeX) {
+        obj.width = nextHalf;
+      } else {
+        obj.height = nextHalf;
+      }
+      obj.x = round1(clamp(anchorX + axis.x * nextHalf * sideSign, 0, WORLD_WIDTH));
+      obj.y = round1(clamp(anchorY + axis.y * nextHalf * sideSign, stageMinY, stageGoalY));
+      applyMultiResizeFromPrimary(index, drag.type, beforeHalf, nextHalf);
       if (type === 'diamond_block') {
         const half = isSizeX
           ? round1(Math.max(0.12, toFinite(obj.width, 0.12)))
