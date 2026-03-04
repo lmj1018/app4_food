@@ -805,6 +805,14 @@ function compileObject(rawObject, entityId) {
           points: closedPoints,
           color,
           fillOpacity: 1,
+          repelEnabled: toTruthyBoolean(
+            rawObject.repelEnabled,
+            toTruthyBoolean(rawObject.ejectOnPenetration, true),
+          ),
+          repelSpeed: Math.max(0.8, toFiniteNumber(rawObject.repelSpeed, 5.4)),
+          repelClearance: clamp(toFiniteNumber(rawObject.repelClearance, 0.12), 0.04, 0.45),
+          repelCooldownMs: Math.max(0, toFiniteNumber(rawObject.repelCooldownMs, 90)),
+          repelVelocityScale: clamp(toFiniteNumber(rawObject.repelVelocityScale, 1.08), 0.5, 2.2),
         },
       };
     }
@@ -4127,9 +4135,52 @@ function createStickyPadBehavior(def, env) {
 
 function createFilledWallPolylineVisualBehavior(def, env) {
   const points = ensureClosedPolylinePoints(Array.isArray(def && def.points) ? def.points : [], 0.2);
+  const polygon = normalizeClosedPolylinePoints(points);
   const color = DEFAULT_OBJECT_COLORS.box;
   const fillOpacity = 1;
+  const centroid = getPolylineCentroid(polygon);
+  const repelEnabled = toTruthyBoolean(def && def.repelEnabled, true);
+  const repelSpeed = Math.max(0.8, toFiniteNumber(def && def.repelSpeed, 5.4));
+  const repelClearance = clamp(toFiniteNumber(def && def.repelClearance, 0.12), 0.04, 0.45);
+  const repelCooldownMs = Math.max(0, toFiniteNumber(def && def.repelCooldownMs, 90));
+  const repelVelocityScale = clamp(toFiniteNumber(def && def.repelVelocityScale, 1.08), 0.5, 2.2);
+  const ejectCooldownByMarble = {};
+  const outsidePointByMarble = {};
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  for (let index = 0; index < polygon.length; index += 1) {
+    const point = polygon[index];
+    const x = toFiniteNumber(point && point[0], NaN);
+    const y = toFiniteNumber(point && point[1], NaN);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      continue;
+    }
+    minX = Math.min(minX, x);
+    maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y);
+    maxY = Math.max(maxY, y);
+  }
   let visualEffect = null;
+
+  function cacheOutsidePoint(marbleKey, x, y, now) {
+    outsidePointByMarble[marbleKey] = {
+      x: toFiniteNumber(x, 0),
+      y: toFiniteNumber(y, 0),
+      at: Math.max(0, toFiniteNumber(now, 0)),
+    };
+  }
+
+  function isNearBounds(x, y, margin = 0) {
+    if (!Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minY) || !Number.isFinite(maxY)) {
+      return true;
+    }
+    return x >= minX - margin
+      && x <= maxX + margin
+      && y >= minY - margin
+      && y <= maxY + margin;
+  }
 
   function hasEntity() {
     const roulette = env.getRoulette();
@@ -4147,6 +4198,138 @@ function createFilledWallPolylineVisualBehavior(def, env) {
       }
     }
     return false;
+  }
+
+  function resolveMarblesInsideFilledWall(now) {
+    if (!repelEnabled || polygon.length < 3) {
+      return;
+    }
+    const roulette = env.getRoulette();
+    const physics = roulette && roulette.physics ? roulette.physics : null;
+    const box2d = env.getBox2D();
+    if (!roulette || !physics || !physics.marbleMap || !box2d || typeof box2d.b2Vec2 !== 'function') {
+      return;
+    }
+    const marbles = Array.isArray(roulette._marbles) ? roulette._marbles : [];
+    if (marbles.length <= 0) {
+      return;
+    }
+    const nearMargin = Math.max(0.08, repelClearance * 1.4);
+    for (let index = 0; index < marbles.length; index += 1) {
+      const marble = marbles[index];
+      if (!marble || typeof marble.id !== 'number') {
+        continue;
+      }
+      const marbleKey = String(marble.id);
+      const body = physics.marbleMap[marble.id];
+      if (!body || typeof body.GetPosition !== 'function') {
+        continue;
+      }
+      const position = body.GetPosition();
+      const worldX = toFiniteNumber(position && position.x, NaN);
+      const worldY = toFiniteNumber(position && position.y, NaN);
+      if (!Number.isFinite(worldX) || !Number.isFinite(worldY)) {
+        continue;
+      }
+      if (!isNearBounds(worldX, worldY, nearMargin)) {
+        cacheOutsidePoint(marbleKey, worldX, worldY, now);
+        continue;
+      }
+      if (!isPointInsidePolygon(polygon, worldX, worldY)) {
+        cacheOutsidePoint(marbleKey, worldX, worldY, now);
+        continue;
+      }
+      if (now < toFiniteNumber(ejectCooldownByMarble[marbleKey], 0)) {
+        continue;
+      }
+
+      const nearest = closestPointOnClosedPolyline(polygon, worldX, worldY);
+      if (!nearest) {
+        continue;
+      }
+      const velocity = typeof body.GetLinearVelocity === 'function' ? body.GetLinearVelocity() : null;
+      const vx = toFiniteNumber(velocity && velocity.x, 0);
+      const vy = toFiniteNumber(velocity && velocity.y, 0);
+      const speed = Math.hypot(vx, vy);
+
+      let dirX = 0;
+      let dirY = 0;
+      if (speed > 0.06) {
+        dirX = -vx;
+        dirY = -vy;
+      } else {
+        const outside = outsidePointByMarble[marbleKey];
+        const outsideAge = Math.abs(toFiniteNumber(now, 0) - toFiniteNumber(outside && outside.at, 0));
+        if (outside && outsideAge <= 2000) {
+          dirX = toFiniteNumber(outside.x, worldX) - worldX;
+          dirY = toFiniteNumber(outside.y, worldY) - worldY;
+        }
+      }
+      let dirLen = Math.hypot(dirX, dirY);
+      if (dirLen < 0.0001) {
+        dirX = toFiniteNumber(nearest.x, worldX) - worldX;
+        dirY = toFiniteNumber(nearest.y, worldY) - worldY;
+        dirLen = Math.hypot(dirX, dirY);
+      }
+      if (dirLen < 0.0001) {
+        dirX = toFiniteNumber(nearest.x, worldX) - toFiniteNumber(centroid.x, worldX);
+        dirY = toFiniteNumber(nearest.y, worldY) - toFiniteNumber(centroid.y, worldY);
+        dirLen = Math.hypot(dirX, dirY);
+      }
+      if (dirLen < 0.0001) {
+        continue;
+      }
+
+      let unitX = dirX / dirLen;
+      let unitY = dirY / dirLen;
+      let targetX = toFiniteNumber(nearest.x, worldX) + unitX * repelClearance;
+      let targetY = toFiniteNumber(nearest.y, worldY) + unitY * repelClearance;
+      if (isPointInsidePolygon(polygon, targetX, targetY)) {
+        const fallbackX = toFiniteNumber(nearest.x, worldX) - toFiniteNumber(centroid.x, worldX);
+        const fallbackY = toFiniteNumber(nearest.y, worldY) - toFiniteNumber(centroid.y, worldY);
+        const fallbackLen = Math.hypot(fallbackX, fallbackY);
+        if (fallbackLen > 0.0001) {
+          unitX = fallbackX / fallbackLen;
+          unitY = fallbackY / fallbackLen;
+          targetX = toFiniteNumber(nearest.x, worldX) + unitX * repelClearance;
+          targetY = toFiniteNumber(nearest.y, worldY) + unitY * repelClearance;
+        }
+      }
+      if (isPointInsidePolygon(polygon, targetX, targetY)) {
+        targetX = toFiniteNumber(nearest.x, worldX) + unitX * Math.max(0.08, repelClearance * 1.8);
+        targetY = toFiniteNumber(nearest.y, worldY) + unitY * Math.max(0.08, repelClearance * 1.8);
+      }
+      const normalSpeed = vx * unitX + vy * unitY;
+      const tangentX = vx - normalSpeed * unitX;
+      const tangentY = vy - normalSpeed * unitY;
+      const ejectSpeed = Math.max(repelSpeed, speed * repelVelocityScale);
+      const nextVx = unitX * ejectSpeed + tangentX * 0.16;
+      const nextVy = unitY * ejectSpeed + tangentY * 0.16;
+      try {
+        if (typeof body.SetEnabled === 'function') {
+          body.SetEnabled(true);
+        }
+        if (typeof body.SetAwake === 'function') {
+          body.SetAwake(true);
+        }
+        if (typeof body.SetTransform === 'function') {
+          const angle = typeof body.GetAngle === 'function' ? body.GetAngle() : 0;
+          body.SetTransform(new box2d.b2Vec2(targetX, targetY), angle);
+        }
+        if (typeof body.SetLinearVelocity === 'function') {
+          body.SetLinearVelocity(new box2d.b2Vec2(nextVx, nextVy));
+        }
+        marble.x = targetX;
+        marble.y = targetY;
+        if (marble.lastPosition && typeof marble.lastPosition === 'object') {
+          marble.lastPosition.x = targetX;
+          marble.lastPosition.y = targetY;
+        }
+        cacheOutsidePoint(marbleKey, targetX, targetY, now);
+        ejectCooldownByMarble[marbleKey] = now + repelCooldownMs;
+      } catch (_) {
+      }
+    }
   }
 
   function ensureVisualEffect() {
@@ -4195,8 +4378,12 @@ function createFilledWallPolylineVisualBehavior(def, env) {
   return {
     kind: 'wall_filled_polyline_visual',
     oid: def.oid,
-    tick() {
+    tick(now) {
       ensureVisualEffect();
+      if (env.isPaused()) {
+        return;
+      }
+      resolveMarblesInsideFilledWall(now);
     },
   };
 }
