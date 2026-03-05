@@ -203,6 +203,31 @@ function drawBottomBumperPath(ctx, halfLen, halfHeight) {
   ctx.closePath();
 }
 
+function drawStickyPadTopHoneyBand(ctx, halfWidth, halfHeight, options = {}) {
+  if (!ctx) {
+    return;
+  }
+  const safeHalfWidth = Math.max(0.08, toFiniteNumber(halfWidth, 1.1));
+  const safeHalfHeight = Math.max(0.04, toFiniteNumber(halfHeight, 0.24));
+  const alpha = clamp(toFiniteNumber(options.alpha, 1), 0.1, 1);
+  const bandHeight = safeHalfHeight * 0.2; // top 10% of full height
+  const topY = -safeHalfHeight;
+  const gradient = ctx.createLinearGradient(0, topY, 0, topY + bandHeight);
+  gradient.addColorStop(0, `rgba(255, 224, 141, ${0.94 * alpha})`);
+  gradient.addColorStop(0.55, `rgba(255, 194, 84, ${0.9 * alpha})`);
+  gradient.addColorStop(1, `rgba(232, 152, 35, ${0.86 * alpha})`);
+  ctx.fillStyle = gradient;
+  ctx.beginPath();
+  ctx.rect(-safeHalfWidth, topY, safeHalfWidth * 2, bandHeight);
+  ctx.fill();
+  ctx.strokeStyle = `rgba(255, 239, 180, ${0.9 * alpha})`;
+  ctx.lineWidth = Math.max(0.02, safeHalfHeight * 0.16);
+  ctx.beginPath();
+  ctx.moveTo(-safeHalfWidth, topY + bandHeight * 0.98);
+  ctx.lineTo(safeHalfWidth, topY + bandHeight * 0.98);
+  ctx.stroke();
+}
+
 function buildBottomBumperColliderPoints(halfLen, halfHeight) {
   const safeHalfLen = Math.max(0.08, toFiniteNumber(halfLen, 0.98));
   const safeHalfHeight = Math.max(0.05, toFiniteNumber(halfHeight, 0.34));
@@ -3941,6 +3966,8 @@ function createStickyPadBehavior(def, env) {
   let currentY = toFiniteNumber(def.y, 0);
   let lastX = currentX;
   let lastY = currentY;
+  let topBandVisualEffect = null;
+  let missingPadFrames = 0;
 
   function readPathPoint(raw, fallbackX, fallbackY) {
     if (!Array.isArray(raw) || raw.length < 2) {
@@ -4075,10 +4102,57 @@ function createStickyPadBehavior(def, env) {
     }
   }
 
+  function ensureTopBandVisualEffect() {
+    const roulette = env.getRoulette();
+    if (!roulette || !Array.isArray(roulette._effects)) {
+      return;
+    }
+    if (topBandVisualEffect && topBandVisualEffect.isDestroy !== true) {
+      return;
+    }
+    topBandVisualEffect = {
+      elapsed: 0,
+      duration: Number.MAX_SAFE_INTEGER,
+      isDestroy: false,
+      update(deltaMs) {
+        this.elapsed += toFiniteNumber(deltaMs, 0);
+        if (getPadEntry()) {
+          missingPadFrames = 0;
+        } else {
+          missingPadFrames += 1;
+        }
+        if (missingPadFrames > 720) {
+          this.isDestroy = true;
+        }
+      },
+      render(ctx) {
+        if (!ctx) {
+          return;
+        }
+        const halfWidth = Math.max(0.08, toFiniteNumber(def.width, 1.1));
+        const halfHeight = Math.max(0.04, toFiniteNumber(def.height, 0.24));
+        const entry = getPadEntry();
+        const centerX = toFiniteNumber(entry && entry.x, currentX);
+        const centerY = toFiniteNumber(entry && entry.y, currentY);
+        const angleRad = normalizeRotationRad(
+          entry && typeof entry.angle === 'number' ? entry.angle : NaN,
+          degToRad(toFiniteNumber(def.rotation, 0)),
+        );
+        ctx.save();
+        ctx.translate(centerX, centerY);
+        ctx.rotate(angleRad);
+        drawStickyPadTopHoneyBand(ctx, halfWidth, halfHeight, { alpha: 0.96 });
+        ctx.restore();
+      },
+    };
+    roulette._effects.push(topBandVisualEffect);
+  }
+
   return {
     kind: 'sticky_pad',
     oid: def.oid,
     tick(now) {
+      ensureTopBandVisualEffect();
       if (env.isPaused()) {
         return;
       }
@@ -4143,6 +4217,7 @@ function createStickyPadBehavior(def, env) {
       lastX = toFiniteNumber(safeState.lastX, currentX);
       lastY = toFiniteNumber(safeState.lastY, currentY);
       updatePadTransform(currentX, currentY, 0, 0);
+      ensureTopBandVisualEffect();
     },
   };
 }

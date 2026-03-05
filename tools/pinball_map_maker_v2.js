@@ -5523,6 +5523,33 @@ function drawBottomBumperPivotDetail(ctx, halfWidth, halfHeight) {
   ctx.restore();
 }
 
+function drawStickyPadTopHoneyBand(ctx, halfWidth, halfHeight, options = {}) {
+  if (!ctx) {
+    return;
+  }
+  const safeHalfWidth = Math.max(1.8, toFinite(halfWidth, 18));
+  const safeHalfHeight = Math.max(1.2, toFinite(halfHeight, 6));
+  const alpha = clamp(toFinite(options.alpha, 1), 0.15, 1);
+  const bandHeight = safeHalfHeight * 0.2; // top 10% of full height
+  const topY = -safeHalfHeight;
+  ctx.save();
+  const gradient = ctx.createLinearGradient(0, topY, 0, topY + bandHeight);
+  gradient.addColorStop(0, `rgba(255, 224, 141, ${0.94 * alpha})`);
+  gradient.addColorStop(0.55, `rgba(255, 194, 84, ${0.9 * alpha})`);
+  gradient.addColorStop(1, `rgba(232, 152, 35, ${0.86 * alpha})`);
+  ctx.fillStyle = gradient;
+  ctx.beginPath();
+  ctx.rect(-safeHalfWidth, topY, safeHalfWidth * 2, bandHeight);
+  ctx.fill();
+  ctx.strokeStyle = `rgba(255, 239, 180, ${0.92 * alpha})`;
+  ctx.lineWidth = Math.max(0.8, Math.min(1.6, safeHalfHeight * 0.22));
+  ctx.beginPath();
+  ctx.moveTo(-safeHalfWidth, topY + bandHeight * 0.98);
+  ctx.lineTo(safeHalfWidth, topY + bandHeight * 0.98);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function getGoalMarkerPreviewImage() {
   if (goalMarkerPreviewImage) {
     return goalMarkerPreviewImage;
@@ -5842,6 +5869,9 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
     ctx.rect(-drawWidth, -drawHeight, drawWidth * 2, drawHeight * 2);
     ctx.fill();
     ctx.stroke();
+    if (obj.type === 'sticky_pad') {
+      drawStickyPadTopHoneyBand(ctx, drawWidth, drawHeight, { alpha: selected ? 1 : 0.9 });
+    }
   }
   if (obj.type === 'fan') {
     const zone = fanZoneConfig(obj);
@@ -6038,6 +6068,7 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
       ctx.rect(-halfW, -halfH, halfW * 2, halfH * 2);
       ctx.fill();
       ctx.stroke();
+      drawStickyPadTopHoneyBand(ctx, halfW, halfH, { alpha: 0.96 });
       ctx.restore();
     }
   }
@@ -6315,6 +6346,14 @@ function drawCreateDragPreview(ctx, layout, drag) {
     ctx.rect(left, top, width, height);
     ctx.fill();
     ctx.stroke();
+    if (tool === 'sticky_pad' && width > 0.5 && height > 0.5) {
+      const centerX = left + width / 2;
+      const centerY = top + height / 2;
+      ctx.save();
+      ctx.translate(centerX, centerY);
+      drawStickyPadTopHoneyBand(ctx, width / 2, height / 2, { alpha: 0.92 });
+      ctx.restore();
+    }
     if (tool === 'magic_wizard') {
       const image = getMagicWizardPreviewImage();
       if (image && image.complete && image.naturalWidth > 0) {
@@ -6676,6 +6715,7 @@ function drawMakerCanvas() {
         ctx.rect(-halfW, -halfH, halfW * 2, halfH * 2);
         ctx.fill();
         ctx.stroke();
+        drawStickyPadTopHoneyBand(ctx, halfW, halfH, { alpha: 0.96 });
       } else if (isBottomBumper) {
         const preview = deepClone(directional);
         setBottomBumperDirectionByPivot(preview, targetWorld, false);
