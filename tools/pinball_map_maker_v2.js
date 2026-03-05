@@ -3953,7 +3953,7 @@ function duplicateSelectedObject() {
     setSelectedIndexes(newIndexes, { primaryIndex: newIndexes[newIndexes.length - 1] });
   }
   refreshCurrentJsonViewer();
-  return newIndexes.length;
+  return newIndexes;
 }
 
 function deleteSelectedObject() {
@@ -4058,8 +4058,16 @@ function runReverseSelectedObjectAction() {
 
 function runDuplicateSelectedObjectAction() {
   rememberUndoState('오브젝트 복제');
-  const count = duplicateSelectedObject();
+  const duplicatedIndexes = duplicateSelectedObject();
+  const count = Array.isArray(duplicatedIndexes) ? duplicatedIndexes.length : 0;
   syncObjectList();
+  if (count > 0) {
+    const normalized = normalizeSelectionIndexes(duplicatedIndexes, getObjects().length);
+    if (normalized.length > 0) {
+      setSelectedIndexes(normalized, { primaryIndex: normalized[normalized.length - 1] });
+      syncObjectList();
+    }
+  }
   queueObjectLiveDraftApply('오브젝트 복제');
   drawMakerCanvas();
   setStatus(count > 1 ? `선택 오브젝트 ${count}개 복제 완료` : '선택 오브젝트 복제 완료');
@@ -6972,16 +6980,7 @@ function beginHandleDrag(index, handle) {
       return false;
     }
     const anchor = getObjectAnchorWorld(obj);
-    editorState.dragState = {
-      type: 'move',
-      index,
-      offsetX: 0,
-      offsetY: 0,
-      moved: false,
-      anchorX: anchor.x,
-      anchorY: anchor.y,
-    };
-    return true;
+    return beginMoveDrag(index, anchor);
   }
   if (handle.kind === 'wall_point') {
     editorState.dragState = {
@@ -8394,7 +8393,13 @@ function handleMakerCanvasPointerDown(event) {
         }
         setSelectedIndexes(selected, { primaryIndex: nearestIndex, keepFloatingHidden: true });
       } else {
-        setSingleSelectedIndex(nearestIndex, { keepFloatingHidden: true });
+        const selected = getSelectedIndexes();
+        const keepGroupSelection = selected.length > 1 && selected.includes(nearestIndex);
+        if (keepGroupSelection) {
+          setSelectedIndexes(selected, { primaryIndex: nearestIndex, keepFloatingHidden: true });
+        } else {
+          setSingleSelectedIndex(nearestIndex, { keepFloatingHidden: true });
+        }
       }
       editorState.floatingInspectorHiddenByUser = true;
     } else if (!additiveMode && !subtractMode) {
