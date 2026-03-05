@@ -3790,9 +3790,11 @@ function applyObjectEditorValues() {
       elements.objExtra2Input ? elements.objExtra2Input.value : (Array.isArray(obj.pathB) ? obj.pathB[1] : obj.y),
       toFinite(obj.y, 0),
     );
+    const stickyMinY = getStageMinYWorld();
+    const stickyMaxY = Math.max(25, getGoalYWorld() + 4);
     let target = {
       x: round1(clamp(rawTargetX, 0.1, WORLD_WIDTH - 0.1)),
-      y: round1(clamp(rawTargetY, 0.1, Math.max(25, getGoalYWorld() + 4))),
+      y: round1(clamp(rawTargetY, stickyMinY, stickyMaxY)),
     };
     const hitDistance = toFinite(
       elements.objHitDistanceInput ? elements.objHitDistanceInput.value : NaN,
@@ -3808,7 +3810,7 @@ function applyObjectEditorValues() {
       } else {
         const scale = hitDistance / dist;
         target.x = round1(clamp(obj.x + dx * scale, 0.1, WORLD_WIDTH - 0.1));
-        target.y = round1(clamp(obj.y + dy * scale, 0.1, Math.max(25, getGoalYWorld() + 4)));
+        target.y = round1(clamp(obj.y + dy * scale, stickyMinY, stickyMaxY));
       }
     }
     obj.pathA = [obj.x, obj.y];
@@ -7332,6 +7334,8 @@ function setStickyPathTarget(obj, point, shiftKey = false) {
   }
   const ax = toFinite(obj.x, 0);
   const ay = toFinite(obj.y, 0);
+  const stickyMinY = getStageMinYWorld();
+  const stickyMaxY = Math.max(25, getGoalYWorld() + 4);
   let target = {
     x: toFinite(point && point.x, ax),
     y: toFinite(point && point.y, ay),
@@ -7340,7 +7344,7 @@ function setStickyPathTarget(obj, point, shiftKey = false) {
     target = snapPointBy45({ x: ax, y: ay }, target);
   }
   target.x = round1(clamp(target.x, 0.1, WORLD_WIDTH - 0.1));
-  target.y = round1(clamp(target.y, 0.1, Math.max(25, getGoalYWorld() + 4)));
+  target.y = round1(clamp(target.y, stickyMinY, stickyMaxY));
   obj.pathA = [round1(ax), round1(ay)];
   obj.pathB = [target.x, target.y];
   return true;
