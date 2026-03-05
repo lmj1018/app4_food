@@ -14,11 +14,13 @@ class PinballV2ScreenArgs {
     required this.candidates,
     required this.mapId,
     this.autoStart = true,
+    this.waitForFullRanking = false,
   });
 
   final List<String> candidates;
   final String mapId;
   final bool autoStart;
+  final bool waitForFullRanking;
 }
 
 class PinballV2Screen extends StatefulWidget {
@@ -75,6 +77,7 @@ SOFTWARE.
   Directory? _cachedLocalMapsDir;
   Timer? _startupTimer;
   Timer? _winnerMonitorTimer;
+  int _winnerMonitorTicks = 0;
 
   bool _pageLoaded = false;
   bool _isStarting = false;
@@ -186,6 +189,7 @@ SOFTWARE.
   void _clearWinnerMonitor() {
     _winnerMonitorTimer?.cancel();
     _winnerMonitorTimer = null;
+    _winnerMonitorTicks = 0;
   }
 
   void _clearMapLabelOverlayTimer() {
@@ -1073,6 +1077,14 @@ SOFTWARE.
   const winner = roulette && roulette._winner && typeof roulette._winner.name === 'string'
     ? roulette._winner.name
     : '';
+  const ranking = Array.isArray(roulette && roulette._winners)
+    ? roulette._winners
+        .map((item) => item && typeof item.name === 'string' ? item.name.trim() : '')
+        .filter((name) => !!name)
+    : [];
+  if (winner && !ranking.includes(winner)) {
+    ranking.unshift(winner);
+  }
   const state = api && typeof api.getState === 'function' ? api.getState() : null;
   const running = !!(state && state.running === true);
   const timeScale = Number(roulette && roulette._timeScale);
@@ -1081,27 +1093,56 @@ SOFTWARE.
     running
     && ((Number.isFinite(timeScale) && timeScale < 0.999) || (Number.isFinite(goalDist) && goalDist < 5))
   );
-  return JSON.stringify({ winner, state, slowMotionActive, timeScale, goalDist });
+  return JSON.stringify({ winner, ranking, state, slowMotionActive, timeScale, goalDist });
 })()
 ''');
         final parsed = _decodeJsMap(raw);
+        _winnerMonitorTicks += 1;
         final winner = (parsed?['winner'] ?? '').toString().trim();
+        final ranking = _extractStringList(parsed?['ranking']);
+        final stateMap = _coerceStringKeyMap(parsed?['state']);
+        final stateRanking = _extractStringList(stateMap?['ranking']);
+        final mergedRanking = _normalizeRankingForResult(
+          ranking.isNotEmpty ? ranking : stateRanking,
+          winner: winner,
+        );
         final slowMotionActive = parsed?['slowMotionActive'] == true;
         _updateSlowMotionBanner(slowMotionActive);
-        if (winner.isNotEmpty) {
-          _finish(winner);
-          return;
-        }
-        final state = parsed?['state'];
-        if (state is Map && mounted) {
-          _syncMapLabel(_coerceStringKeyMap(state));
-          final running = state['running'] == true;
+        if (stateMap != null && mounted) {
+          _syncMapLabel(stateMap);
+          final running = stateMap['running'] == true;
           if (!running && !_hasError) {
-            final text = (state['statusText'] ?? '').toString().trim();
+            final text = (stateMap['statusText'] ?? '').toString().trim();
             if (text.isNotEmpty) {
               _setStatus(text);
             }
           }
+        }
+        final running = stateMap?['running'] == true;
+        if (winner.isNotEmpty) {
+          if (widget.args.waitForFullRanking) {
+            final candidateCount = _toInt(
+              stateMap?['candidateCount'],
+              fallback: _candidates.length,
+            );
+            final expectedCount = max(2, candidateCount);
+            final rankingComplete = mergedRanking.length >= expectedCount;
+            final timedOut = _winnerMonitorTicks > 900;
+            if (!rankingComplete && !timedOut && running) {
+              if (_winnerMonitorTicks % 20 == 0) {
+                _setStatus('1등 확정. 전체 순위 집계 중...');
+              }
+              return;
+            }
+          }
+          _finish(winner, ranking: mergedRanking);
+          return;
+        }
+        if (widget.args.waitForFullRanking &&
+            !running &&
+            mergedRanking.isNotEmpty) {
+          _finish(mergedRanking.first, ranking: mergedRanking);
+          return;
         }
       } catch (_) {}
     });
@@ -1143,7 +1184,52 @@ SOFTWARE.
     return '';
   }
 
-  void _finish(String winner) {
+  List<String> _extractStringList(dynamic payload) {
+    if (payload is! List) {
+      return const <String>[];
+    }
+    return payload
+        .map((item) => item == null ? '' : item.toString().trim())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  List<String> _normalizeRankingForResult(
+    List<String> ranking, {
+    required String winner,
+  }) {
+    final normalized = <String>[];
+    final seen = <String>{};
+    final winnerName = winner.trim();
+    if (winnerName.isNotEmpty) {
+      normalized.add(winnerName);
+      seen.add(winnerName);
+    }
+    for (final raw in ranking) {
+      final value = raw.trim();
+      if (value.isEmpty || seen.contains(value)) {
+        continue;
+      }
+      normalized.add(value);
+      seen.add(value);
+    }
+    return normalized;
+  }
+
+  int _toInt(dynamic value, {int fallback = 0}) {
+    if (value is int) {
+      return value;
+    }
+    if (value is num) {
+      return value.toInt();
+    }
+    if (value is String) {
+      return int.tryParse(value.trim()) ?? fallback;
+    }
+    return fallback;
+  }
+
+  void _finish(String winner, {List<String> ranking = const <String>[]}) {
     if (_isFinishing || !mounted) {
       return;
     }
@@ -1151,7 +1237,20 @@ SOFTWARE.
     _clearStartupTimer();
     _clearWinnerMonitor();
     _clearSlowMotionBannerTimer();
-    Navigator.pop<String>(context, winner);
+    final normalizedWinner = winner.trim();
+    final normalizedRanking = _normalizeRankingForResult(
+      ranking,
+      winner: normalizedWinner,
+    );
+    if (widget.args.waitForFullRanking || normalizedRanking.length > 1) {
+      Navigator.pop<Map<String, dynamic>>(context, <String, dynamic>{
+        'winner': normalizedWinner,
+        'ranking': normalizedRanking,
+        'top3': normalizedRanking.take(3).toList(growable: false),
+      });
+      return;
+    }
+    Navigator.pop<String>(context, normalizedWinner);
   }
 
   Future<void> _onBridgeMessage(JavaScriptMessage message) async {
@@ -1168,7 +1267,10 @@ SOFTWARE.
       final winner = _extractWinnerName(parsed['payload']);
       if (winner.isNotEmpty) {
         _pushRuntimeDebug('goal', parsed['payload']);
-        _finish(winner);
+        final ranking = _extractStringList(
+          parsed['payload'] is Map ? parsed['payload']['ranking'] : null,
+        );
+        _finish(winner, ranking: ranking);
       }
       return;
     }

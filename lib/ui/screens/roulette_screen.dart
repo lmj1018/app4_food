@@ -165,6 +165,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
 
   bool _isSpinning = false;
   String? _spinProgressText;
+  bool _showAllCustomRankingInResult = false;
   int _spinGateState = _spinGateStateReady;
   DateTime? _spinCooldownUntil;
   Timer? _spinCooldownTicker;
@@ -1915,6 +1916,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
         ),
         launchConfig: launchConfig,
         candidateNames: entries,
+        waitForFullRanking: _showAllCustomRankingInResult,
       );
     } finally {
       if (mounted) {
@@ -2039,6 +2041,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
     required RouletteResultArgs args,
     required _PinballLaunchConfig launchConfig,
     required List<String> candidateNames,
+    bool waitForFullRanking = false,
     List<RankedPlace> rankedCandidates = const <RankedPlace>[],
   }) async {
     final normalizedCandidates = candidateNames
@@ -2059,6 +2062,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
           candidates: normalizedCandidates,
           mapId: launchConfig.v2MapId ?? 'v2_default',
           autoStart: true,
+          waitForFullRanking: waitForFullRanking,
         ),
       );
     } else {
@@ -2074,15 +2078,22 @@ class _RouletteScreenState extends State<RouletteScreen> {
           candidates: normalizedCandidates,
           autoStart: true,
           selectedMapIndex: effectiveMapIndex,
+          waitForFullRanking: waitForFullRanking,
         ),
       );
     }
-    if (!mounted || pinballResult == null || pinballResult is! String) {
+    if (!mounted || pinballResult == null) {
       return false;
     }
-    final winner = pinballResult.trim();
-
-    final winnerName = winner;
+    final outcome = _parsePinballOutcome(pinballResult);
+    if (outcome == null) {
+      return false;
+    }
+    final winnerName = outcome.winner;
+    final rankingNames = args.mode == RouletteMode.custom &&
+            waitForFullRanking
+        ? outcome.ranking
+        : const <String>[];
     final matchedStore =
         args.mode == RouletteMode.store && rankedCandidates.isNotEmpty
         ? _findStoreByName(
@@ -2112,9 +2123,67 @@ class _RouletteScreenState extends State<RouletteScreen> {
         originLabel: args.originLabel,
         showSearchButton: args.showSearchButton,
         fromMood: args.fromMood,
+        rankingNames: rankingNames,
       ),
     );
     return true;
+  }
+
+  _PinballOutcome? _parsePinballOutcome(Object pinballResult) {
+    String winner = '';
+    List<String> ranking = const <String>[];
+
+    if (pinballResult is String) {
+      winner = pinballResult.trim();
+    } else if (pinballResult is Map) {
+      final dynamic rawWinner = pinballResult['winner'];
+      if (rawWinner is String) {
+        winner = rawWinner.trim();
+      } else if (rawWinner != null) {
+        winner = rawWinner.toString().trim();
+      }
+      ranking = _extractStringList(pinballResult['ranking']);
+    }
+
+    if (winner.isEmpty && ranking.isNotEmpty) {
+      winner = ranking.first;
+    }
+    if (winner.isEmpty) {
+      return null;
+    }
+    return _PinballOutcome(
+      winner: winner,
+      ranking: _normalizeRanking(winner, ranking),
+    );
+  }
+
+  List<String> _extractStringList(dynamic raw) {
+    if (raw is! List) {
+      return const <String>[];
+    }
+    return raw
+        .map((item) => item == null ? '' : item.toString().trim())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  List<String> _normalizeRanking(String winner, List<String> ranking) {
+    final normalized = <String>[];
+    final seen = <String>{};
+    final first = winner.trim();
+    if (first.isNotEmpty) {
+      normalized.add(first);
+      seen.add(first);
+    }
+    for (final item in ranking) {
+      final value = item.trim();
+      if (value.isEmpty || seen.contains(value)) {
+        continue;
+      }
+      normalized.add(value);
+      seen.add(value);
+    }
+    return normalized;
   }
 
   RankedPlace? _findStoreByName({
@@ -2688,6 +2757,43 @@ class _RouletteScreenState extends State<RouletteScreen> {
                   ),
                 ),
                 const SizedBox(height: 28),
+                if (isCustomMode)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () {
+                        setState(() {
+                          _showAllCustomRankingInResult =
+                              !_showAllCustomRankingInResult;
+                        });
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(4, 0, 0, 8),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Checkbox(
+                              value: _showAllCustomRankingInResult,
+                              onChanged: (value) {
+                                setState(() {
+                                  _showAllCustomRankingInResult =
+                                      value ?? false;
+                                });
+                              },
+                            ),
+                            Text(
+                              '모든등수보기',
+                              style: textTheme.bodyMedium?.copyWith(
+                                color: const Color(0xFF2F3237),
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 GlowingActionButton(
                   onTap: canSpin ? _onSpinButtonPressed : null,
                   isLoading:
@@ -2836,6 +2942,13 @@ class _StoreSelectionContext {
 
   final String queryKeyword;
   final String reasonLabel;
+}
+
+class _PinballOutcome {
+  const _PinballOutcome({required this.winner, required this.ranking});
+
+  final String winner;
+  final List<String> ranking;
 }
 
 class _PinballMapChoice {

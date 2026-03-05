@@ -1232,7 +1232,15 @@ function wireGoalEvent() {
     const winner = event && event.detail && typeof event.detail.winner === 'string'
       ? event.detail.winner
       : '';
-    postBridge('goal', { winner });
+    const ranking = Array.isArray(roulette && roulette._winners)
+      ? roulette._winners
+          .map((item) => item && typeof item.name === 'string' ? item.name.trim() : '')
+          .filter((name) => !!name)
+      : [];
+    if (winner && !ranking.includes(winner)) {
+      ranking.unshift(winner);
+    }
+    postBridge('goal', { winner, ranking });
   });
   roulette.__v2GoalWired = true;
 }
@@ -2176,6 +2184,17 @@ function getState() {
   const roulette = getRoulette();
   const marbles = roulette && Array.isArray(roulette._marbles) ? roulette._marbles : [];
   const running = roulette ? roulette._isRunning === true : false;
+  const winner = roulette && roulette._winner && typeof roulette._winner.name === 'string'
+    ? roulette._winner.name.trim()
+    : '';
+  const ranking = Array.isArray(roulette && roulette._winners)
+    ? roulette._winners
+        .map((item) => item && typeof item.name === 'string' ? item.name.trim() : '')
+        .filter((name) => !!name)
+    : [];
+  if (winner && !ranking.includes(winner)) {
+    ranking.unshift(winner);
+  }
   const slowMotionActive = running && (
     toFiniteNumber(roulette && roulette._timeScale, 1) < 0.999
     || toFiniteNumber(roulette && roulette._goalDist, Number.POSITIVE_INFINITY) < 5
@@ -2189,6 +2208,9 @@ function getState() {
       ? roulette._uiObjects.some((item) => isMiniMapUiObject(item))
       : false,
     slowMotionActive,
+    winner,
+    ranking,
+    top3: ranking.slice(0, 3),
     candidateCount: control.candidates.length,
     marbleCount: marbles.length,
     winningRank: control.winningRank,
