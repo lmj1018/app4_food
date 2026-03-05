@@ -126,6 +126,27 @@ function normalizeGoalMarkerImageSrc(value) {
 
 function normalizeMagicWizardImageSrc(value) {
   const raw = toId(value, '../../background/magic.svg');
+  let override = '';
+  try {
+    const candidate = typeof window !== 'undefined'
+      ? String(window.__v2MagicWizardImageDataUrl || '').trim()
+      : '';
+    const isDataImage = candidate.startsWith('data:image/');
+    const isHttpUrl = candidate.startsWith('http://') || candidate.startsWith('https://');
+    const isAppAssetPath = candidate.startsWith('/__app_asset/') || candidate.startsWith('__app_asset/');
+    if (isDataImage || isHttpUrl || isAppAssetPath) {
+      override = candidate;
+    }
+  } catch (_) {
+    override = '';
+  }
+  if (override) {
+    const lower = raw.toLowerCase();
+    const useOverride = lower.includes('magic.svg') || lower.includes('/background/');
+    if (useOverride) {
+      return override;
+    }
+  }
   return raw || '../../background/magic.svg';
 }
 

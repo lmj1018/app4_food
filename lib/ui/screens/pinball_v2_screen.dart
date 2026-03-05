@@ -101,6 +101,7 @@ SOFTWARE.
   String? _candidateImageKey;
   Map<String, String>? _candidateImageDataUrls;
   String? _goalLineImageDataUrl;
+  String? _magicWizardImageDataUrl;
   final List<String> _runtimeDebugTrail = <String>[];
 
   List<String> get _candidates => _cachedCandidates ??= () {
@@ -710,6 +711,25 @@ SOFTWARE.
     return imageUrl;
   }
 
+  Future<String> _resolveMagicWizardImageDataUrl() async {
+    if (_magicWizardImageDataUrl != null) {
+      return _magicWizardImageDataUrl!;
+    }
+    final baseUri = await _ensureLocalServer();
+    var imageUrl = await _resolveAppAssetUrl(
+      baseUri,
+      'assets/background/magic.svg',
+    );
+    if (imageUrl.isEmpty) {
+      imageUrl = await _resolveAppAssetUrl(
+        baseUri,
+        'assets/ui/pinball/assets/magic.svg',
+      );
+    }
+    _magicWizardImageDataUrl = imageUrl;
+    return imageUrl;
+  }
+
   Future<String> _resolveAppAssetUrl(Uri baseUri, String assetPath) async {
     try {
       await rootBundle.load(assetPath);
@@ -870,6 +890,7 @@ SOFTWARE.
 
     final imageDataUrls = await _resolveCandidateImageDataUrls();
     final goalLineImageDataUrl = await _resolveGoalLineImageDataUrl();
+    final magicWizardImageDataUrl = await _resolveMagicWizardImageDataUrl();
     if (!mounted || _isFinishing) {
       _isStarting = false;
       return;
@@ -886,6 +907,7 @@ SOFTWARE.
       'isPinballApp': true,
       'imageDataUrls': imageDataUrls,
       'goalLineImageDataUrl': goalLineImageDataUrl,
+      'magicWizardImageDataUrl': magicWizardImageDataUrl,
     };
     final encodedPayload = jsonEncode(payload);
 

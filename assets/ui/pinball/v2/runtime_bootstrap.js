@@ -328,9 +328,11 @@ function getConfiguredMarbleRadius() {
     if (Number.isFinite(stageRadius) && stageRadius > 0) {
       return normalizeMarbleRadius(stageRadius);
     }
-    return DEFAULT_MARBLE_RADIUS;
   }
-  return resolveConfiguredMarbleRadiusFromMap(control.mapJson);
+  return normalizeMarbleRadius(
+    resolveConfiguredMarbleRadiusFromMap(control.mapJson),
+    DEFAULT_MARBLE_RADIUS,
+  );
 }
 
 function applyMarbleRenderSize(radius) {
@@ -582,6 +584,19 @@ function setPayloadGoalMarkerImage(raw) {
     delete window.__v2GoalMarkerImageDataUrl;
   } catch (_) {
     window.__v2GoalMarkerImageDataUrl = '';
+  }
+}
+
+function setPayloadMagicWizardImage(raw) {
+  const src = typeof raw === 'string' ? raw.trim() : '';
+  if (isSupportedRuntimeImageSrc(src)) {
+    window.__v2MagicWizardImageDataUrl = src;
+    return;
+  }
+  try {
+    delete window.__v2MagicWizardImageDataUrl;
+  } catch (_) {
+    window.__v2MagicWizardImageDataUrl = '';
   }
 }
 
@@ -2088,6 +2103,17 @@ async function start() {
   setSkillsEnabled(false);
   roulette._isRunning = false;
   roulette.start();
+  // Some engine paths recreate marble fixtures on spin start; re-apply map radius shortly after.
+  enforceMarbleBodyPhysics();
+  patchRendererMarbleImages();
+  window.setTimeout(() => {
+    enforceMarbleBodyPhysics();
+    patchRendererMarbleImages();
+  }, 80);
+  window.setTimeout(() => {
+    enforceMarbleBodyPhysics();
+    patchRendererMarbleImages();
+  }, 220);
   postBridge('spinStarted', {
     mapId: control.mapId,
     count: marbles.length,
@@ -2224,6 +2250,7 @@ async function init(payload = {}) {
     }
     setPayloadMarbleImages(safePayload.imageDataUrls);
     setPayloadGoalMarkerImage(safePayload.goalLineImageDataUrl);
+    setPayloadMagicWizardImage(safePayload.magicWizardImageDataUrl);
 
     const mapResult = await loadMapById(selectedMapId);
     if (!mapResult.ok) {
