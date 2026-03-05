@@ -203,6 +203,71 @@ function drawBottomBumperPath(ctx, halfLen, halfHeight) {
   ctx.closePath();
 }
 
+function drawBottomBumperBrokenOverlay(ctx, halfLen, halfHeight, pulseRatio = 0) {
+  if (!ctx) {
+    return;
+  }
+  const safeHalfLen = Math.max(0.08, toFiniteNumber(halfLen, 0.98));
+  const safeHalfHeight = Math.max(0.05, toFiniteNumber(halfHeight, 0.34));
+  const pulse = clamp(toFiniteNumber(pulseRatio, 0), 0, 1);
+  const crackWidth = Math.max(0.018, safeHalfHeight * 0.16);
+  const tipX = safeHalfLen;
+
+  ctx.save();
+  drawBottomBumperPath(ctx, safeHalfLen, safeHalfHeight);
+  ctx.clip();
+
+  ctx.strokeStyle = `rgba(15, 26, 45, ${0.82 + pulse * 0.12})`;
+  ctx.lineWidth = crackWidth;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-safeHalfLen * 0.44, -safeHalfHeight * 0.34);
+  ctx.lineTo(-safeHalfLen * 0.1, -safeHalfHeight * 0.08);
+  ctx.lineTo(safeHalfLen * 0.24, -safeHalfHeight * 0.28);
+  ctx.lineTo(safeHalfLen * 0.58, -safeHalfHeight * 0.03);
+  ctx.moveTo(-safeHalfLen * 0.34, safeHalfHeight * 0.2);
+  ctx.lineTo(safeHalfLen * 0.02, safeHalfHeight * 0.02);
+  ctx.lineTo(safeHalfLen * 0.34, safeHalfHeight * 0.26);
+  ctx.lineTo(safeHalfLen * 0.64, safeHalfHeight * 0.06);
+  ctx.moveTo(-safeHalfLen * 0.08, -safeHalfHeight * 0.02);
+  ctx.lineTo(safeHalfLen * 0.08, safeHalfHeight * 0.05);
+  ctx.lineTo(safeHalfLen * 0.18, -safeHalfHeight * 0.02);
+  ctx.stroke();
+
+  ctx.strokeStyle = `rgba(235, 248, 255, ${0.26 + pulse * 0.34})`;
+  ctx.lineWidth = Math.max(0.008, crackWidth * 0.42);
+  ctx.beginPath();
+  ctx.moveTo(-safeHalfLen * 0.42, -safeHalfHeight * 0.3);
+  ctx.lineTo(-safeHalfLen * 0.12, -safeHalfHeight * 0.09);
+  ctx.lineTo(safeHalfLen * 0.2, -safeHalfHeight * 0.24);
+  ctx.moveTo(-safeHalfLen * 0.31, safeHalfHeight * 0.18);
+  ctx.lineTo(safeHalfLen * 0.03, safeHalfHeight * 0.03);
+  ctx.lineTo(safeHalfLen * 0.28, safeHalfHeight * 0.2);
+  ctx.stroke();
+
+  ctx.fillStyle = `rgba(12, 21, 36, ${0.66 + pulse * 0.22})`;
+  ctx.beginPath();
+  ctx.moveTo(tipX * 0.66, -safeHalfHeight * 0.34);
+  ctx.lineTo(tipX * 0.95, -safeHalfHeight * 0.08);
+  ctx.lineTo(tipX * 0.86, safeHalfHeight * 0.2);
+  ctx.lineTo(tipX * 0.6, safeHalfHeight * 0.06);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.strokeStyle = `rgba(255, 232, 155, ${0.44 + pulse * 0.34})`;
+  ctx.lineWidth = Math.max(0.01, crackWidth * 0.5);
+  ctx.beginPath();
+  for (let stripe = 0; stripe < 4; stripe += 1) {
+    const x = safeHalfLen * (0.22 + stripe * 0.12);
+    ctx.moveTo(x, -safeHalfHeight * 0.56);
+    ctx.lineTo(x - safeHalfHeight * 0.36, -safeHalfHeight * 0.12);
+  }
+  ctx.stroke();
+
+  ctx.restore();
+}
+
 function drawStickyPadTopHoneyBand(ctx, halfWidth, halfHeight, options = {}) {
   if (!ctx) {
     return;
@@ -2744,6 +2809,7 @@ function createBottomBumperBehavior(def, env) {
   let lastCenterY = NaN;
   let broken = false;
   let remainingBreakHits = configuredBreakHitCount;
+  let brokenAt = 0;
   let visualEffect = null;
 
   function getEntryByEntityId(targetEntityId) {
@@ -3030,9 +3096,18 @@ function createBottomBumperBehavior(def, env) {
         const halfHeight = Math.max(0.05, toFiniteNumber(def.height, 0.34));
         const mirror = def.mirror === true;
         const lineWidth = Math.max(0.08, 0.42 / Math.max(1, toFiniteNumber(zoomScale, 1)));
-        const bodyColor = typeof def.color === 'string' && !isTransparentColorString(def.color)
+        const normalBodyColor = typeof def.color === 'string' && !isTransparentColorString(def.color)
           ? def.color
           : DEFAULT_OBJECT_COLORS.bottomBumper;
+        const nowMs = Date.now();
+        const brokenElapsedMs = brokenAt > 0 ? Math.max(0, nowMs - brokenAt) : Number.MAX_SAFE_INTEGER;
+        const brokenFlashRatio = broken ? clamp(1 - brokenElapsedMs / 380, 0, 1) : 0;
+        const brokenPulseRatio = broken
+          ? 0.5 + 0.5 * Math.sin(this.elapsed * 0.012)
+          : 0;
+        const bodyColor = broken
+          ? `rgba(96, 128, 160, ${0.9 + brokenFlashRatio * 0.08})`
+          : normalBodyColor;
         const pivotX = -halfLen;
         const pivotRadius = Math.max(halfHeight * 0.36, 0.065);
         const pivotInner = Math.max(0.03, pivotRadius * 0.46);
@@ -3045,27 +3120,74 @@ function createBottomBumperBehavior(def, env) {
         }
 
         ctx.fillStyle = bodyColor;
-        ctx.strokeStyle = 'rgba(198, 236, 255, 0.96)';
+        ctx.strokeStyle = broken
+          ? `rgba(255, 226, 164, ${0.78 + brokenFlashRatio * 0.2})`
+          : 'rgba(198, 236, 255, 0.96)';
         ctx.lineWidth = lineWidth;
-        ctx.shadowColor = 'rgba(98, 182, 255, 0.28)';
-        ctx.shadowBlur = 0.22;
+        ctx.shadowColor = broken
+          ? `rgba(255, 178, 110, ${0.22 + brokenFlashRatio * 0.26})`
+          : 'rgba(98, 182, 255, 0.28)';
+        ctx.shadowBlur = broken ? 0.28 : 0.22;
         drawBottomBumperPath(ctx, halfLen, halfHeight);
         ctx.fill();
         ctx.shadowBlur = 0;
         ctx.stroke();
 
-        ctx.fillStyle = 'rgba(12, 22, 44, 0.96)';
-        ctx.strokeStyle = 'rgba(201, 235, 255, 0.96)';
+        if (broken) {
+          const burstRatio = clamp(1 - brokenElapsedMs / 260, 0, 1);
+          ctx.fillStyle = `rgba(255, 146, 86, ${0.16 + brokenFlashRatio * 0.24})`;
+          drawBottomBumperPath(ctx, halfLen, halfHeight);
+          ctx.fill();
+          drawBottomBumperBrokenOverlay(
+            ctx,
+            halfLen,
+            halfHeight,
+            Math.max(brokenFlashRatio, brokenPulseRatio * 0.8),
+          );
+          if (burstRatio > 0.01) {
+            const spread = 0.06 + (1 - burstRatio) * 0.16;
+            const shardLength = Math.max(halfHeight * 0.48, 0.05);
+            ctx.strokeStyle = `rgba(238, 248, 255, ${0.2 + burstRatio * 0.72})`;
+            ctx.lineWidth = Math.max(0.04, lineWidth * 0.54);
+            ctx.beginPath();
+            for (let shard = 0; shard < 6; shard += 1) {
+              const t = (shard / 5) * 2 - 1;
+              const angle = t * 0.82;
+              const sx = halfLen * 0.95 + Math.cos(angle) * spread;
+              const sy = Math.sin(angle) * (halfHeight * 0.82 + spread * 0.6);
+              const ex = sx + Math.cos(angle) * shardLength;
+              const ey = sy + Math.sin(angle) * shardLength * 0.88;
+              ctx.moveTo(sx, sy);
+              ctx.lineTo(ex, ey);
+            }
+            ctx.stroke();
+          }
+        }
+
+        ctx.fillStyle = broken ? 'rgba(19, 24, 34, 0.97)' : 'rgba(12, 22, 44, 0.96)';
+        ctx.strokeStyle = broken
+          ? `rgba(255, 217, 152, ${0.74 + brokenFlashRatio * 0.18})`
+          : 'rgba(201, 235, 255, 0.96)';
         ctx.lineWidth = Math.max(0.07, lineWidth * 0.82);
         ctx.beginPath();
         ctx.arc(pivotX, 0, pivotRadius, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
 
-        ctx.fillStyle = 'rgba(135, 207, 255, 0.96)';
+        ctx.fillStyle = broken
+          ? `rgba(255, 150, 112, ${0.86 + brokenFlashRatio * 0.1})`
+          : 'rgba(135, 207, 255, 0.96)';
         ctx.beginPath();
         ctx.arc(pivotX, 0, pivotInner, 0, Math.PI * 2);
         ctx.fill();
+        if (broken) {
+          ctx.strokeStyle = `rgba(255, 242, 208, ${0.34 + brokenPulseRatio * 0.3})`;
+          ctx.lineWidth = Math.max(0.03, lineWidth * 0.42);
+          ctx.beginPath();
+          ctx.moveTo(pivotX - pivotRadius * 0.44, -pivotRadius * 0.44);
+          ctx.lineTo(pivotX + pivotRadius * 0.44, pivotRadius * 0.44);
+          ctx.stroke();
+        }
         ctx.restore();
       },
     };
@@ -3164,6 +3286,7 @@ function createBottomBumperBehavior(def, env) {
       return;
     }
     broken = true;
+    brokenAt = now;
     swingStartAt = now;
     swingUntil = now;
     const mainEntry = getMainEntry();
@@ -3275,6 +3398,7 @@ function createBottomBumperBehavior(def, env) {
         lastCenterX: toFiniteNumber(lastCenterX, toFiniteNumber(def.x, 0)),
         lastCenterY: toFiniteNumber(lastCenterY, toFiniteNumber(def.y, 0)),
         broken,
+        brokenAt: toFiniteNumber(brokenAt, 0),
         remainingBreakHits: Math.max(0, toFiniteNumber(remainingBreakHits, configuredBreakHitCount)),
         cooldownByMarble: { ...cooldownByMarble },
         ejectCooldownByMarble: { ...ejectCooldownByMarble },
@@ -3308,6 +3432,13 @@ function createBottomBumperBehavior(def, env) {
       }
       const hasBrokenFlag = Object.prototype.hasOwnProperty.call(safeState, 'broken');
       broken = hasBrokenFlag ? safeState.broken === true : configuredBreakHitCount > 0 && toFiniteNumber(safeState.remainingBreakHits, configuredBreakHitCount) <= 0;
+      brokenAt = Math.max(
+        0,
+        toFiniteNumber(
+          safeState.brokenAt,
+          broken ? Date.now() - 9999 : 0,
+        ),
+      );
       remainingBreakHits = Math.max(
         0,
         Math.floor(
