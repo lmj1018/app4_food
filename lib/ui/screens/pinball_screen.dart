@@ -39,8 +39,8 @@ class PinballScreen extends StatefulWidget {
 class _PinballScreenState extends State<PinballScreen> {
   static const String _pinballAssetDir = 'assets/ui/pinball';
   static const Duration _startupTimeout = Duration(seconds: 35);
-  static const int _normalCountdownTotalMs = 57600;
-  static const int _fullRankingCountdownTotalMs = 108000;
+  static const int _normalCountdownTotalMs = 86400;
+  static const int _fullRankingCountdownTotalMs = 162000;
   static const Duration _countdownTickInterval = Duration(milliseconds: 50);
   static const String _thirdPartyNoticesAssetPath =
       'assets/licenses/THIRD_PARTY_NOTICES.txt';
@@ -6151,7 +6151,7 @@ SOFTWARE.
     }
     // timeout-based forced winner judgement enabled (extended)
     const runMs = now - (Number(control.runStartedAt) || now);
-    if (runMs < 120000) {
+    if (runMs < 180000) {
       return;
     }
 
@@ -6825,7 +6825,7 @@ SOFTWARE.
   }
 
   Future<void> _monitorWinnerFallback(int generation, int ticket) async {
-    final maxTicks = _waitForFullRanking ? 900 : 480;
+    final maxTicks = _waitForFullRanking ? 1350 : 720;
     for (var i = 0; i < maxTicks; i++) {
       if (!mounted ||
           _isFinishing ||
@@ -6869,11 +6869,11 @@ SOFTWARE.
             );
           });
         }
-        if (i > 720 && winner.isNotEmpty) {
+        if (i > 1080 && winner.isNotEmpty) {
           _finish(winner, ranking: finalRanking);
           return;
         }
-        if (i > 840 && finalRanking.isNotEmpty) {
+        if (i > 1260 && finalRanking.isNotEmpty) {
           _finish(finalRanking.first, ranking: finalRanking);
           return;
         }
@@ -6886,7 +6886,7 @@ SOFTWARE.
           _logPinballStatus('결과 확정 처리 중...');
         });
       }
-      if (!_waitForFullRanking && i > 240 && top3.isNotEmpty) {
+      if (!_waitForFullRanking && i > 360 && top3.isNotEmpty) {
         _finish(top3.first, ranking: finalRanking);
         return;
       }
