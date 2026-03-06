@@ -471,11 +471,15 @@ class _AnimatedRankingListState extends State<_AnimatedRankingList>
   Color _nameColorForIndex(int index) {
     const baseColor = Color(0xFFE6006E);
     final hsl = HSLColor.fromColor(baseColor);
+    final rank = index + 2;
     final lightness = (hsl.lightness - 0.07 - (index * 0.022)).clamp(
       0.26,
       0.58,
     );
-    final saturation = (hsl.saturation * 0.72).clamp(0.42, 0.88);
+    final saturationFactor = rank >= 10
+        ? 0.0
+        : ((10 - rank) / 8).clamp(0.0, 1.0).toDouble();
+    final saturation = (hsl.saturation * saturationFactor).clamp(0.0, 1.0);
     return hsl.withLightness(lightness).withSaturation(saturation).toColor();
   }
 
