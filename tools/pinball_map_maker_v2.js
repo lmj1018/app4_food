@@ -16,6 +16,8 @@ const GOAL_MARKER_IMAGE_DEFAULT_SRC = '../../background/finish.png';
 const GOAL_MARKER_IMAGE_PREVIEW_SRC = '../assets/background/finish.png';
 const MAGIC_WIZARD_IMAGE_DEFAULT_SRC = '../../background/magic.svg';
 const MAGIC_WIZARD_IMAGE_PREVIEW_SRC = '../assets/background/magic.svg';
+const NINJA_IMAGE_DEFAULT_SRC = '../../background/ninja.svg';
+const NINJA_IMAGE_PREVIEW_SRC = '../assets/background/ninja.svg';
 const DEFAULT_SKILL_WARMUP_SEC = 5;
 const OBJECT_COLOR_PRESET = {
   wall: '#ff7cc8',
@@ -36,6 +38,7 @@ const OBJECT_COLOR_PRESET = {
   physicsBall: '#ff79cb',
   goalMarker: '#ffc4e7',
   magicWizard: '#ffa66c',
+  ninja: '#ffd08a',
 };
 const DEFAULT_MARBLE_SIZE_SCALE = 1;
 const MIN_MARBLE_SIZE_SCALE = 0.4;
@@ -65,6 +68,7 @@ const undoHistory = [];
 const redoHistory = [];
 let goalMarkerPreviewImage = null;
 let magicWizardPreviewImage = null;
+let ninjaPreviewImage = null;
 
 let mapCatalog = [];
 let workingMapJson = null;
@@ -351,6 +355,34 @@ function isDirectionFacingLeftDeg(value) {
   return deg > 90 && deg < 270;
 }
 
+function isMagicWizardType(type) {
+  return String(type || '') === 'magic_wizard';
+}
+
+function isNinjaType(type) {
+  return String(type || '') === 'ninja';
+}
+
+function isRangedCasterType(type) {
+  return isMagicWizardType(type) || isNinjaType(type);
+}
+
+function rangedCasterLabel(type) {
+  return isNinjaType(type) ? '닌자' : '마법사';
+}
+
+function rangedCasterProjectileLabel(type) {
+  return isNinjaType(type) ? '표창' : '화염구';
+}
+
+function rangedCasterAccentColor(type) {
+  return isNinjaType(type) ? '#ffd8a2' : '#ffbe86';
+}
+
+function getRangedCasterDefaultImageSrc(type) {
+  return isNinjaType(type) ? NINJA_IMAGE_DEFAULT_SRC : MAGIC_WIZARD_IMAGE_DEFAULT_SRC;
+}
+
 function getMagicWizardRenderMirror(obj, dirDegValue = null) {
   const dirDeg = normalizeDeg(
     dirDegValue == null
@@ -362,22 +394,33 @@ function getMagicWizardRenderMirror(obj, dirDegValue = null) {
 }
 
 function getMagicWizardTravelDistance(obj, fallback = 7.4) {
+  const type = String(obj && obj.type ? obj.type : '');
+  const distanceFieldValue = isNinjaType(type)
+    ? obj && obj.shurikenDistance
+    : obj && obj.fireballDistance;
+  const speedFieldValue = isNinjaType(type)
+    ? obj && obj.shurikenSpeed
+    : obj && obj.fireballSpeed;
   const base = Math.max(
     0.2,
     toFinite(
-      obj && obj.fireballDistance,
-      toFinite(obj && obj.hitDistance, toFinite(obj && obj.fireballSpeed, fallback)),
+      distanceFieldValue,
+      toFinite(obj && obj.hitDistance, toFinite(speedFieldValue, fallback)),
     ),
   );
   return round2(clamp(base, 0.2, 24));
 }
 
 function setMagicWizardTravelDistance(obj, distance) {
-  if (!obj || String(obj.type || '') !== 'magic_wizard') {
+  if (!obj || !isRangedCasterType(obj.type)) {
     return 0;
   }
   const safe = round2(clamp(toFinite(distance, getMagicWizardTravelDistance(obj, 7.4)), 0.2, 24));
-  obj.fireballDistance = safe;
+  if (isNinjaType(obj.type)) {
+    obj.shurikenDistance = safe;
+  } else {
+    obj.fireballDistance = safe;
+  }
   obj.hitDistance = safe;
   return safe;
 }
@@ -960,6 +1003,52 @@ function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
         obj.fireballRadius = Math.max(0.05, toFinite(obj.fireballRadius, toFinite(obj.radius, 0.2)));
         obj.force = Math.max(0.1, toFinite(obj.force, 2.8));
         obj.imageSrc = MAGIC_WIZARD_IMAGE_DEFAULT_SRC;
+        if (typeof obj.color !== 'string' || !obj.color.trim()) {
+          obj.color = 'rgba(0,0,0,0)';
+        }
+      } else if (type === 'ninja') {
+        obj.width = Math.max(0.08, toFinite(obj.width, 0.8));
+        obj.height = Math.max(0.08, toFinite(obj.height, 0.8));
+        obj.dirDeg = round1(normalizeDeg(toFinite(obj.dirDeg, toFinite(obj.rotation, 0))));
+        obj.rotation = obj.dirDeg;
+        obj.mirror = false;
+        obj.fireIntervalMs = Math.max(120, Math.floor(toFinite(obj.fireIntervalMs, toFinite(obj.intervalMs, 900))));
+        obj.shurikenSpeed = Math.max(
+          0.2,
+          toFinite(obj.shurikenSpeed, toFinite(obj.fireballSpeed, toFinite(obj.hitDistance, 7.4))),
+        );
+        obj.shurikenDistance = Math.max(0.2, toFinite(
+          obj.shurikenDistance,
+          toFinite(obj.fireballDistance, toFinite(obj.hitDistance, obj.shurikenSpeed)),
+        ));
+        obj.hitDistance = obj.shurikenDistance;
+        obj.shurikenRadius = Math.max(0.05, toFinite(obj.shurikenRadius, toFinite(obj.fireballRadius, toFinite(obj.radius, 0.2))));
+        obj.shurikenLifeMs = Math.max(320, Math.floor(toFinite(obj.shurikenLifeMs, toFinite(obj.fireballLifeMs, 1300))));
+        obj.shurikenCount = Math.max(1, Math.floor(toFinite(obj.shurikenCount, toFinite(obj.projectileCount, 1))));
+        obj.randomAngleEnabled = obj.randomAngleEnabled === true
+          || obj.randomAngleEnabled === 1
+          || String(obj.randomAngleEnabled || '').trim().toLowerCase() === 'true'
+          || obj.randomAngle === true
+          || obj.randomAngle === 1
+          || String(obj.randomAngle || '').trim().toLowerCase() === 'true';
+        obj.randomAngleRangeDeg = Math.max(
+          0,
+          toFinite(obj.randomAngleRangeDeg, toFinite(obj.randomAngleDeg, 30)),
+        );
+        obj.shurikenPropelMs = Math.max(120, Math.floor(toFinite(obj.shurikenPropelMs, toFinite(obj.propelMs, 620))));
+        obj.shurikenGravity = Math.max(0, toFinite(obj.shurikenGravity, toFinite(obj.gravity, 10)));
+        obj.shurikenStickMs = Math.max(280, Math.floor(toFinite(obj.shurikenStickMs, toFinite(obj.stickMs, 2000))));
+        obj.shurikenPierceBalls = obj.shurikenPierceBalls === true
+          || obj.shurikenPierceBalls === 1
+          || String(obj.shurikenPierceBalls || '').trim().toLowerCase() === 'true'
+          || obj.persistAfterHit === true
+          || obj.persistAfterHit === 1
+          || String(obj.persistAfterHit || '').trim().toLowerCase() === 'true'
+          || obj.pierceBalls === true
+          || obj.pierceBalls === 1
+          || String(obj.pierceBalls || '').trim().toLowerCase() === 'true';
+        obj.imageSrc = NINJA_IMAGE_DEFAULT_SRC;
+        obj.noCollision = true;
         if (typeof obj.color !== 'string' || !obj.color.trim()) {
           obj.color = 'rgba(0,0,0,0)';
         }
@@ -1882,6 +1971,8 @@ function toolDisplayName(tool) {
       return '선풍기';
     case 'magic_wizard':
       return '마법사 화염';
+    case 'ninja':
+      return '닌자 표창';
     case 'sticky_pad':
       return '이동 점착패드';
     case 'burst_bumper':
@@ -1924,6 +2015,7 @@ function defaultRestitutionForType(type) {
     case 'bottom_bumper':
     case 'fan':
     case 'magic_wizard':
+    case 'ninja':
     case 'sticky_pad':
     case 'black_hole':
     case 'white_hole':
@@ -1984,6 +2076,7 @@ function defaultColorForObjectType(type) {
     case 'fan':
       return OBJECT_COLOR_PRESET.fan;
     case 'magic_wizard':
+    case 'ninja':
       return 'rgba(0,0,0,0)';
     case 'sticky_pad':
       return OBJECT_COLOR_PRESET.sticky;
@@ -2020,7 +2113,7 @@ function isDirectionalTargetObject(obj) {
     || type === 'bottom_bumper'
     || type === 'fan'
     || type === 'sticky_pad'
-    || type === 'magic_wizard';
+    || isRangedCasterType(type);
 }
 
 function isAimDirectionalObject(obj) {
@@ -2028,7 +2121,7 @@ function isAimDirectionalObject(obj) {
     return false;
   }
   const type = String(obj.type || '');
-  return type === 'hammer' || type === 'bottom_bumper' || type === 'fan' || type === 'magic_wizard';
+  return type === 'hammer' || type === 'bottom_bumper' || type === 'fan' || isRangedCasterType(type);
 }
 
 function isPolylineTool(tool) {
@@ -2186,6 +2279,7 @@ function setSelectedTool(tool) {
     'bottom_bumper',
     'fan',
     'magic_wizard',
+    'ninja',
     'sticky_pad',
     'burst_bumper',
     'domino_block',
@@ -2449,6 +2543,36 @@ function createObjectByTool(tool, x, y) {
       color: 'rgba(0,0,0,0)',
     };
   }
+  if (tool === 'ninja') {
+    return {
+      oid: nextOid('ninja'),
+      type: 'ninja',
+      x: px,
+      y: py,
+      width: 0.8,
+      height: 0.8,
+      rotation: 0,
+      dirDeg: 0,
+      mirror: false,
+      fireIntervalMs: 900,
+      shurikenSpeed: 7.4,
+      shurikenDistance: 7.4,
+      hitDistance: 7.4,
+      shurikenRadius: 0.2,
+      shurikenLifeMs: 1300,
+      shurikenCount: 1,
+      randomAngleEnabled: false,
+      randomAngleRangeDeg: 30,
+      shurikenPropelMs: 620,
+      shurikenGravity: 10,
+      shurikenStickMs: 2000,
+      shurikenPierceBalls: false,
+      force: 2.8,
+      imageSrc: NINJA_IMAGE_DEFAULT_SRC,
+      noCollision: true,
+      color: 'rgba(0,0,0,0)',
+    };
+  }
   if (tool === 'sticky_pad') {
     return {
       oid: nextOid('sticky'),
@@ -2693,7 +2817,7 @@ function populateObjectEditor() {
       elements.objForceInput.value = String(round2(toFinite(obj.angularVelocity, 2.2)));
     } else if (obj.type === 'goal_marker_image') {
       elements.objForceInput.value = '';
-    } else if (obj.type === 'magic_wizard') {
+    } else if (isRangedCasterType(obj.type)) {
       elements.objForceInput.value = String(round2(toFinite(obj.force, 2.8)));
     } else if (obj.type === 'stopwatch_bomb') {
       elements.objForceInput.value = String(round1(toFinite(obj.force, 4.8)));
@@ -2714,7 +2838,7 @@ function populateObjectEditor() {
       elements.objIntervalInput.value = '';
     } else if (obj.type === 'goal_marker_image') {
       elements.objIntervalInput.value = '';
-    } else if (obj.type === 'magic_wizard') {
+    } else if (isRangedCasterType(obj.type)) {
       elements.objIntervalInput.value = String(Math.round(toFinite(obj.fireIntervalMs, 900)));
     } else if (obj.type === 'stopwatch_bomb') {
       elements.objIntervalInput.value = String(Math.round(toFinite(obj.intervalMs, 4000)));
@@ -2751,11 +2875,11 @@ function populateObjectEditor() {
       if (elements.objHitDistanceLabel) {
         elements.objHitDistanceLabel.textContent = '바람거리';
       }
-    } else if (obj.type === 'magic_wizard') {
+    } else if (isRangedCasterType(obj.type)) {
       elements.objHitDistanceInput.value = String(getMagicWizardTravelDistance(obj, 7.4));
       elements.objHitDistanceInput.disabled = false;
       if (elements.objHitDistanceLabel) {
-        elements.objHitDistanceLabel.textContent = '화염구 도착거리';
+        elements.objHitDistanceLabel.textContent = `${rangedCasterProjectileLabel(obj.type)} 도착거리`;
       }
     } else if (obj.type === 'burst_bumper') {
       elements.objHitDistanceInput.value = String(Math.max(1, Math.floor(toFinite(obj.hpPerLayer, 1))));
@@ -2797,7 +2921,7 @@ function populateObjectEditor() {
       dirLabel = '레이어 수';
     } else if (obj.type === 'fan') {
       dirLabel = '바람 방향(도)';
-    } else if (obj.type === 'magic_wizard') {
+    } else if (isRangedCasterType(obj.type)) {
       dirLabel = '발사 방향(도)';
     } else if (obj.type === 'bottom_bumper') {
       dirLabel = '타격 방향(도)';
@@ -2824,6 +2948,8 @@ function populateObjectEditor() {
       forceLabel = '풍압';
     } else if (obj.type === 'magic_wizard') {
       forceLabel = '화염구 힘';
+    } else if (obj.type === 'ninja') {
+      forceLabel = '표창 힘';
     } else if (obj.type === 'bottom_bumper') {
       forceLabel = '타격힘';
     } else if (obj.type === 'sticky_pad') {
@@ -2844,22 +2970,28 @@ function populateObjectEditor() {
     } else if (obj.type === 'bottom_bumper') {
       intervalLabel = '랜덤 간격(ms)';
     }
-    if (obj.type === 'magic_wizard') {
+    if (isRangedCasterType(obj.type)) {
       intervalLabel = '발사 간격(ms)';
     }
     elements.objIntervalLabel.textContent = intervalLabel;
   }
   if (elements.objBreakHitCountInput) {
     const isBottomBumper = obj.type === 'bottom_bumper';
-    elements.objBreakHitCountInput.disabled = !isBottomBumper;
+    const isNinja = obj.type === 'ninja';
+    elements.objBreakHitCountInput.disabled = !(isBottomBumper || isNinja);
+    const randomAngleEnabled = obj.randomAngleEnabled === true
+      || obj.randomAngleEnabled === 1
+      || String(obj.randomAngleEnabled || '').trim().toLowerCase() === 'true';
     elements.objBreakHitCountInput.value = isBottomBumper
       ? String(Math.max(0, Math.floor(toFinite(obj.breakHitCount, 0))))
-      : '';
+      : (isNinja
+        ? String(round1(randomAngleEnabled ? Math.max(0, toFinite(obj.randomAngleRangeDeg, 30)) : 0))
+        : '');
   }
   if (elements.objBreakHitCountLabel) {
     elements.objBreakHitCountLabel.textContent = obj.type === 'bottom_bumper'
       ? '파손 충격 횟수(0=비활성)'
-      : '파손 충격 횟수(미사용)';
+      : (obj.type === 'ninja' ? '랜덤 각도 범위(도, 0=비활성)' : '파손 충격 횟수(미사용)');
   }
 
   if (isPolylineObject(obj)) {
@@ -2915,6 +3047,16 @@ function populateObjectEditor() {
     if (elements.objExtra2Input) elements.objExtra2Input.value = '0';
     if (elements.objExtra1Label) elements.objExtra1Label.textContent = '화염구 크기';
     if (elements.objExtra2Label) elements.objExtra2Label.textContent = '보조(미사용)';
+  } else if (obj.type === 'ninja') {
+    if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
+    if (elements.objYInput) elements.objYInput.value = String(round1(toFinite(obj.y, 0)));
+    if (elements.objExtra1Input) elements.objExtra1Input.value = String(round2(toFinite(obj.shurikenRadius, toFinite(obj.fireballRadius, 0.2))));
+    if (elements.objExtra2Input) elements.objExtra2Input.value = String(Math.max(1, Math.floor(toFinite(obj.shurikenCount, 1))));
+    if (elements.objExtra1Label) elements.objExtra1Label.textContent = '표창 크기';
+    if (elements.objExtra2Label) elements.objExtra2Label.textContent = '표창 수';
+    if (elements.objRadiusInput) elements.objRadiusInput.value = String(Math.max(320, Math.floor(toFinite(obj.shurikenLifeMs, 1300))));
+    if (elements.objRadiusLabel) elements.objRadiusLabel.textContent = '표창 지속(ms)';
+    if (elements.objPairInput) elements.objPairInput.value = String(obj.shurikenPierceBalls === true ? '1' : '0');
   } else if (obj.type === 'sticky_pad') {
     const pathB = Array.isArray(obj.pathB) ? obj.pathB : [toFinite(obj.x, 0) + 2.4, toFinite(obj.y, 0)];
     if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
@@ -3368,6 +3510,30 @@ function sharedSyncKeysForType(type) {
       return ['color', 'width', 'height', 'dirDeg', 'force', 'triggerRadius', 'hitDistance', 'restitution', 'friction'];
     case 'magic_wizard':
       return ['color', 'width', 'height', 'dirDeg', 'force', 'fireIntervalMs', 'fireballSpeed', 'fireballDistance', 'fireballRadius', 'imageSrc', 'restitution', 'friction'];
+    case 'ninja':
+      return [
+        'color',
+        'width',
+        'height',
+        'dirDeg',
+        'force',
+        'fireIntervalMs',
+        'shurikenSpeed',
+        'shurikenDistance',
+        'shurikenRadius',
+        'shurikenLifeMs',
+        'shurikenCount',
+        'randomAngleEnabled',
+        'randomAngleRangeDeg',
+        'shurikenPropelMs',
+        'shurikenGravity',
+        'shurikenStickMs',
+        'shurikenPierceBalls',
+        'imageSrc',
+        'noCollision',
+        'restitution',
+        'friction',
+      ];
     case 'sticky_pad':
       return ['color', 'width', 'height', 'rotation', 'speed', 'pauseMs', 'stickyTopOnly', 'restitution', 'friction'];
     case 'burst_bumper':
@@ -3732,13 +3898,51 @@ function applyObjectEditorValues() {
     finalizeObjectEditorValues(obj);
     return;
   }
-  if (obj.type === 'magic_wizard') {
+  if (isRangedCasterType(obj.type)) {
+    const isNinja = isNinjaType(obj.type);
     obj.x = round1(toFinite(elements.objXInput ? elements.objXInput.value : obj.x, toFinite(obj.x, 0)));
     obj.y = round1(toFinite(elements.objYInput ? elements.objYInput.value : obj.y, toFinite(obj.y, 0)));
-    obj.fireballRadius = round2(Math.max(0.05, toFinite(
-      elements.objExtra1Input ? elements.objExtra1Input.value : obj.fireballRadius,
-      toFinite(obj.fireballRadius, 0.2),
-    )));
+    if (isNinja) {
+      obj.shurikenRadius = round2(Math.max(0.05, toFinite(
+        elements.objExtra1Input ? elements.objExtra1Input.value : obj.shurikenRadius,
+        toFinite(obj.shurikenRadius, toFinite(obj.fireballRadius, 0.2)),
+      )));
+      obj.shurikenCount = Math.max(
+        1,
+        Math.min(
+          24,
+          Math.floor(toFinite(
+            elements.objExtra2Input ? elements.objExtra2Input.value : obj.shurikenCount,
+            toFinite(obj.shurikenCount, 1),
+          )),
+        ),
+      );
+      obj.shurikenLifeMs = Math.max(320, Math.floor(toFinite(
+        elements.objRadiusInput ? elements.objRadiusInput.value : obj.shurikenLifeMs,
+        toFinite(obj.shurikenLifeMs, 1300),
+      )));
+      const randomRange = Math.max(0, round1(toFinite(
+        elements.objBreakHitCountInput ? elements.objBreakHitCountInput.value : obj.randomAngleRangeDeg,
+        toFinite(obj.randomAngleRangeDeg, 30),
+      )));
+      obj.randomAngleEnabled = randomRange > 0;
+      obj.randomAngleRangeDeg = randomRange;
+      obj.shurikenPierceBalls = obj.shurikenPierceBalls === true
+        || obj.shurikenPierceBalls === 1
+        || String(obj.shurikenPierceBalls || '').trim().toLowerCase() === 'true';
+      const rawPair = elements.objPairInput ? String(elements.objPairInput.value ?? '').trim().toLowerCase() : '';
+      if (rawPair) {
+        obj.shurikenPierceBalls = rawPair === '1' || rawPair === 'true' || rawPair === 'y' || rawPair === 'yes';
+      }
+      obj.imageSrc = NINJA_IMAGE_DEFAULT_SRC;
+      obj.noCollision = true;
+    } else {
+      obj.fireballRadius = round2(Math.max(0.05, toFinite(
+        elements.objExtra1Input ? elements.objExtra1Input.value : obj.fireballRadius,
+        toFinite(obj.fireballRadius, 0.2),
+      )));
+      obj.imageSrc = MAGIC_WIZARD_IMAGE_DEFAULT_SRC;
+    }
     obj.mirror = false;
     const rawDir = elements.objDirInput ? String(elements.objDirInput.value ?? '').trim() : '';
     const rawRotation = elements.objRotationInput ? String(elements.objRotationInput.value ?? '').trim() : '';
@@ -3756,18 +3960,24 @@ function applyObjectEditorValues() {
       elements.objIntervalInput ? elements.objIntervalInput.value : obj.fireIntervalMs,
       toFinite(obj.fireIntervalMs, toFinite(obj.intervalMs, 900)),
     )));
-    obj.fireballSpeed = round2(Math.max(0.2, toFinite(
-      obj.fireballSpeed,
-      7.4,
-    )));
+    if (isNinja) {
+      obj.shurikenSpeed = round2(Math.max(0.2, toFinite(
+        obj.shurikenSpeed,
+        toFinite(obj.fireballSpeed, 7.4),
+      )));
+    } else {
+      obj.fireballSpeed = round2(Math.max(0.2, toFinite(
+        obj.fireballSpeed,
+        7.4,
+      )));
+    }
     setMagicWizardTravelDistance(
       obj,
       toFinite(
-        elements.objHitDistanceInput ? elements.objHitDistanceInput.value : obj.fireballDistance,
+        elements.objHitDistanceInput ? elements.objHitDistanceInput.value : obj.hitDistance,
         getMagicWizardTravelDistance(obj, 7.4),
       ),
     );
-    obj.imageSrc = MAGIC_WIZARD_IMAGE_DEFAULT_SRC;
     finalizeObjectEditorValues(obj);
     return;
   }
@@ -3899,10 +4109,10 @@ function reverseSelectedObjectRotation() {
       changedCount += 1;
       continue;
     }
-    if (obj.type === 'magic_wizard') {
+    if (isRangedCasterType(obj.type)) {
       obj.dirDeg = round1(normalizeDeg(toFinite(obj.dirDeg, toFinite(obj.rotation, 0)) + 180));
       obj.rotation = obj.dirDeg;
-      lastMessage = `마법사 발사 방향 반전 완료 (dirDeg=${obj.dirDeg})`;
+      lastMessage = `${rangedCasterLabel(obj.type)} 발사 방향 반전 완료 (dirDeg=${obj.dirDeg})`;
       changedCount += 1;
       continue;
     }
@@ -4627,7 +4837,7 @@ function getRectLikeGeometryWorld(obj) {
     return null;
   }
   let angleDeg = normalizeDeg(toFinite(obj.rotation, 0));
-  if (type === 'hammer' || type === 'bottom_bumper' || type === 'fan' || type === 'magic_wizard') {
+  if (type === 'hammer' || type === 'bottom_bumper' || type === 'fan' || isRangedCasterType(type)) {
     angleDeg = normalizeDeg(toFinite(obj.dirDeg, angleDeg));
   }
   const rad = (Math.PI / 180) * angleDeg;
@@ -5031,7 +5241,7 @@ function supportsRotationHandle(obj) {
     || type === 'hammer'
     || type === 'bottom_bumper'
     || type === 'fan'
-    || type === 'magic_wizard'
+    || isRangedCasterType(type)
     || type === 'domino_block'
     || type === 'sticky_pad'
     || type === 'goal_marker_image';
@@ -5084,7 +5294,7 @@ function getBoxResizeHandlesWorld(obj) {
     && type !== 'hammer'
     && type !== 'bottom_bumper'
     && type !== 'fan'
-    && type !== 'magic_wizard'
+    && !isRangedCasterType(type)
     && type !== 'sticky_pad'
     && type !== 'domino_block'
     && type !== 'goal_marker_image') {
@@ -5094,9 +5304,9 @@ function getBoxResizeHandlesWorld(obj) {
   const cy = toFinite(obj.y, 0);
   const width = Math.max(0.08, toFinite(obj.width, 1.2));
   const height = Math.max(0.05, toFinite(obj.height, 0.2));
-  const angleDeg = type === 'hammer' || type === 'bottom_bumper' || type === 'fan' || type === 'magic_wizard'
-    ? normalizeDeg(toFinite(obj.dirDeg, toFinite(obj.rotation, 0)))
-    : normalizeDeg(toFinite(obj.rotation, 0));
+      const angleDeg = type === 'hammer' || type === 'bottom_bumper' || type === 'fan' || isRangedCasterType(type)
+        ? normalizeDeg(toFinite(obj.dirDeg, toFinite(obj.rotation, 0)))
+        : normalizeDeg(toFinite(obj.rotation, 0));
   const rad = (Math.PI / 180) * angleDeg;
   const axisX = { x: Math.cos(rad), y: Math.sin(rad) };
   const axisY = { x: -Math.sin(rad), y: Math.cos(rad) };
@@ -5131,7 +5341,7 @@ function resolveBoxResizeAxes(obj) {
   const type = String(obj.type || '');
   const cx = toFinite(obj.x, 0);
   const cy = toFinite(obj.y, 0);
-  const angleDeg = type === 'hammer' || type === 'bottom_bumper' || type === 'fan' || type === 'magic_wizard'
+  const angleDeg = type === 'hammer' || type === 'bottom_bumper' || type === 'fan' || isRangedCasterType(type)
     ? normalizeDeg(toFinite(obj.dirDeg, toFinite(obj.rotation, 0)))
     : normalizeDeg(toFinite(obj.rotation, 0));
   const rad = (Math.PI / 180) * angleDeg;
@@ -5206,21 +5416,21 @@ function getHammerDirectionHandleWorld(obj) {
     return null;
   }
   const isBottomBumper = String(obj.type || '') === 'bottom_bumper';
-  const isMagicWizard = String(obj.type || '') === 'magic_wizard';
+  const isRangedCaster = isRangedCasterType(obj.type);
   const anchor = isBottomBumper
     ? (getBottomBumperPivotWorld(obj) || { x: toFinite(obj.x, 0), y: toFinite(obj.y, 0) })
     : { x: toFinite(obj.x, 0), y: toFinite(obj.y, 0) };
-  const defaultDir = obj.type === 'fan' ? 0 : (isMagicWizard ? 0 : 90);
+  const defaultDir = obj.type === 'fan' ? 0 : (isRangedCaster ? 0 : 90);
   const dirDeg = isBottomBumper
     ? getBottomBumperEffectiveDirDeg(obj)
     : normalizeDeg(toFinite(obj.dirDeg, defaultDir));
   const dir = (Math.PI / 180) * dirDeg;
   const defaultDistance = isBottomBumper
     ? getBottomBumperDirectionHandleDistance(obj)
-    : (obj.type === 'fan' ? 2.8 : (isMagicWizard ? getMagicWizardTravelDistance(obj, 7.4) : 0.95));
+    : (obj.type === 'fan' ? 2.8 : (isRangedCaster ? getMagicWizardTravelDistance(obj, 7.4) : 0.95));
   const distance = isBottomBumper
     ? getBottomBumperDirectionHandleDistance(obj)
-    : Math.max(0.2, toFinite(isMagicWizard ? obj.fireballDistance : obj.hitDistance, defaultDistance));
+    : Math.max(0.2, toFinite(obj.hitDistance, defaultDistance));
   return {
     kind: 'hammer_dir',
     x: round1(anchor.x + Math.cos(dir) * distance),
@@ -5594,6 +5804,23 @@ function getMagicWizardPreviewImage() {
   return magicWizardPreviewImage;
 }
 
+function getNinjaPreviewImage() {
+  if (ninjaPreviewImage) {
+    return ninjaPreviewImage;
+  }
+  const image = new Image();
+  image.decoding = 'async';
+  image.src = NINJA_IMAGE_PREVIEW_SRC;
+  image.addEventListener('load', () => {
+    drawMakerCanvas();
+  });
+  image.addEventListener('error', () => {
+    ninjaPreviewImage = null;
+  });
+  ninjaPreviewImage = image;
+  return ninjaPreviewImage;
+}
+
 function drawObjectOnCanvas(ctx, layout, obj, selected) {
   if (!selected && isBoundaryWallObject(obj)) {
     return;
@@ -5801,14 +6028,17 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
     ctx.restore();
     return;
   }
-  if (obj.type === 'magic_wizard') {
+  if (isRangedCasterType(obj.type)) {
     const width = Math.max(0.08, toFinite(obj.width, 0.8));
     const height = Math.max(0.08, toFinite(obj.height, 0.8));
     const drawWidth = width * layout.scale;
     const drawHeight = height * layout.scale;
     const angleDeg = normalizeDeg(toFinite(obj.dirDeg, toFinite(obj.rotation, 0)));
     const mirror = getMagicWizardRenderMirror(obj, angleDeg);
-    const image = getMagicWizardPreviewImage();
+    const image = isNinjaType(obj.type) ? getNinjaPreviewImage() : getMagicWizardPreviewImage();
+    const accentColor = isNinjaType(obj.type) ? '#ffd08a' : '#ffa66c';
+    const accentStroke = isNinjaType(obj.type) ? '#ffe0b6' : '#ffcb9e';
+    const projectileTint = isNinjaType(obj.type) ? 'rgba(255, 208, 138, 0.92)' : 'rgba(255, 148, 84, 0.92)';
     ctx.save();
     ctx.translate(center.x, center.y);
     if (mirror) {
@@ -5817,14 +6047,14 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
     if (image && image.complete && image.naturalWidth > 0) {
       ctx.drawImage(image, -drawWidth, -drawHeight, drawWidth * 2, drawHeight * 2);
     } else {
-      ctx.fillStyle = selected ? 'rgba(255, 212, 77, 0.2)' : 'rgba(255, 166, 108, 0.24)';
-      ctx.strokeStyle = selected ? '#ffd44d' : '#ffa66c';
+      ctx.fillStyle = selected ? 'rgba(255, 212, 77, 0.2)' : (isNinjaType(obj.type) ? 'rgba(255, 208, 138, 0.22)' : 'rgba(255, 166, 108, 0.24)');
+      ctx.strokeStyle = selected ? '#ffd44d' : accentColor;
       ctx.lineWidth = selected ? 2 : 1.6;
       ctx.beginPath();
       ctx.rect(-drawWidth * 0.72, -drawHeight * 0.82, drawWidth * 1.44, drawHeight * 1.64);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = 'rgba(255, 148, 84, 0.92)';
+      ctx.fillStyle = projectileTint;
       ctx.beginPath();
       ctx.arc(drawWidth * 0.62, -drawHeight * 0.12, Math.max(2, drawHeight * 0.24), 0, Math.PI * 2);
       ctx.fill();
@@ -5849,7 +6079,7 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
         const hp = worldToCanvas(layout, rotationHandle.x, rotationHandle.y);
         drawHandleWithFeedback(ctx, hp.x, hp.y, 5.2, 'rotation', {
           fill: 'rgba(8,16,36,0.95)',
-          stroke: '#ffd44d',
+          stroke: accentStroke,
         });
       }
     }
@@ -5966,12 +6196,12 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
       ctx.save();
       const isFan = obj.type === 'fan';
       const isBottomBumper = obj.type === 'bottom_bumper';
-      const isMagicWizard = obj.type === 'magic_wizard';
+      const isRangedCaster = isRangedCasterType(obj.type);
       const anchorWorld = isBottomBumper
         ? (getBottomBumperPivotWorld(obj) || centerWorld)
         : centerWorld;
       const anchor = worldToCanvas(layout, anchorWorld.x, anchorWorld.y);
-      const lineColor = isFan ? '#8fe6ff' : (isBottomBumper ? '#8fd5ff' : (isMagicWizard ? '#ffbe86' : '#9fd7ff'));
+      const lineColor = isFan ? '#8fe6ff' : (isBottomBumper ? '#8fd5ff' : (isRangedCaster ? rangedCasterAccentColor(obj.type) : '#9fd7ff'));
       ctx.strokeStyle = lineColor;
       ctx.lineWidth = 1.6;
       ctx.setLineDash([6, 4]);
@@ -6021,14 +6251,20 @@ function drawObjectOnCanvas(ctx, layout, obj, selected) {
         ctx.fill();
         ctx.stroke();
         drawBottomBumperPivotDetail(ctx, halfW, halfH);
-      } else if (isMagicWizard) {
+      } else if (isRangedCaster) {
         const targetPoint = worldToCanvas(layout, targetX, targetY);
-        const fireRadius = Math.max(0.05, toFinite(obj.fireballRadius, 0.2)) * layout.scale;
-        ctx.fillStyle = 'rgba(255,140,58,0.45)';
-        ctx.strokeStyle = '#ffbe86';
+        const projectileRadius = Math.max(
+          0.05,
+          toFinite(
+            isNinjaType(obj.type) ? obj.shurikenRadius : obj.fireballRadius,
+            0.2,
+          ),
+        ) * layout.scale;
+        ctx.fillStyle = isNinjaType(obj.type) ? 'rgba(255, 208, 138, 0.45)' : 'rgba(255,140,58,0.45)';
+        ctx.strokeStyle = rangedCasterAccentColor(obj.type);
         ctx.lineWidth = 1.2;
         ctx.beginPath();
-        ctx.arc(targetPoint.x, targetPoint.y, Math.max(3.4, fireRadius * 1.25), 0, Math.PI * 2);
+        ctx.arc(targetPoint.x, targetPoint.y, Math.max(3.4, projectileRadius * 1.25), 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
       } else {
@@ -6261,28 +6497,31 @@ function drawCreateDragPreview(ctx, layout, drag) {
     ctx.restore();
     return;
   }
-  if (tool === 'magic_wizard') {
+  if (isRangedCasterType(tool)) {
     const half = Math.max(0.12, Math.max(Math.abs(current.x - start.x), Math.abs(current.y - start.y)) / 2);
     const cx = (start.x + current.x) / 2;
     const cy = (start.y + current.y) / 2;
     const center = worldToCanvas(layout, cx, cy);
     const extent = half * layout.scale;
-    const image = getMagicWizardPreviewImage();
+    const image = isNinjaType(tool) ? getNinjaPreviewImage() : getMagicWizardPreviewImage();
+    const strokeColor = isNinjaType(tool) ? '#ffd8a2' : '#ffcb9e';
+    const fillColor = isNinjaType(tool) ? 'rgba(255, 208, 138, 0.2)' : 'rgba(255, 166, 108, 0.18)';
+    const borderColor = isNinjaType(tool) ? '#ffd08a' : '#ffa66c';
     ctx.translate(center.x, center.y);
     if (image && image.complete && image.naturalWidth > 0) {
       ctx.globalAlpha = 0.9;
       ctx.drawImage(image, -extent, -extent, extent * 2, extent * 2);
       ctx.globalAlpha = 1;
     } else {
-      ctx.fillStyle = 'rgba(255, 166, 108, 0.18)';
-      ctx.strokeStyle = '#ffa66c';
+      ctx.fillStyle = fillColor;
+      ctx.strokeStyle = borderColor;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.rect(-extent, -extent, extent * 2, extent * 2);
       ctx.fill();
       ctx.stroke();
     }
-    ctx.strokeStyle = '#ffcb9e';
+    ctx.strokeStyle = strokeColor;
     ctx.lineWidth = 1.6;
     ctx.beginPath();
     ctx.rect(-extent, -extent, extent * 2, extent * 2);
@@ -6306,6 +6545,9 @@ function drawCreateDragPreview(ctx, layout, drag) {
   } else if (tool === 'magic_wizard') {
     ctx.fillStyle = 'rgba(255, 166, 108, 0.18)';
     ctx.strokeStyle = '#ffa66c';
+  } else if (tool === 'ninja') {
+    ctx.fillStyle = 'rgba(255, 208, 138, 0.2)';
+    ctx.strokeStyle = '#ffd08a';
   } else if (tool === 'domino_block') {
     ctx.fillStyle = 'rgba(255, 103, 190, 0.2)';
     ctx.strokeStyle = '#ff67be';
@@ -6364,8 +6606,8 @@ function drawCreateDragPreview(ctx, layout, drag) {
       drawStickyPadTopHoneyBand(ctx, width / 2, height / 2, { alpha: 0.92 });
       ctx.restore();
     }
-    if (tool === 'magic_wizard') {
-      const image = getMagicWizardPreviewImage();
+    if (isRangedCasterType(tool)) {
+      const image = isNinjaType(tool) ? getNinjaPreviewImage() : getMagicWizardPreviewImage();
       if (image && image.complete && image.naturalWidth > 0) {
         const centerX = (start.x + current.x) / 2;
         const centerY = (start.y + current.y) / 2;
@@ -6621,13 +6863,13 @@ function drawMakerCanvas() {
           || item.type === 'bottom_bumper'
           || item.type === 'fan'
           || item.type === 'sticky_pad'
-          || item.type === 'magic_wizard'),
+          || isRangedCasterType(item.type)),
     );
     if (directional) {
       const isFan = directional.type === 'fan';
       const isBottomBumper = directional.type === 'bottom_bumper';
       const isSticky = directional.type === 'sticky_pad';
-      const isMagicWizard = directional.type === 'magic_wizard';
+      const isRangedCaster = isRangedCasterType(directional.type);
       const centerWorld = {
         x: toFinite(directional.x, 0),
         y: toFinite(directional.y, 0),
@@ -6645,7 +6887,7 @@ function drawMakerCanvas() {
         isBottomBumper
           ? getBottomBumperEffectiveDirDeg(directional)
           : directional.dirDeg,
-        isFan ? 0 : (isMagicWizard ? 0 : 90),
+        isFan ? 0 : (isRangedCaster ? 0 : 90),
       );
       const targetWorld = hoverWorld
         ? { x: hoverWorld.x, y: hoverWorld.y }
@@ -6657,7 +6899,7 @@ function drawMakerCanvas() {
                 ? getBottomBumperDirectionHandleDistance(directional)
                 : Math.max(
                   0.2,
-                  isMagicWizard
+                  isRangedCaster
                     ? getMagicWizardTravelDistance(directional, 7.4)
                     : toFinite(directional.hitDistance, isFan ? 2.8 : 1),
                 )
@@ -6667,7 +6909,7 @@ function drawMakerCanvas() {
                 ? getBottomBumperDirectionHandleDistance(directional)
                 : Math.max(
                   0.2,
-                  isMagicWizard
+                  isRangedCaster
                     ? getMagicWizardTravelDistance(directional, 7.4)
                     : toFinite(directional.hitDistance, isFan ? 2.8 : 1),
                 )
@@ -6677,7 +6919,7 @@ function drawMakerCanvas() {
       ctx.save();
       ctx.strokeStyle = isSticky
         ? '#ffaad9'
-        : (isFan ? '#8fe6ff' : (isBottomBumper ? '#8fd5ff' : (isMagicWizard ? '#ffbe86' : '#9fd7ff')));
+        : (isFan ? '#8fe6ff' : (isBottomBumper ? '#8fd5ff' : (isRangedCaster ? rangedCasterAccentColor(directional.type) : '#9fd7ff')));
       ctx.lineWidth = 1.8;
       ctx.setLineDash([6, 4]);
       ctx.beginPath();
@@ -6689,7 +6931,7 @@ function drawMakerCanvas() {
         fill: 'rgba(8,16,36,0.94)',
         stroke: isSticky
           ? '#ffaad9'
-          : (isFan ? '#8fe6ff' : (isBottomBumper ? '#8fd5ff' : (isMagicWizard ? '#ffbe86' : '#9fd7ff'))),
+          : (isFan ? '#8fe6ff' : (isBottomBumper ? '#8fd5ff' : (isRangedCaster ? rangedCasterAccentColor(directional.type) : '#9fd7ff'))),
         lineWidth: 1.6,
       });
       const dir = Math.atan2(target.y - anchor.y, target.x - anchor.x);
@@ -6745,10 +6987,10 @@ function drawMakerCanvas() {
         ctx.fill();
         ctx.stroke();
         drawBottomBumperPivotDetail(ctx, halfW, halfH);
-      } else if (isMagicWizard) {
+      } else if (isRangedCaster) {
         const ghost = worldToCanvas(layout, toFinite(directional.x, 0), toFinite(directional.y, 0));
         const half = Math.max(0.12, Math.max(toFinite(directional.width, 0.8), toFinite(directional.height, 0.8))) * layout.scale;
-        const image = getMagicWizardPreviewImage();
+        const image = isNinjaType(directional.type) ? getNinjaPreviewImage() : getMagicWizardPreviewImage();
         ctx.translate(ghost.x, ghost.y);
         const mirror = getMagicWizardRenderMirror(directional, (dir * 180) / Math.PI);
         if (mirror) {
@@ -6759,8 +7001,8 @@ function drawMakerCanvas() {
           ctx.drawImage(image, -half, -half, half * 2, half * 2);
           ctx.globalAlpha = 1;
         } else {
-          ctx.fillStyle = 'rgba(255,166,108,0.2)';
-          ctx.strokeStyle = '#ffbe86';
+          ctx.fillStyle = isNinjaType(directional.type) ? 'rgba(255,208,138,0.22)' : 'rgba(255,166,108,0.2)';
+          ctx.strokeStyle = rangedCasterAccentColor(directional.type);
           ctx.lineWidth = 1.5;
           ctx.beginPath();
           ctx.rect(-half, -half, half * 2, half * 2);
@@ -7208,6 +7450,46 @@ function createMagicWizardFromDrag(startWorld, endWorld) {
   };
 }
 
+function createNinjaFromDrag(startWorld, endWorld) {
+  const mapJson = getMutableMap();
+  const goalY = Math.max(25, toFinite(mapJson.stage && mapJson.stage.goalY, 210) + 4);
+  const start = clampWorldPoint(startWorld, goalY);
+  const end = clampWorldPoint(endWorld, goalY);
+  const dx = toFinite(end.x, 0) - toFinite(start.x, 0);
+  const dy = toFinite(end.y, 0) - toFinite(start.y, 0);
+  const halfSize = round1(Math.max(0.12, Math.max(Math.abs(dx), Math.abs(dy)) / 2));
+  const centerX = round1((start.x + end.x) / 2);
+  const centerY = round1((start.y + end.y) / 2);
+  return {
+    oid: nextOid('ninja'),
+    type: 'ninja',
+    x: centerX,
+    y: centerY,
+    width: halfSize,
+    height: halfSize,
+    rotation: 0,
+    dirDeg: 0,
+    mirror: false,
+    fireIntervalMs: 900,
+    shurikenSpeed: 7.4,
+    shurikenDistance: 7.4,
+    hitDistance: 7.4,
+    shurikenRadius: round2(Math.max(0.08, Math.min(0.42, halfSize * 0.22))),
+    shurikenLifeMs: 1300,
+    shurikenCount: 1,
+    randomAngleEnabled: false,
+    randomAngleRangeDeg: 30,
+    shurikenPropelMs: 620,
+    shurikenGravity: 10,
+    shurikenStickMs: 2000,
+    shurikenPierceBalls: false,
+    force: 2.8,
+    imageSrc: NINJA_IMAGE_DEFAULT_SRC,
+    noCollision: true,
+    color: 'rgba(0,0,0,0)',
+  };
+}
+
 function createBottomBumperFromDrag(startWorld, endWorld, options = {}) {
   const mapJson = getMutableMap();
   const goalY = Math.max(25, toFinite(mapJson.stage && mapJson.stage.goalY, 210) + 4);
@@ -7291,7 +7573,7 @@ function setHammerDirectionAndDistance(obj, point, shiftKey = false) {
   if (obj.type === 'bottom_bumper') {
     return setBottomBumperDirectionByPivot(obj, point, shiftKey);
   }
-  const isMagicWizard = obj.type === 'magic_wizard';
+  const isRangedCaster = isRangedCasterType(obj.type);
   const cx = toFinite(obj.x, 0);
   const cy = toFinite(obj.y, 0);
   let dx = toFinite(point && point.x, cx) - cx;
@@ -7300,11 +7582,11 @@ function setHammerDirectionAndDistance(obj, point, shiftKey = false) {
   if (distance < 0.05) {
     const fallbackDistance = obj.type === 'fan'
       ? 2.8
-      : (isMagicWizard ? getMagicWizardTravelDistance(obj, 7.4) : 1.1);
-    const safeDistance = Math.max(0.2, toFinite(isMagicWizard ? obj.fireballDistance : obj.hitDistance, fallbackDistance));
+      : (isRangedCaster ? getMagicWizardTravelDistance(obj, 7.4) : 1.1);
+    const safeDistance = Math.max(0.2, toFinite(obj.hitDistance, fallbackDistance));
     const fallbackDirDeg = obj.type === 'fan'
       ? toFinite(obj.dirDeg, 0)
-      : toFinite(obj.dirDeg, toFinite(obj.rotation, isMagicWizard ? 0 : 90));
+      : toFinite(obj.dirDeg, toFinite(obj.rotation, isRangedCaster ? 0 : 90));
     const fallbackRad = (Math.PI / 180) * normalizeDeg(fallbackDirDeg);
     distance = safeDistance;
     dx = Math.cos(fallbackRad) * distance;
@@ -7320,7 +7602,7 @@ function setHammerDirectionAndDistance(obj, point, shiftKey = false) {
   obj.dirDeg = round1(normalizeDeg(angleDeg));
   obj.rotation = obj.dirDeg;
   const resolvedDistance = round1(clamp(Math.hypot(dx, dy), 0.2, 24));
-  if (isMagicWizard) {
+  if (isRangedCaster) {
     setMagicWizardTravelDistance(obj, resolvedDistance);
   } else {
     obj.hitDistance = resolvedDistance;
@@ -7374,6 +7656,7 @@ function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
       || tool === 'bottom_bumper'
       || tool === 'fan'
       || tool === 'magic_wizard'
+      || tool === 'ninja'
       || tool === 'sticky_pad'
       || tool === 'domino_block'
       || tool === 'goal_marker_image';
@@ -7451,6 +7734,9 @@ function createObjectFromDrag(tool, startWorld, endWorld, options = {}) {
   }
   if (tool === 'magic_wizard') {
     return createMagicWizardFromDrag(start, end);
+  }
+  if (tool === 'ninja') {
+    return createNinjaFromDrag(start, end);
   }
   if (tool === 'sticky_pad') {
     return createStickyPadFromDrag(start, end);
@@ -7534,7 +7820,7 @@ function canResizeByBoxHandle(obj) {
     || type === 'hammer'
     || type === 'bottom_bumper'
     || type === 'fan'
-    || type === 'magic_wizard'
+    || isRangedCasterType(type)
     || type === 'sticky_pad'
     || type === 'domino_block'
     || type === 'goal_marker_image';
@@ -7649,9 +7935,13 @@ function applyMultiResizeFromPrimary(primaryIndex, dragType, beforeValue, afterV
         const baseHalfSize = Math.max(toFinite(obj.width, 0.12), toFinite(obj.height, 0.08));
         obj.triggerRadius = round1(Math.max(0.35, baseHalfSize + 0.35));
         obj.hitDistance = round1(Math.max(0.5, baseHalfSize * 2.8));
-      } else if (obj.type === 'magic_wizard') {
+      } else if (isRangedCasterType(obj.type)) {
         const baseHalfSize = Math.max(toFinite(obj.width, 0.12), toFinite(obj.height, 0.12));
-        obj.fireballRadius = round2(Math.max(0.05, Math.min(0.42, baseHalfSize * 0.22)));
+        if (isNinjaType(obj.type)) {
+          obj.shurikenRadius = round2(Math.max(0.05, Math.min(0.42, baseHalfSize * 0.22)));
+        } else {
+          obj.fireballRadius = round2(Math.max(0.05, Math.min(0.42, baseHalfSize * 0.22)));
+        }
       } else if (obj.type === 'bottom_bumper') {
         const baseHalfSize = Math.max(toFinite(obj.width, 0.12), toFinite(obj.height, 0.08));
         obj.triggerRadius = round1(Math.max(0.35, baseHalfSize + 0.4));
@@ -7674,14 +7964,14 @@ function applyMultiResizeFromPrimary(primaryIndex, dragType, beforeValue, afterV
         continue;
       }
       const distanceScale = Math.max(0.01, toFinite(options.distanceScale, 1));
-      const isMagicWizard = obj.type === 'magic_wizard';
-      const fallbackDir = obj.type === 'fan' ? 0 : (isMagicWizard ? 0 : 90);
+      const isRangedCaster = isRangedCasterType(obj.type);
+      const fallbackDir = obj.type === 'fan' ? 0 : (isRangedCaster ? 0 : 90);
       const fallbackDistance = obj.type === 'fan'
         ? 2.8
-        : (isMagicWizard ? getMagicWizardTravelDistance(obj, 7.4) : 0.95);
+        : (isRangedCaster ? getMagicWizardTravelDistance(obj, 7.4) : 0.95);
       obj.dirDeg = round1(normalizeDeg(toFinite(obj.dirDeg, fallbackDir) + dirDelta));
       obj.rotation = obj.dirDeg;
-      if (isMagicWizard) {
+      if (isRangedCaster) {
         const nextDistance = round1(clamp(getMagicWizardTravelDistance(obj, fallbackDistance) * distanceScale, 0.2, 24));
         setMagicWizardTravelDistance(obj, nextDistance);
       } else {
@@ -7846,15 +8136,15 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
       || type === 'hammer'
       || type === 'bottom_bumper'
       || type === 'fan'
-      || type === 'magic_wizard'
+      || isRangedCasterType(type)
       || type === 'sticky_pad'
       || type === 'domino_block'
       || type === 'goal_marker_image') {
       const cx = toFinite(obj.x, 0);
       const cy = toFinite(obj.y, 0);
-      const angleDeg = type === 'hammer' || type === 'bottom_bumper' || type === 'fan' || type === 'magic_wizard'
-        ? normalizeDeg(toFinite(obj.dirDeg, toFinite(obj.rotation, 0)))
-        : normalizeDeg(toFinite(obj.rotation, 0));
+  const angleDeg = type === 'hammer' || type === 'bottom_bumper' || type === 'fan' || isRangedCasterType(type)
+    ? normalizeDeg(toFinite(obj.dirDeg, toFinite(obj.rotation, 0)))
+    : normalizeDeg(toFinite(obj.rotation, 0));
       const rad = (Math.PI / 180) * angleDeg;
       const axisX = { x: Math.cos(rad), y: Math.sin(rad) };
       const axisY = { x: -Math.sin(rad), y: Math.cos(rad) };
@@ -7911,9 +8201,13 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
         const baseHalfSize = Math.max(toFinite(obj.width, 0.12), toFinite(obj.height, 0.08));
         obj.triggerRadius = round1(Math.max(0.35, baseHalfSize + 0.35));
         obj.hitDistance = round1(Math.max(0.5, baseHalfSize * 2.8));
-      } else if (type === 'magic_wizard') {
+      } else if (isRangedCasterType(type)) {
         const baseHalfSize = Math.max(toFinite(obj.width, 0.12), toFinite(obj.height, 0.12));
-        obj.fireballRadius = round2(Math.max(0.05, Math.min(0.42, baseHalfSize * 0.22)));
+        if (isNinjaType(type)) {
+          obj.shurikenRadius = round2(Math.max(0.05, Math.min(0.42, baseHalfSize * 0.22)));
+        } else {
+          obj.fireballRadius = round2(Math.max(0.05, Math.min(0.42, baseHalfSize * 0.22)));
+        }
       } else if (type === 'bottom_bumper') {
         const baseHalfSize = Math.max(toFinite(obj.width, 0.12), toFinite(obj.height, 0.08));
         obj.triggerRadius = round1(Math.max(0.35, baseHalfSize + 0.4));
@@ -7929,19 +8223,19 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
       return false;
     }
     const isBottomBumper = obj.type === 'bottom_bumper';
-    const isMagicWizard = obj.type === 'magic_wizard';
+    const isRangedCaster = isRangedCasterType(obj.type);
     const fallbackDir = obj.type === 'fan'
       ? 0
-      : (isBottomBumper ? getBottomBumperBaseDirDeg(obj) : (isMagicWizard ? 0 : 90));
+      : (isBottomBumper ? getBottomBumperBaseDirDeg(obj) : (isRangedCaster ? 0 : 90));
     const fallbackDistance = obj.type === 'fan'
       ? 2.8
       : (isBottomBumper
         ? getBottomBumperDirectionHandleDistance(obj)
-        : (isMagicWizard ? getMagicWizardTravelDistance(obj, 7.4) : 0.95));
+        : (isRangedCaster ? getMagicWizardTravelDistance(obj, 7.4) : 0.95));
     const beforeDir = toFinite(obj.dirDeg, fallbackDir);
     const beforeDistance = isBottomBumper
       ? getBottomBumperDirectionHandleDistance(obj)
-      : Math.max(0.2, toFinite(isMagicWizard ? obj.fireballDistance : obj.hitDistance, fallbackDistance));
+      : Math.max(0.2, toFinite(obj.hitDistance, fallbackDistance));
     const updated = setHammerDirectionAndDistance(obj, point, !!(event && event.shiftKey));
     if (!updated) {
       return false;
@@ -7949,7 +8243,7 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
     const dirDelta = normalizeSignedDeg(toFinite(obj.dirDeg, beforeDir) - beforeDir);
     const afterDistance = isBottomBumper
       ? getBottomBumperDirectionHandleDistance(obj)
-      : Math.max(0.2, toFinite(isMagicWizard ? obj.fireballDistance : obj.hitDistance, fallbackDistance));
+      : Math.max(0.2, toFinite(obj.hitDistance, fallbackDistance));
     const distanceScale = Math.max(0.01, afterDistance / Math.max(0.01, beforeDistance));
     applyMultiResizeFromPrimary(index, 'hammer_dir', beforeDistance, afterDistance, {
       dirDelta,
@@ -7978,7 +8272,7 @@ function updateObjectByDrag(point, event = null, rawPoint = null) {
       nextRotation = snapAngleDeg(nextRotation, 45);
     }
     obj.rotation = normalizeDeg(nextRotation);
-    if (isAimDirectionalObject(obj) || obj.type === 'magic_wizard') {
+    if (isAimDirectionalObject(obj) || isRangedCasterType(obj.type)) {
       obj.dirDeg = obj.rotation;
     }
     drag.moved = true;
@@ -8136,7 +8430,8 @@ function finishDrag() {
         || tool === 'bottom_bumper'
         || tool === 'fan'
         || tool === 'sticky_pad'
-        || tool === 'magic_wizard') {
+        || tool === 'magic_wizard'
+        || tool === 'ninja') {
         editorState.pendingHammerOid = String(created.oid || '');
         let createdHint = '해머 생성 완료: 드래그/클릭으로 타격 방향·이동거리 설정';
         if (tool === 'fan') {
@@ -8147,6 +8442,8 @@ function finishDrag() {
           createdHint = '점착패드 생성 완료: 드래그/클릭으로 이동 목표점(B) 지정';
         } else if (tool === 'magic_wizard') {
           createdHint = '마법사 생성 완료: 드래그/클릭으로 화염 발사 방향·도착거리 설정';
+        } else if (tool === 'ninja') {
+          createdHint = '닌자 생성 완료: 드래그/클릭으로 표창 발사 방향·도착거리 설정';
         }
         updateMakerHint(createdHint);
       } else {
@@ -8159,7 +8456,8 @@ function finishDrag() {
         || tool === 'bottom_bumper'
         || tool === 'fan'
         || tool === 'sticky_pad'
-        || tool === 'magic_wizard';
+        || tool === 'magic_wizard'
+        || tool === 'ninja';
       if (tool !== 'portal' && !needsDirectionFollowup) {
         updateMakerHint(`${toolDisplayName(tool)} 생성 완료: ${created.oid || ''}`);
       }
@@ -8197,9 +8495,9 @@ function finishDrag() {
       } else if (type === 'sticky_pad') {
         queueObjectLiveDraftApply('점착패드 이동 경로 설정');
         updateMakerHint('점착패드 A↔B 이동 경로 설정 완료');
-      } else if (type === 'magic_wizard') {
-        queueObjectLiveDraftApply('마법사 발사 방향 설정');
-        updateMakerHint('마법사 화염 발사 방향·도착거리 설정 완료');
+      } else if (isRangedCasterType(type)) {
+        queueObjectLiveDraftApply(`${rangedCasterLabel(type)} 발사 방향 설정`);
+        updateMakerHint(`${rangedCasterLabel(type)} ${rangedCasterProjectileLabel(type)} 발사 방향·도착거리 설정 완료`);
       } else {
         queueObjectLiveDraftApply('해머 타격 방향/거리 설정');
         updateMakerHint('해머 타격 방향 설정 완료');
@@ -8269,7 +8567,8 @@ function handleMakerCanvasPointerDown(event) {
     || tool === 'bottom_bumper'
     || tool === 'fan'
     || tool === 'sticky_pad'
-    || tool === 'magic_wizard') && editorState.pendingHammerOid) {
+    || tool === 'magic_wizard'
+    || tool === 'ninja') && editorState.pendingHammerOid) {
     const objects = getObjects();
     const index = objects.findIndex(
       (item) =>
@@ -8279,7 +8578,7 @@ function handleMakerCanvasPointerDown(event) {
           || item.type === 'bottom_bumper'
           || item.type === 'fan'
           || item.type === 'sticky_pad'
-          || item.type === 'magic_wizard'),
+          || isRangedCasterType(item.type)),
     );
     if (index >= 0) {
       const directionalType = objects[index] && objects[index].type;
@@ -8290,8 +8589,8 @@ function handleMakerCanvasPointerDown(event) {
         directionalUndoLabel = '하단 범퍼 각도 설정 시작';
       } else if (directionalType === 'sticky_pad') {
         directionalUndoLabel = '점착패드 경로 설정 시작';
-      } else if (directionalType === 'magic_wizard') {
-        directionalUndoLabel = '마법사 발사 방향 설정 시작';
+      } else if (isRangedCasterType(directionalType)) {
+        directionalUndoLabel = `${rangedCasterLabel(directionalType)} 발사 방향 설정 시작`;
       }
       rememberUndoState(directionalUndoLabel);
       setSingleSelectedIndex(index);
@@ -8310,8 +8609,8 @@ function handleMakerCanvasPointerDown(event) {
         directionalHint = '하단 범퍼 타격 각도 설정중';
       } else if (directionalType === 'sticky_pad') {
         directionalHint = '점착패드 이동 목표점 설정중';
-      } else if (directionalType === 'magic_wizard') {
-        directionalHint = '마법사 화염 발사 방향·도착거리 설정중';
+      } else if (isRangedCasterType(directionalType)) {
+        directionalHint = `${rangedCasterLabel(directionalType)} ${rangedCasterProjectileLabel(directionalType)} 발사 방향·도착거리 설정중`;
       }
       updateMakerHint(directionalHint);
       drawMakerCanvas();
@@ -8342,8 +8641,8 @@ function handleMakerCanvasPointerDown(event) {
         ? '선풍기 바람 방향/거리 드래그 편집중'
         : (selectedObj && selectedObj.type === 'bottom_bumper'
           ? '하단 범퍼 타격 각도 드래그 편집중'
-          : (selectedObj && selectedObj.type === 'magic_wizard'
-            ? '마법사 화염 발사 방향 드래그 편집중'
+          : (selectedObj && isRangedCasterType(selectedObj.type)
+            ? `${rangedCasterLabel(selectedObj.type)} ${rangedCasterProjectileLabel(selectedObj.type)} 발사 방향 드래그 편집중`
             : '해머 타격 방향/거리 드래그 편집중')));
     } else if (selectedHandle.kind === 'sticky_target') {
       updateMakerHint('점착패드 이동 목표점 드래그 편집중');
@@ -8660,7 +8959,8 @@ function addObjectAt(tool, x, y, options = {}) {
       || tool === 'bottom_bumper'
       || tool === 'fan'
       || tool === 'sticky_pad'
-      || tool === 'magic_wizard') {
+      || tool === 'magic_wizard'
+      || tool === 'ninja') {
       editorState.pendingHammerOid = String(created.oid || '');
       let createHint = '해머 생성 완료: 드래그/클릭으로 타격 방향·이동거리 설정';
       if (tool === 'fan') {
@@ -8671,6 +8971,8 @@ function addObjectAt(tool, x, y, options = {}) {
         createHint = '점착패드 생성 완료: 드래그/클릭으로 이동 목표점(B) 지정';
       } else if (tool === 'magic_wizard') {
         createHint = '마법사 생성 완료: 드래그/클릭으로 화염 발사 방향·도착거리 설정';
+      } else if (tool === 'ninja') {
+        createHint = '닌자 생성 완료: 드래그/클릭으로 표창 발사 방향·도착거리 설정';
       }
       updateMakerHint(createHint);
     } else {
@@ -9428,7 +9730,8 @@ function handleMakerCanvasRightClickAction() {
     || tool === 'bottom_bumper'
     || tool === 'fan'
     || tool === 'sticky_pad'
-    || tool === 'magic_wizard') && editorState.pendingHammerOid) {
+    || tool === 'magic_wizard'
+    || tool === 'ninja') && editorState.pendingHammerOid) {
     resetPendingHammer();
     updateMakerHint(tool === 'fan'
       ? '선풍기 방향 설정 입력 취소'
@@ -9436,7 +9739,7 @@ function handleMakerCanvasRightClickAction() {
         ? '하단 범퍼 각도 설정 입력 취소'
         : (tool === 'sticky_pad'
           ? '점착패드 목표점 설정 입력 취소'
-          : (tool === 'magic_wizard' ? '마법사 발사 방향 설정 입력 취소' : '해머 방향 설정 입력 취소'))));
+          : (isRangedCasterType(tool) ? `${rangedCasterLabel(tool)} 발사 방향 설정 입력 취소` : '해머 방향 설정 입력 취소'))));
     drawMakerCanvas();
     setStatus(tool === 'fan'
       ? '선풍기 방향 설정 대기를 취소했습니다.'
@@ -9444,7 +9747,7 @@ function handleMakerCanvasRightClickAction() {
         ? '하단 범퍼 각도 설정 대기를 취소했습니다.'
         : (tool === 'sticky_pad'
           ? '점착패드 목표점 설정 대기를 취소했습니다.'
-          : (tool === 'magic_wizard' ? '마법사 발사 방향 설정 대기를 취소했습니다.' : '해머 방향 설정 대기를 취소했습니다.'))));
+          : (isRangedCasterType(tool) ? `${rangedCasterLabel(tool)} 발사 방향 설정 대기를 취소했습니다.` : '해머 방향 설정 대기를 취소했습니다.'))));
     return;
   }
   if (tool === 'select' && !editorState.dragState) {
@@ -9568,7 +9871,8 @@ function setupEvents() {
       && selectedTool() !== 'bottom_bumper'
       && selectedTool() !== 'fan'
       && selectedTool() !== 'sticky_pad'
-      && selectedTool() !== 'magic_wizard') {
+      && selectedTool() !== 'magic_wizard'
+      && selectedTool() !== 'ninja') {
       resetPendingHammer();
     }
     cancelDrag();
@@ -9613,10 +9917,10 @@ function setupEvents() {
       updateMakerHint('도미노 블럭 모드: 드래그로 크기 생성 (동적 물리)');
     } else if (tool === 'physics_ball') {
       updateMakerHint('물리 공 모드: 드래그로 반지름 생성 (동적 물리)');
-    } else if (tool === 'magic_wizard') {
+    } else if (isRangedCasterType(tool)) {
       updateMakerHint(editorState.pendingHammerOid
-        ? '마법사 발사 방향 설정 대기: 드래그/클릭으로 화염 방향·도착거리 지정'
-        : '마법사 화염 모드: 드래그로 비율 고정 크기 생성 후, 점선 단계에서 발사 방향·도착거리 지정');
+        ? `${rangedCasterLabel(tool)} 발사 방향 설정 대기: 드래그/클릭으로 ${rangedCasterProjectileLabel(tool)} 방향·도착거리 지정`
+        : `${rangedCasterLabel(tool)} ${rangedCasterProjectileLabel(tool)} 모드: 드래그로 비율 고정 크기 생성 후, 점선 단계에서 발사 방향·도착거리 지정`);
     } else if (tool === 'goal_marker_image') {
       updateMakerHint('골라인 이미지 모드: 드래그로 크기 지정 생성 (배경 마커)');
     } else if (tool === 'rotor') {

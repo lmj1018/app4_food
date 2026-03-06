@@ -460,6 +460,14 @@ class PinballMapMakerHandler(SimpleHTTPRequestHandler):
         message = fmt % args
         sys.stdout.write(f"[http] {self.address_string()} - {message}\n")
 
+    def end_headers(self) -> None:
+        # Always serve the map maker with no-cache headers so latest tool changes
+        # (e.g. newly added object buttons) are reflected without stale browser cache.
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        super().end_headers()
+
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlsplit(self.path)
         if parsed.path.startswith("/__pinball_v2_api/"):
@@ -495,7 +503,6 @@ class PinballMapMakerHandler(SimpleHTTPRequestHandler):
         raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status.value)
         self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)
