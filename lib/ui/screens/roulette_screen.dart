@@ -2769,7 +2769,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
                         });
                       },
                       child: Padding(
-                        padding: const EdgeInsets.fromLTRB(4, 0, 0, 8),
+                        padding: const EdgeInsets.fromLTRB(4, 6, 0, 6),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 10,

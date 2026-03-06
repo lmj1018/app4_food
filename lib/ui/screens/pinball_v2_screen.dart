@@ -91,6 +91,9 @@ SOFTWARE.
   bool _showMapLabelOverlay = false;
   bool _didShowMapLabelOverlayOnce = false;
   Timer? _mapLabelOverlayTimer;
+  String? _selectedMapIdOverride;
+  Timer? _licenseHoldTimer;
+  bool _licenseHoldTriggered = false;
   bool _slowMotionActive = false;
   DateTime? _slowMotionActiveSince;
   int _slowMotionActivationCount = 0;
@@ -122,6 +125,15 @@ SOFTWARE.
     }
     return list;
   }();
+
+  String get _effectiveMapId {
+    final override = _selectedMapIdOverride?.trim() ?? '';
+    if (override.isNotEmpty) {
+      return override;
+    }
+    final fromArgs = widget.args.mapId.trim();
+    return fromArgs.isEmpty ? 'v2_default' : fromArgs;
+  }
 
   String _normalizeCandidate(String value) {
     var out = value.trim();
@@ -198,6 +210,175 @@ SOFTWARE.
   void _clearMapLabelOverlayTimer() {
     _mapLabelOverlayTimer?.cancel();
     _mapLabelOverlayTimer = null;
+  }
+
+  void _clearLicenseHoldTimer() {
+    _licenseHoldTimer?.cancel();
+    _licenseHoldTimer = null;
+  }
+
+  void _startLicenseHoldTimer() {
+    _clearLicenseHoldTimer();
+    _licenseHoldTriggered = false;
+    _licenseHoldTimer = Timer(const Duration(seconds: 5), () {
+      if (!mounted) {
+        return;
+      }
+      _licenseHoldTriggered = true;
+      unawaited(_showMapSelectDialogAndRestart());
+    });
+  }
+
+  Future<List<_V2RuntimeMapChoice>> _loadRuntimeMapChoices() async {
+    const manifestPath = 'assets/ui/pinball/maps/manifest.json';
+    try {
+      final raw = await rootBundle.loadString(manifestPath);
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        final maps = decoded['maps'];
+        if (maps is List) {
+          final items = <_V2RuntimeMapChoice>[];
+          for (final entry in maps) {
+            if (entry is! Map) {
+              continue;
+            }
+            final id = (entry['id'] ?? '').toString().trim();
+            if (id.isEmpty) {
+              continue;
+            }
+            final enabled = entry['enabled'];
+            if (enabled is bool && !enabled) {
+              continue;
+            }
+            final engine = (entry['engine'] ?? '').toString().trim().toLowerCase();
+            if (engine.isNotEmpty && engine != 'v2') {
+              continue;
+            }
+            final titleRaw = (entry['title'] ?? '').toString().trim();
+            final sort = _toInt(entry['sort'], fallback: 9999);
+            items.add(
+              _V2RuntimeMapChoice(
+                id: id,
+                title: titleRaw.isEmpty ? id : titleRaw,
+                sort: sort,
+              ),
+            );
+          }
+          items.sort((a, b) {
+            final bySort = a.sort.compareTo(b.sort);
+            if (bySort != 0) {
+              return bySort;
+            }
+            return a.title.compareTo(b.title);
+          });
+          if (items.isNotEmpty) {
+            return items;
+          }
+        }
+      }
+    } catch (_) {}
+    final fallbackId = _effectiveMapId;
+    return <_V2RuntimeMapChoice>[
+      _V2RuntimeMapChoice(id: fallbackId, title: fallbackId, sort: 0),
+    ];
+  }
+
+  Future<void> _showMapSelectDialogAndRestart() async {
+    if (!mounted) {
+      return;
+    }
+    final choices = await _loadRuntimeMapChoices();
+    if (!mounted || choices.isEmpty) {
+      return;
+    }
+    final selectedId = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        final currentMapId = _effectiveMapId;
+        return AlertDialog(
+          backgroundColor: const Color(0xFF101214),
+          title: const Text(
+            '맵 선택',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+          ),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 320),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final choice in choices)
+                    ListTile(
+                      dense: true,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      leading: Icon(
+                        choice.id == currentMapId
+                            ? Icons.radio_button_checked_rounded
+                            : Icons.radio_button_unchecked_rounded,
+                        color: choice.id == currentMapId
+                            ? const Color(0xFFFF4D98)
+                            : Colors.white70,
+                      ),
+                      title: Text(
+                        choice.title,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      subtitle: Text(
+                        choice.id,
+                        style: const TextStyle(
+                          color: Colors.white60,
+                          fontSize: 12,
+                        ),
+                      ),
+                      onTap: () => Navigator.of(dialogContext).pop(choice.id),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('취소'),
+            ),
+          ],
+        );
+      },
+    );
+    if (selectedId == null || !mounted) {
+      return;
+    }
+    await _restartWithSelectedMapId(selectedId);
+  }
+
+  Future<void> _restartWithSelectedMapId(String mapId) async {
+    if (!mounted) {
+      return;
+    }
+    final nextMapId = mapId.trim();
+    if (nextMapId.isEmpty) {
+      return;
+    }
+    _clearLicenseHoldTimer();
+    _clearStartupTimer();
+    _clearWinnerMonitor();
+    _clearMapLabelOverlayTimer();
+    _resetSlowMotionBannerState();
+    setState(() {
+      _selectedMapIdOverride = nextMapId;
+      _hasError = false;
+      _didStart = false;
+      _isStarting = false;
+      _isFinishing = false;
+      _pageLoaded = false;
+      _mapLabel = '';
+      _showMapLabelOverlay = false;
+      _didShowMapLabelOverlayOnce = false;
+      _statusText = '$nextMapId 로딩 중...';
+    });
+    await _loadPage(clearCache: true);
   }
 
   void _clearSlowMotionBannerTimer() {
@@ -602,11 +783,10 @@ SOFTWARE.
   }
 
   Future<void> _loadPage({bool clearCache = false}) async {
+    final mapId = _effectiveMapId;
     _pushRuntimeDebug('load_page_begin', <String, Object>{
       'clearCache': clearCache,
-      'mapId': widget.args.mapId.trim().isEmpty
-          ? 'v2_default'
-          : widget.args.mapId.trim(),
+      'mapId': mapId,
       'candidateCount': _candidates.length,
     });
     if (clearCache) {
@@ -622,9 +802,7 @@ SOFTWARE.
       'fromApp': '1',
       'isPinballApp': '1',
       'disableSw': '1',
-      'mapId': widget.args.mapId.trim().isEmpty
-          ? 'v2_default'
-          : widget.args.mapId.trim(),
+      'mapId': mapId,
       'appCacheBust': '${DateTime.now().microsecondsSinceEpoch}',
     };
     final uri = baseUri.replace(path: '/index_v2.html', queryParameters: query);
@@ -829,8 +1007,7 @@ SOFTWARE.
         return mapId.trim();
       }
     }
-    final fallback = widget.args.mapId.trim();
-    return fallback.isEmpty ? 'v2_default' : fallback;
+    return _effectiveMapId;
   }
 
   void _syncMapLabel(Map<String, dynamic>? state, {bool forceShow = false}) {
@@ -886,9 +1063,7 @@ SOFTWARE.
       'pageLoaded': _pageLoaded,
       'candidateCount': _candidates.length,
       'autoStart': widget.args.autoStart,
-      'mapId': widget.args.mapId.trim().isEmpty
-          ? 'v2_default'
-          : widget.args.mapId.trim(),
+      'mapId': _effectiveMapId,
     });
     _isStarting = true;
     _resetSlowMotionBannerState();
@@ -904,9 +1079,7 @@ SOFTWARE.
     }
 
     final payload = <String, Object>{
-      'mapId': widget.args.mapId.trim().isEmpty
-          ? 'v2_default'
-          : widget.args.mapId.trim(),
+      'mapId': _effectiveMapId,
       'candidates': _candidates,
       'winningRank': 1,
       'autoStart': widget.args.autoStart,
@@ -1425,6 +1598,7 @@ SOFTWARE.
     _clearStartupTimer();
     _clearWinnerMonitor();
     _clearMapLabelOverlayTimer();
+    _clearLicenseHoldTimer();
     _clearSlowMotionBannerTimer();
     final server = _localServer;
     _localServer = null;
@@ -1584,7 +1758,17 @@ SOFTWARE.
                   color: Colors.transparent,
                   child: InkWell(
                     borderRadius: BorderRadius.circular(7),
-                    onTap: _showLicenseNotice,
+                    onTapDown: (_) => _startLicenseHoldTimer(),
+                    onTapUp: (_) => _clearLicenseHoldTimer(),
+                    onTapCancel: _clearLicenseHoldTimer,
+                    onTap: () {
+                      _clearLicenseHoldTimer();
+                      if (_licenseHoldTriggered) {
+                        _licenseHoldTriggered = false;
+                        return;
+                      }
+                      _showLicenseNotice();
+                    },
                     child: Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 7,
@@ -1616,4 +1800,16 @@ SOFTWARE.
       ),
     );
   }
+}
+
+class _V2RuntimeMapChoice {
+  const _V2RuntimeMapChoice({
+    required this.id,
+    required this.title,
+    required this.sort,
+  });
+
+  final String id;
+  final String title;
+  final int sort;
 }

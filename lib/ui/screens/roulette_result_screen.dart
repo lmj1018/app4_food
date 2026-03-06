@@ -423,12 +423,9 @@ class _CustomRankingSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '최종 순위',
-            style: textTheme.titleMedium?.copyWith(
-              color: const Color(0xFFE6006E),
-              fontWeight: FontWeight.w800,
-            ),
+          _GradientTitleText(
+            text: '최종 순위',
+            style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 8),
           _AnimatedRankingList(items: items),
