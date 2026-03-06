@@ -1526,9 +1526,9 @@ function compileObject(rawObject, entityId) {
             280,
             toFiniteNumber(rawObject.shurikenStickMs, toFiniteNumber(rawObject.stickMs, 2000)),
           ),
-          shurikenPierceBalls: toBoolean(
+          shurikenPierceBalls: toTruthyBoolean(
             rawObject.shurikenPierceBalls,
-            toBoolean(rawObject.persistAfterHit, toBoolean(rawObject.pierceBalls, false)),
+            toTruthyBoolean(rawObject.persistAfterHit, toTruthyBoolean(rawObject.pierceBalls, false)),
           ),
           imageSrc: normalizeNinjaImageSrc(rawObject.imageSrc),
         },
@@ -4324,6 +4324,12 @@ function createNinjaBehavior(def, env) {
     return !(dirDeg > 90 && dirDeg < 270);
   }
 
+  function nextRandomUnit() {
+    const rng = env && typeof env.getRng === 'function' ? env.getRng() : null;
+    const value = rng && typeof rng.next === 'function' ? rng.next() : Math.random();
+    return clamp(toFiniteNumber(value, 0.5), 0, 0.999999);
+  }
+
   function ensureNinjaVisualEffect() {
     const roulette = env.getRoulette();
     if (!roulette || !Array.isArray(roulette._effects)) {
@@ -4815,12 +4821,11 @@ function createNinjaBehavior(def, env) {
     const muzzleDistance = Math.max(0.12, Math.max(width, height) * 0.62);
     const randomEnabled = toBoolean(def.randomAngleEnabled, false);
     const randomRangeDeg = Math.max(0, toFiniteNumber(def.randomAngleRangeDeg, 30));
-    const randomOffset = randomEnabled
-      ? degToRad((Math.random() * 2 - 1) * randomRangeDeg)
-      : 0;
     const rawCount = Math.max(1, Math.floor(toFiniteNumber(def.shurikenCount, 1)));
     const shurikenCount = Math.max(1, Math.min(24, rawCount));
-    const radialStep = shurikenCount > 1 ? (Math.PI * 2) / shurikenCount : 0;
+    // Keep multi-shot spread around aimed direction (default cone: +-30deg), not 360deg.
+    const spreadHalfDeg = randomRangeDeg > 0 ? randomRangeDeg : 30;
+    const spreadHalfRad = degToRad(spreadHalfDeg);
     const legacySpeed = Math.max(0.2, toFiniteNumber(def.shurikenSpeed, 7.4));
     const radius = Math.max(0.05, toFiniteNumber(def.shurikenRadius, 0.2));
     const lifeMs = Math.max(320, toFiniteNumber(def.shurikenLifeMs, 1300));
@@ -4831,7 +4836,22 @@ function createNinjaBehavior(def, env) {
     const propelMs = Math.max(120, toFiniteNumber(def.shurikenPropelMs, Math.max(220, lifeMs * 0.45)));
 
     for (let shotIndex = 0; shotIndex < shurikenCount; shotIndex += 1) {
-      const dirRad = baseDir + randomOffset + radialStep * shotIndex;
+      let spreadOffsetRad = 0;
+      if (shurikenCount > 1) {
+        const ratio = shurikenCount > 1 ? shotIndex / (shurikenCount - 1) : 0.5;
+        const fanOffset = (-spreadHalfRad) + (spreadHalfRad * 2 * ratio);
+        if (randomEnabled && spreadHalfRad > 0) {
+          const jitterRange = Math.min(spreadHalfRad * 0.18, degToRad(4));
+          const jitter = (nextRandomUnit() * 2 - 1) * jitterRange;
+          spreadOffsetRad = clamp(fanOffset + jitter, -spreadHalfRad, spreadHalfRad);
+        } else {
+          spreadOffsetRad = fanOffset;
+        }
+      } else if (randomEnabled && spreadHalfRad > 0) {
+        spreadOffsetRad = (nextRandomUnit() * 2 - 1) * spreadHalfRad;
+      }
+
+      const dirRad = baseDir + spreadOffsetRad;
       const startX = originX + Math.cos(dirRad) * muzzleDistance;
       const startY = originY + Math.sin(dirRad) * muzzleDistance;
       shurikens.push({

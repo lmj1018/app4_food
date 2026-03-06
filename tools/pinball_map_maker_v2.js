@@ -156,6 +156,7 @@ const elements = {
   objDiamondRotateAutoInput: document.getElementById('objDiamondRotateAutoInput'),
   reverseRotationButton: document.getElementById('reverseRotationButton'),
   objPairInput: document.getElementById('objPairInput'),
+  objNinjaPierceInput: document.getElementById('objNinjaPierceInput'),
   objDirLabel: document.getElementById('objDirLabel'),
   objDirInput: document.getElementById('objDirInput'),
   objForceLabel: document.getElementById('objForceLabel'),
@@ -695,6 +696,7 @@ function setBusy(isBusy) {
     elements.objDiamondRotateAutoInput,
     elements.reverseRotationButton,
     elements.objPairInput,
+    elements.objNinjaPierceInput,
     elements.objDirInput,
     elements.objForceInput,
     elements.objIntervalInput,
@@ -2710,6 +2712,10 @@ function clearObjectEditor() {
     elements.objDiamondRotateAutoInput.disabled = true;
   }
   if (elements.objPairInput) elements.objPairInput.value = '';
+  if (elements.objNinjaPierceInput) {
+    elements.objNinjaPierceInput.checked = false;
+    elements.objNinjaPierceInput.disabled = true;
+  }
   if (elements.objDirInput) elements.objDirInput.value = '';
   if (elements.objForceInput) elements.objForceInput.value = '';
   if (elements.objIntervalInput) elements.objIntervalInput.value = '';
@@ -2819,6 +2825,14 @@ function populateObjectEditor() {
     elements.objNoCollisionInput.checked = obj.noCollision === true;
   }
   if (elements.objPairInput) elements.objPairInput.value = String(obj.pair || '');
+  if (elements.objNinjaPierceInput) {
+    const ninjaPierceEnabled = obj.shurikenPierceBalls === true
+      || obj.shurikenPierceBalls === 1
+      || String(obj.shurikenPierceBalls || '').trim().toLowerCase() === 'true';
+    const isNinja = obj.type === 'ninja';
+    elements.objNinjaPierceInput.disabled = !isNinja;
+    elements.objNinjaPierceInput.checked = isNinja && ninjaPierceEnabled;
+  }
   if (elements.objDirInput) {
     if (obj.type === 'rotor') {
       elements.objDirInput.value = '';
@@ -3080,7 +3094,6 @@ function populateObjectEditor() {
     if (elements.objExtra2Label) elements.objExtra2Label.textContent = '표창 수';
     if (elements.objRadiusInput) elements.objRadiusInput.value = String(Math.max(320, Math.floor(toFinite(obj.shurikenLifeMs, 1300))));
     if (elements.objRadiusLabel) elements.objRadiusLabel.textContent = '표창 지속(ms)';
-    if (elements.objPairInput) elements.objPairInput.value = String(obj.shurikenPierceBalls === true ? '1' : '0');
   } else if (obj.type === 'sticky_pad') {
     const pathB = Array.isArray(obj.pathB) ? obj.pathB : [toFinite(obj.x, 0) + 2.4, toFinite(obj.y, 0)];
     if (elements.objXInput) elements.objXInput.value = String(round1(toFinite(obj.x, 0)));
@@ -3264,6 +3277,9 @@ function buildFloatingInspectorFieldDefs(obj) {
       force: obj.type === 'portal' || obj.type === 'goal_marker_image',
       allowEmpty: obj.type === 'goal_marker_image',
     });
+  }
+  if (obj.type === 'ninja') {
+    pushField('objNinjaPierceInput', '무적 표창(볼 관통 유지)', { force: true });
   }
 
   pushField('objDirInput', readMakerLabelText(elements.objDirLabel, '방향'));
@@ -3951,13 +3967,13 @@ function applyObjectEditorValues() {
       )));
       obj.randomAngleEnabled = randomRange > 0;
       obj.randomAngleRangeDeg = randomRange;
-      obj.shurikenPierceBalls = obj.shurikenPierceBalls === true
-        || obj.shurikenPierceBalls === 1
-        || String(obj.shurikenPierceBalls || '').trim().toLowerCase() === 'true';
-      const rawPair = elements.objPairInput ? String(elements.objPairInput.value ?? '').trim().toLowerCase() : '';
-      if (rawPair) {
-        obj.shurikenPierceBalls = rawPair === '1' || rawPair === 'true' || rawPair === 'y' || rawPair === 'yes';
-      }
+      obj.shurikenPierceBalls = elements.objNinjaPierceInput
+        ? elements.objNinjaPierceInput.checked === true
+        : (
+          obj.shurikenPierceBalls === true
+          || obj.shurikenPierceBalls === 1
+          || String(obj.shurikenPierceBalls || '').trim().toLowerCase() === 'true'
+        );
       obj.imageSrc = NINJA_IMAGE_DEFAULT_SRC;
       obj.noCollision = true;
     } else {
@@ -10072,6 +10088,7 @@ function setupEvents() {
     elements.objDiamondRotateSpeedInput,
     elements.objDiamondRotateAutoInput,
     elements.objPairInput,
+    elements.objNinjaPierceInput,
     elements.objDirInput,
     elements.objForceInput,
     elements.objIntervalInput,
