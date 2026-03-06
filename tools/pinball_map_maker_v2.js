@@ -156,6 +156,7 @@ const elements = {
   objDiamondRotateAutoInput: document.getElementById('objDiamondRotateAutoInput'),
   reverseRotationButton: document.getElementById('reverseRotationButton'),
   objPairInput: document.getElementById('objPairInput'),
+  objProjectilePierceLabel: document.getElementById('objProjectilePierceLabel'),
   objNinjaPierceInput: document.getElementById('objNinjaPierceInput'),
   objDirLabel: document.getElementById('objDirLabel'),
   objDirInput: document.getElementById('objDirInput'),
@@ -1004,6 +1005,15 @@ function normalizeMapJson(rawMapJson, fallbackMapId = 'v2_custom_map') {
         ));
         obj.hitDistance = obj.fireballDistance;
         obj.fireballRadius = Math.max(0.05, toFinite(obj.fireballRadius, toFinite(obj.radius, 0.2)));
+        obj.fireballPierceBalls = obj.fireballPierceBalls === true
+          || obj.fireballPierceBalls === 1
+          || String(obj.fireballPierceBalls || '').trim().toLowerCase() === 'true'
+          || obj.persistAfterHit === true
+          || obj.persistAfterHit === 1
+          || String(obj.persistAfterHit || '').trim().toLowerCase() === 'true'
+          || obj.pierceBalls === true
+          || obj.pierceBalls === 1
+          || String(obj.pierceBalls || '').trim().toLowerCase() === 'true';
         obj.force = Math.max(0.1, toFinite(obj.force, 2.8));
         obj.imageSrc = MAGIC_WIZARD_IMAGE_DEFAULT_SRC;
         if (typeof obj.color !== 'string' || !obj.color.trim()) {
@@ -2564,6 +2574,7 @@ function createObjectByTool(tool, x, y) {
       fireballSpeed: 7.4,
       fireballDistance: 7.4,
       fireballRadius: 0.2,
+      fireballPierceBalls: false,
       force: 2.8,
       imageSrc: MAGIC_WIZARD_IMAGE_DEFAULT_SRC,
       color: 'rgba(0,0,0,0)',
@@ -2716,6 +2727,9 @@ function clearObjectEditor() {
     elements.objNinjaPierceInput.checked = false;
     elements.objNinjaPierceInput.disabled = true;
   }
+  if (elements.objProjectilePierceLabel) {
+    elements.objProjectilePierceLabel.textContent = '무적 투사체(볼 맞아도 관통)';
+  }
   if (elements.objDirInput) elements.objDirInput.value = '';
   if (elements.objForceInput) elements.objForceInput.value = '';
   if (elements.objIntervalInput) elements.objIntervalInput.value = '';
@@ -2826,12 +2840,29 @@ function populateObjectEditor() {
   }
   if (elements.objPairInput) elements.objPairInput.value = String(obj.pair || '');
   if (elements.objNinjaPierceInput) {
-    const ninjaPierceEnabled = obj.shurikenPierceBalls === true
-      || obj.shurikenPierceBalls === 1
-      || String(obj.shurikenPierceBalls || '').trim().toLowerCase() === 'true';
-    const isNinja = obj.type === 'ninja';
-    elements.objNinjaPierceInput.disabled = !isNinja;
-    elements.objNinjaPierceInput.checked = isNinja && ninjaPierceEnabled;
+    const isRanged = isRangedCasterType(obj.type);
+    const projectilePierceEnabled = isNinjaType(obj.type)
+      ? (
+        obj.shurikenPierceBalls === true
+        || obj.shurikenPierceBalls === 1
+        || String(obj.shurikenPierceBalls || '').trim().toLowerCase() === 'true'
+      )
+      : (
+        obj.fireballPierceBalls === true
+        || obj.fireballPierceBalls === 1
+        || String(obj.fireballPierceBalls || '').trim().toLowerCase() === 'true'
+      );
+    elements.objNinjaPierceInput.disabled = !isRanged;
+    elements.objNinjaPierceInput.checked = isRanged && projectilePierceEnabled;
+  }
+  if (elements.objProjectilePierceLabel) {
+    if (isNinjaType(obj.type)) {
+      elements.objProjectilePierceLabel.textContent = '무적 표창(볼 맞아도 관통)';
+    } else if (isMagicWizardType(obj.type)) {
+      elements.objProjectilePierceLabel.textContent = '무적 파이어볼(볼 맞아도 관통)';
+    } else {
+      elements.objProjectilePierceLabel.textContent = '무적 투사체(볼 맞아도 관통)';
+    }
   }
   if (elements.objDirInput) {
     if (obj.type === 'rotor') {
@@ -3278,8 +3309,12 @@ function buildFloatingInspectorFieldDefs(obj) {
       allowEmpty: obj.type === 'goal_marker_image',
     });
   }
-  if (obj.type === 'ninja') {
-    pushField('objNinjaPierceInput', '무적 표창(볼 관통 유지)', { force: true });
+  if (isRangedCasterType(obj.type)) {
+    pushField(
+      'objNinjaPierceInput',
+      isNinjaType(obj.type) ? '무적 표창(볼 관통 유지)' : '무적 파이어볼(볼 관통 유지)',
+      { force: true },
+    );
   }
 
   pushField('objDirInput', readMakerLabelText(elements.objDirLabel, '방향'));
@@ -3549,7 +3584,7 @@ function sharedSyncKeysForType(type) {
     case 'fan':
       return ['color', 'width', 'height', 'dirDeg', 'force', 'triggerRadius', 'hitDistance', 'restitution', 'friction'];
     case 'magic_wizard':
-      return ['color', 'width', 'height', 'dirDeg', 'force', 'fireIntervalMs', 'fireballSpeed', 'fireballDistance', 'fireballRadius', 'imageSrc', 'restitution', 'friction'];
+      return ['color', 'width', 'height', 'dirDeg', 'force', 'fireIntervalMs', 'fireballSpeed', 'fireballDistance', 'fireballRadius', 'fireballPierceBalls', 'imageSrc', 'restitution', 'friction'];
     case 'ninja':
       return [
         'color',
@@ -3981,6 +4016,13 @@ function applyObjectEditorValues() {
         elements.objExtra1Input ? elements.objExtra1Input.value : obj.fireballRadius,
         toFinite(obj.fireballRadius, 0.2),
       )));
+      obj.fireballPierceBalls = elements.objNinjaPierceInput
+        ? elements.objNinjaPierceInput.checked === true
+        : (
+          obj.fireballPierceBalls === true
+          || obj.fireballPierceBalls === 1
+          || String(obj.fireballPierceBalls || '').trim().toLowerCase() === 'true'
+        );
       obj.imageSrc = MAGIC_WIZARD_IMAGE_DEFAULT_SRC;
     }
     obj.mirror = false;
@@ -7484,6 +7526,7 @@ function createMagicWizardFromDrag(startWorld, endWorld) {
     fireballSpeed: 7.4,
     fireballDistance: 7.4,
     fireballRadius: round2(Math.max(0.08, Math.min(0.42, halfSize * 0.22))),
+    fireballPierceBalls: false,
     force: 2.8,
     imageSrc: MAGIC_WIZARD_IMAGE_DEFAULT_SRC,
     color: 'rgba(0,0,0,0)',

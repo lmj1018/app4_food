@@ -1418,6 +1418,10 @@ function compileObject(rawObject, entityId) {
           })(),
           fireballRadius: Math.max(0.05, toFiniteNumber(rawObject.fireballRadius, toFiniteNumber(rawObject.radius, 0.2))),
           fireballLifeMs: Math.max(260, toFiniteNumber(rawObject.fireballLifeMs, 900)),
+          fireballPierceBalls: toTruthyBoolean(
+            rawObject.fireballPierceBalls,
+            toTruthyBoolean(rawObject.persistAfterHit, toTruthyBoolean(rawObject.pierceBalls, false)),
+          ),
           imageSrc: normalizeMagicWizardImageSrc(rawObject.imageSrc),
         },
       };
@@ -4117,6 +4121,7 @@ function createMagicWizardBehavior(def, env) {
     const dtSec = Math.max(0.004, Math.min(0.09, toFiniteNumber(deltaMs, 16.666) / 1000));
     const impulsePower = Math.max(0.1, toFiniteNumber(def.force, 2.8));
     const impactPadding = 0.36;
+    const pierceBalls = toBoolean(def.fireballPierceBalls, false);
     for (let index = fireballs.length - 1; index >= 0; index -= 1) {
       const projectile = fireballs[index];
       if (!projectile) {
@@ -4176,7 +4181,7 @@ function createMagicWizardBehavior(def, env) {
           break;
         }
       }
-      if (expired || outOfBounds || consumed) {
+      if (expired || outOfBounds || (consumed && !pierceBalls)) {
         fireballs.splice(index, 1);
       }
     }
