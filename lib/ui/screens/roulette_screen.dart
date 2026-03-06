@@ -2761,7 +2761,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
                   Align(
                     alignment: Alignment.centerRight,
                     child: InkWell(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(14),
                       onTap: () {
                         setState(() {
                           _showAllCustomRankingInResult =
@@ -2769,27 +2769,56 @@ class _RouletteScreenState extends State<RouletteScreen> {
                         });
                       },
                       child: Padding(
-                        padding: const EdgeInsets.fromLTRB(4, 0, 0, 8),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Checkbox(
-                              value: _showAllCustomRankingInResult,
-                              onChanged: (value) {
-                                setState(() {
-                                  _showAllCustomRankingInResult =
-                                      value ?? false;
-                                });
-                              },
+                        padding: const EdgeInsets.fromLTRB(4, 0, 0, 10),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFEEF6),
+                            borderRadius: BorderRadius.circular(13),
+                            border: Border.all(
+                              color: const Color(0xFFFF4D98),
+                              width: 1.1,
                             ),
-                            Text(
-                              '모든등수보기',
-                              style: textTheme.bodyMedium?.copyWith(
-                                color: const Color(0xFF2F3237),
-                                fontWeight: FontWeight.w700,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              AnimatedContainer(
+                                duration: const Duration(milliseconds: 160),
+                                curve: Curves.easeOutCubic,
+                                width: 18,
+                                height: 18,
+                                decoration: BoxDecoration(
+                                  color: _showAllCustomRankingInResult
+                                      ? const Color(0xFFFF2E84)
+                                      : Colors.white,
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                    color: const Color(0xFFFF2E84),
+                                    width: 1.3,
+                                  ),
+                                ),
+                                child: _showAllCustomRankingInResult
+                                    ? const Icon(
+                                        Icons.check_rounded,
+                                        size: 13,
+                                        color: Colors.white,
+                                      )
+                                    : null,
                               ),
-                            ),
-                          ],
+                              const SizedBox(width: 7),
+                              Text(
+                                '모든등수보기',
+                                style: textTheme.bodySmall?.copyWith(
+                                  color: const Color(0xFFE6006E),
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),

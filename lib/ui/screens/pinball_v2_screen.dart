@@ -37,6 +37,7 @@ class PinballV2Screen extends StatefulWidget {
 class _PinballV2ScreenState extends State<PinballV2Screen> {
   static const String _pinballAssetDir = 'assets/ui/pinball';
   static const Duration _startupTimeout = Duration(seconds: 30);
+  static const int _fullRankingWaitTimeoutTicks = 120;
   static const String _thirdPartyNoticesAssetPath =
       'assets/licenses/THIRD_PARTY_NOTICES.txt';
   static const List<String> _slowMotionBannerAssets = <String>[
@@ -78,6 +79,7 @@ SOFTWARE.
   Timer? _startupTimer;
   Timer? _winnerMonitorTimer;
   int _winnerMonitorTicks = 0;
+  int? _fullRankingWaitStartTick;
 
   bool _pageLoaded = false;
   bool _isStarting = false;
@@ -190,6 +192,7 @@ SOFTWARE.
     _winnerMonitorTimer?.cancel();
     _winnerMonitorTimer = null;
     _winnerMonitorTicks = 0;
+    _fullRankingWaitStartTick = null;
   }
 
   void _clearMapLabelOverlayTimer() {
@@ -1119,16 +1122,24 @@ SOFTWARE.
           }
         }
         final running = stateMap?['running'] == true;
+        final expectedCount = max(
+          2,
+          _toInt(stateMap?['candidateCount'], fallback: _candidates.length),
+        );
+        if (widget.args.waitForFullRanking &&
+            _fullRankingWaitStartTick == null &&
+            (winner.isNotEmpty || mergedRanking.isNotEmpty)) {
+          _fullRankingWaitStartTick = _winnerMonitorTicks;
+        }
         if (winner.isNotEmpty) {
           if (widget.args.waitForFullRanking) {
-            final candidateCount = _toInt(
-              stateMap?['candidateCount'],
-              fallback: _candidates.length,
-            );
-            final expectedCount = max(2, candidateCount);
             final rankingComplete = mergedRanking.length >= expectedCount;
-            final timedOut = _winnerMonitorTicks > 900;
-            if (!rankingComplete && !timedOut && running) {
+            final waitStartTick =
+                _fullRankingWaitStartTick ?? _winnerMonitorTicks;
+            final timedOut =
+                (_winnerMonitorTicks - waitStartTick) >=
+                _fullRankingWaitTimeoutTicks;
+            if (!rankingComplete && !timedOut) {
               if (_winnerMonitorTicks % 20 == 0) {
                 _setStatus('1등 확정. 전체 순위 집계 중...');
               }
@@ -1139,6 +1150,22 @@ SOFTWARE.
           return;
         }
         if (widget.args.waitForFullRanking &&
+            mergedRanking.isNotEmpty) {
+          final rankingComplete = mergedRanking.length >= expectedCount;
+          final waitStartTick = _fullRankingWaitStartTick ?? _winnerMonitorTicks;
+          final timedOut =
+              (_winnerMonitorTicks - waitStartTick) >=
+              _fullRankingWaitTimeoutTicks;
+          if (!rankingComplete && !timedOut) {
+            if (_winnerMonitorTicks % 20 == 0) {
+              _setStatus('전체 순위 집계 중...');
+            }
+            return;
+          }
+          _finish(mergedRanking.first, ranking: mergedRanking);
+          return;
+        }
+        if (!widget.args.waitForFullRanking &&
             !running &&
             mergedRanking.isNotEmpty) {
           _finish(mergedRanking.first, ranking: mergedRanking);
@@ -1267,9 +1294,21 @@ SOFTWARE.
       final winner = _extractWinnerName(parsed['payload']);
       if (winner.isNotEmpty) {
         _pushRuntimeDebug('goal', parsed['payload']);
-        final ranking = _extractStringList(
+        final rankingFromPayload = _extractStringList(
           parsed['payload'] is Map ? parsed['payload']['ranking'] : null,
         );
+        final ranking = _normalizeRankingForResult(
+          rankingFromPayload,
+          winner: winner,
+        );
+        if (widget.args.waitForFullRanking) {
+          final expectedCount = max(2, _candidates.length);
+          if (ranking.length < expectedCount) {
+            _fullRankingWaitStartTick ??= _winnerMonitorTicks;
+            _setStatus('1등 확정. 전체 순위 집계 중...');
+            return;
+          }
+        }
         _finish(winner, ranking: ranking);
       }
       return;
