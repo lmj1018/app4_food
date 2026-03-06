@@ -1139,7 +1139,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
     _PinballMapChoice(mapIndex: 3, title: 'Pot of greed'),
     _PinballMapChoice(
       mapIndex: 4,
-      title: 'Into The Night (by item4)',
+      title: 'Into The Night',
     ),
   ];
   static const List<_V2MapChoice> _preferredV2MapChoices = <_V2MapChoice>[
@@ -1453,7 +1453,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
         (choice) => _MapLaunchOption(
           number: choice.mapIndex,
           label: 'M${choice.mapIndex} - ${choice.title}',
-          isNew: choice.mapIndex >= 4,
+          isNew: false,
           config: _PinballLaunchConfig.v1(choice.mapIndex),
         ),
       ),
