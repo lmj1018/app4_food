@@ -144,7 +144,11 @@ class _RouletteScreenState extends State<RouletteScreen> {
   final List<TextEditingController> _customItemControllers =
       <TextEditingController>[];
   static const int _minCustomItemCount = 2;
-  static const int _maxCustomItemCount = 12;
+  static const int _maxCustomItemCount = 20;
+  static const Duration _customItemHoldDelay = Duration(seconds: 1);
+  static const Duration _customItemHoldRepeatInterval = Duration(
+    milliseconds: 90,
+  );
   static const int _defaultRadiusM = 2000;
   static const int _kakaoMaxRadiusM = 20000;
   static const int _storeBallCandidatesPerSingleFetch = 15;
@@ -166,6 +170,9 @@ class _RouletteScreenState extends State<RouletteScreen> {
   bool _isSpinning = false;
   String? _spinProgressText;
   bool _showAllCustomRankingInResult = false;
+  Timer? _customItemHoldDelayTimer;
+  Timer? _customItemHoldRepeatTimer;
+  bool _customItemHoldTriggered = false;
   int _spinGateState = _spinGateStateReady;
   DateTime? _spinCooldownUntil;
   Timer? _spinCooldownTicker;
@@ -816,6 +823,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
   void dispose() {
     _spinCooldownTicker?.cancel();
     _disposeRewardedAd();
+    _clearCustomItemHoldTimers();
     for (final controller in _customItemControllers) {
       controller.dispose();
     }
@@ -890,6 +898,75 @@ class _RouletteScreenState extends State<RouletteScreen> {
         }
       }
     });
+  }
+
+  void _clearCustomItemHoldTimers() {
+    _customItemHoldDelayTimer?.cancel();
+    _customItemHoldDelayTimer = null;
+    _customItemHoldRepeatTimer?.cancel();
+    _customItemHoldRepeatTimer = null;
+  }
+
+  void _startCustomItemHold(int delta) {
+    _clearCustomItemHoldTimers();
+    _customItemHoldTriggered = false;
+    _customItemHoldDelayTimer = Timer(_customItemHoldDelay, () {
+      if (!mounted) {
+        return;
+      }
+      _customItemHoldTriggered = true;
+      _changeCustomItemCount(delta);
+      _customItemHoldRepeatTimer = Timer.periodic(
+        _customItemHoldRepeatInterval,
+        (_) {
+          if (!mounted) {
+            _clearCustomItemHoldTimers();
+            return;
+          }
+          _changeCustomItemCount(delta);
+        },
+      );
+    });
+  }
+
+  void _finishCustomItemHold(int delta) {
+    final wasHoldTriggered = _customItemHoldTriggered;
+    _clearCustomItemHoldTimers();
+    _customItemHoldTriggered = false;
+    if (wasHoldTriggered) {
+      return;
+    }
+    _changeCustomItemCount(delta);
+  }
+
+  void _cancelCustomItemHold() {
+    _clearCustomItemHoldTimers();
+    _customItemHoldTriggered = false;
+  }
+
+  Widget _buildCustomCountAdjustButton({
+    required int delta,
+    required IconData icon,
+  }) {
+    return Semantics(
+      button: true,
+      label: delta > 0 ? '커스텀 항목 증가' : '커스텀 항목 감소',
+      child: Listener(
+        behavior: HitTestBehavior.opaque,
+        onPointerDown: (_) => _startCustomItemHold(delta),
+        onPointerUp: (_) => _finishCustomItemHold(delta),
+        onPointerCancel: (_) => _cancelCustomItemHold(),
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: Icon(
+            icon,
+            size: 28,
+            color: const Color(0xFF6A7E85),
+          ),
+        ),
+      ),
+    );
   }
 
   List<_RouletteCandidate> get _activeCandidates {
@@ -2478,21 +2555,10 @@ class _RouletteScreenState extends State<RouletteScreen> {
                                         mainAxisAlignment:
                                             MainAxisAlignment.center,
                                         children: [
-                                          TextButton(
-                                            onPressed: () =>
-                                                _changeCustomItemCount(-1),
-                                            style: TextButton.styleFrom(
-                                              minimumSize: const Size(44, 44),
-                                              padding: EdgeInsets.zero,
-                                              foregroundColor: const Color(
-                                                0xFF6A7E85,
-                                              ),
-                                            ),
-                                            child: const Icon(
-                                              Icons
-                                                  .remove_circle_outline_rounded,
-                                              size: 28,
-                                            ),
+                                          _buildCustomCountAdjustButton(
+                                            delta: -1,
+                                            icon: Icons
+                                                .remove_circle_outline_rounded,
                                           ),
                                           const SizedBox(width: 16),
                                           Text(
@@ -2506,20 +2572,10 @@ class _RouletteScreenState extends State<RouletteScreen> {
                                                 ),
                                           ),
                                           const SizedBox(width: 16),
-                                          TextButton(
-                                            onPressed: () =>
-                                                _changeCustomItemCount(1),
-                                            style: TextButton.styleFrom(
-                                              minimumSize: const Size(44, 44),
-                                              padding: EdgeInsets.zero,
-                                              foregroundColor: const Color(
-                                                0xFF6A7E85,
-                                              ),
-                                            ),
-                                            child: const Icon(
-                                              Icons.add_circle_outline_rounded,
-                                              size: 28,
-                                            ),
+                                          _buildCustomCountAdjustButton(
+                                            delta: 1,
+                                            icon: Icons
+                                                .add_circle_outline_rounded,
                                           ),
                                         ],
                                       ),
