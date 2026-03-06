@@ -75,6 +75,7 @@ let workingMapJson = null;
 const editorState = {
   selectedIndex: -1,
   selectedIndexes: [],
+  currentTool: 'select',
   pendingWallStart: null,
   pendingWallOid: '',
   pendingWallType: '',
@@ -1930,7 +1931,37 @@ function formatEngineDiagnostics(diagnostics) {
 }
 
 function selectedTool() {
-  return String(elements.makerToolSelect && elements.makerToolSelect.value ? elements.makerToolSelect.value : 'select');
+  const fromState = String(editorState.currentTool || '').trim();
+  if (fromState) {
+    return fromState;
+  }
+  const fromSelect = String(elements.makerToolSelect && elements.makerToolSelect.value
+    ? elements.makerToolSelect.value
+    : '').trim();
+  return fromSelect || 'select';
+}
+
+function collectAllowedMakerTools() {
+  const allowed = new Set(['select']);
+  if (elements.makerToolSelect && elements.makerToolSelect.options) {
+    for (let index = 0; index < elements.makerToolSelect.options.length; index += 1) {
+      const option = elements.makerToolSelect.options[index];
+      const value = String(option && option.value ? option.value : '').trim();
+      if (value) {
+        allowed.add(value);
+      }
+    }
+  }
+  if (Array.isArray(elements.makerToolButtons)) {
+    for (let index = 0; index < elements.makerToolButtons.length; index += 1) {
+      const button = elements.makerToolButtons[index];
+      const value = String(button && button.dataset ? button.dataset.makerTool || '' : '').trim();
+      if (value) {
+        allowed.add(value);
+      }
+    }
+  }
+  return allowed;
 }
 
 function toolDisplayName(tool) {
@@ -2259,38 +2290,31 @@ function syncToolButtons() {
 
 function setSelectedTool(tool) {
   const fallback = 'select';
-  const allowed = new Set([
-    'select',
-    'spawn_point',
-    'wall_segment',
-    'wall_polyline',
-    'wall_filled_polyline',
-    'wall_corridor_segment',
-    'wall_corridor_polyline',
-    'peg_circle',
-    'diamond_block',
-    'box_block',
-    'rotor',
-    'portal',
-    'black_hole',
-    'white_hole',
-    'stopwatch_bomb',
-    'hammer',
-    'bottom_bumper',
-    'fan',
-    'magic_wizard',
-    'ninja',
-    'sticky_pad',
-    'burst_bumper',
-    'domino_block',
-    'physics_ball',
-    'goal_marker_image',
-  ]);
-  const nextTool = allowed.has(String(tool || '')) ? String(tool) : fallback;
+  const allowed = collectAllowedMakerTools();
+  const requested = String(tool || '').trim();
+  const nextTool = allowed.has(requested) ? requested : fallback;
+  editorState.currentTool = nextTool;
   if (elements.makerToolSelect) {
+    let hasOption = false;
+    if (elements.makerToolSelect.options) {
+      for (let index = 0; index < elements.makerToolSelect.options.length; index += 1) {
+        const option = elements.makerToolSelect.options[index];
+        if (String(option && option.value ? option.value : '').trim() === nextTool) {
+          hasOption = true;
+          break;
+        }
+      }
+    }
+    if (!hasOption) {
+      const dynamicOption = document.createElement('option');
+      dynamicOption.value = nextTool;
+      dynamicOption.textContent = toolDisplayName(nextTool);
+      elements.makerToolSelect.appendChild(dynamicOption);
+    }
     elements.makerToolSelect.value = nextTool;
   }
   syncToolButtons();
+  return nextTool;
 }
 
 function resetPendingWall() {
@@ -9864,6 +9888,7 @@ function setupEvents() {
   });
 
   bindEvent(elements.makerToolSelect, 'change', () => {
+    setSelectedTool(elements.makerToolSelect ? elements.makerToolSelect.value : 'select');
     syncToolButtons();
     resetPendingWall();
     resetPendingPortal();
