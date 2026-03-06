@@ -28,6 +28,7 @@ const DEFAULT_OBJECT_COLORS = {
   physicsBall: '#ff79cb',
   goalMarker: '#ffc4e7',
   magicWizard: '#ffa66c',
+  ninja: '#ffd08a',
 };
 
 const runtimeImageCache = new Map();
@@ -148,6 +149,32 @@ function normalizeMagicWizardImageSrc(value) {
     }
   }
   return raw || '../../background/magic.svg';
+}
+
+function normalizeNinjaImageSrc(value) {
+  const raw = toId(value, '../../background/ninja.svg');
+  let override = '';
+  try {
+    const candidate = typeof window !== 'undefined'
+      ? String(window.__v2NinjaImageDataUrl || '').trim()
+      : '';
+    const isDataImage = candidate.startsWith('data:image/');
+    const isHttpUrl = candidate.startsWith('http://') || candidate.startsWith('https://');
+    const isAppAssetPath = candidate.startsWith('/__app_asset/') || candidate.startsWith('__app_asset/');
+    if (isDataImage || isHttpUrl || isAppAssetPath) {
+      override = candidate;
+    }
+  } catch (_) {
+    override = '';
+  }
+  if (override) {
+    const lower = raw.toLowerCase();
+    const useOverride = lower.includes('ninja.svg') || lower.includes('/background/');
+    if (useOverride) {
+      return override;
+    }
+  }
+  return raw || '../../background/ninja.svg';
 }
 
 function isTransparentColorString(value) {
@@ -1392,6 +1419,118 @@ function compileObject(rawObject, entityId) {
           fireballRadius: Math.max(0.05, toFiniteNumber(rawObject.fireballRadius, toFiniteNumber(rawObject.radius, 0.2))),
           fireballLifeMs: Math.max(260, toFiniteNumber(rawObject.fireballLifeMs, 900)),
           imageSrc: normalizeMagicWizardImageSrc(rawObject.imageSrc),
+        },
+      };
+    case 'ninja':
+      return {
+        entity: compileBox(
+          {
+            ...rawObject,
+            width: Math.max(0.08, toFiniteNumber(rawObject.width, 0.72)),
+            height: Math.max(0.08, toFiniteNumber(rawObject.height, 0.9)),
+            restitution: toFiniteNumber(rawObject.restitution, 0.05),
+            rotation: toFiniteNumber(rawObject.rotation, toFiniteNumber(rawObject.dirDeg, 0)),
+            color: 'rgba(0,0,0,0)',
+            noCollision: true,
+            sensor: true,
+          },
+          entityId,
+          false,
+        ),
+        behavior: {
+          kind: 'ninja',
+          oid: toId(rawObject.oid, `ninja_${entityId}`),
+          entityId,
+          x: toFiniteNumber(rawObject.x, 11.75),
+          y: toFiniteNumber(rawObject.y, 70),
+          width: Math.max(0.08, toFiniteNumber(rawObject.width, 0.72)),
+          height: Math.max(0.08, toFiniteNumber(rawObject.height, 0.9)),
+          dirDeg: toFiniteNumber(rawObject.dirDeg, toFiniteNumber(rawObject.rotation, 0)),
+          mirror: false,
+          force: Math.max(0.1, toFiniteNumber(rawObject.force, 2.8)),
+          fireIntervalMs: Math.max(
+            120,
+            toFiniteNumber(rawObject.fireIntervalMs, toFiniteNumber(rawObject.intervalMs, 900)),
+          ),
+          shurikenSpeed: Math.max(
+            0.2,
+            toFiniteNumber(
+              rawObject.shurikenSpeed,
+              toFiniteNumber(
+                rawObject.fireballSpeed,
+                toFiniteNumber(rawObject.hitDistance, 7.4),
+              ),
+            ),
+          ),
+          shurikenDistance: (() => {
+            const direct = toFiniteNumber(rawObject.shurikenDistance, NaN);
+            if (Number.isFinite(direct) && direct > 0) {
+              return Math.max(0.2, direct);
+            }
+            const fallbackDistance = toFiniteNumber(rawObject.fireballDistance, NaN);
+            if (Number.isFinite(fallbackDistance) && fallbackDistance > 0) {
+              return Math.max(0.2, fallbackDistance);
+            }
+            const legacyDistance = toFiniteNumber(rawObject.hitDistance, NaN);
+            if (Number.isFinite(legacyDistance) && legacyDistance > 0) {
+              return Math.max(0.2, legacyDistance);
+            }
+            return NaN;
+          })(),
+          shurikenRadius: Math.max(
+            0.05,
+            toFiniteNumber(
+              rawObject.shurikenRadius,
+              toFiniteNumber(
+                rawObject.fireballRadius,
+                toFiniteNumber(rawObject.radius, 0.2),
+              ),
+            ),
+          ),
+          shurikenLifeMs: Math.max(
+            320,
+            toFiniteNumber(
+              rawObject.shurikenLifeMs,
+              toFiniteNumber(rawObject.fireballLifeMs, 1300),
+            ),
+          ),
+          randomAngleEnabled: toBoolean(
+            rawObject.randomAngleEnabled,
+            toTruthyBoolean(rawObject.randomAngle, false),
+          ),
+          randomAngleRangeDeg: Math.max(
+            0,
+            toFiniteNumber(
+              rawObject.randomAngleRangeDeg,
+              toFiniteNumber(rawObject.randomAngleDeg, 30),
+            ),
+          ),
+          shurikenCount: Math.max(
+            1,
+            Math.floor(
+              toFiniteNumber(
+                rawObject.shurikenCount,
+                toFiniteNumber(rawObject.projectileCount, 1),
+              ),
+            ),
+          ),
+          shurikenPropelMs: Math.max(
+            120,
+            toFiniteNumber(rawObject.shurikenPropelMs, toFiniteNumber(rawObject.propelMs, 620)),
+          ),
+          shurikenGravity: Math.max(
+            0,
+            toFiniteNumber(rawObject.shurikenGravity, toFiniteNumber(rawObject.gravity, 10)),
+          ),
+          shurikenStickMs: Math.max(
+            280,
+            toFiniteNumber(rawObject.shurikenStickMs, toFiniteNumber(rawObject.stickMs, 2000)),
+          ),
+          shurikenPierceBalls: toBoolean(
+            rawObject.shurikenPierceBalls,
+            toBoolean(rawObject.persistAfterHit, toBoolean(rawObject.pierceBalls, false)),
+          ),
+          imageSrc: normalizeNinjaImageSrc(rawObject.imageSrc),
         },
       };
     case 'sticky_pad':
@@ -4109,6 +4248,783 @@ function createMagicWizardBehavior(def, env) {
   };
 }
 
+function createNinjaBehavior(def, env) {
+  let nextShotAt = 0;
+  let lastTickAt = 0;
+  let missingEntityFrames = 0;
+  let ninjaVisualEffect = null;
+  let shurikenVisualEffect = null;
+  let nextProjectileId = 1;
+  const shurikens = [];
+  const image = getRuntimeImage(normalizeNinjaImageSrc(def.imageSrc || '../../background/ninja.svg'));
+
+  function hasEntity() {
+    const roulette = env.getRoulette();
+    const physics = roulette && roulette.physics ? roulette.physics : null;
+    const entities = physics && Array.isArray(physics.entities) ? physics.entities : [];
+    if (entities.length <= 0) {
+      return true;
+    }
+    const targetId = Math.floor(toFiniteNumber(def.entityId, NaN));
+    const targetX = toFiniteNumber(def.x, 0);
+    const targetY = toFiniteNumber(def.y, 0);
+    const targetW = Math.max(0.08, toFiniteNumber(def.width, 0.72));
+    const targetH = Math.max(0.08, toFiniteNumber(def.height, 0.9));
+    const fallbackDistance = Math.max(0.35, Math.max(targetW, targetH) * 0.8);
+    for (let index = 0; index < entities.length; index += 1) {
+      const entry = entities[index];
+      const entityId = toFiniteNumber(
+        entry && entry.shape && Number.isFinite(Number(entry.shape.__v2eid))
+          ? entry.shape.__v2eid
+          : (entry && Number.isFinite(Number(entry.__v2eid)) ? entry.__v2eid : NaN),
+        NaN,
+      );
+      if (Number.isFinite(targetId) && Number.isFinite(entityId) && entityId === targetId) {
+        return true;
+      }
+      const shape = entry && entry.shape ? entry.shape : null;
+      if (!shape || String(shape.type || '') !== 'box') {
+        continue;
+      }
+      const body = entry && entry.body ? entry.body : null;
+      const pos = body && typeof body.GetPosition === 'function' ? body.GetPosition() : null;
+      const ex = toFiniteNumber(pos && pos.x, NaN);
+      const ey = toFiniteNumber(pos && pos.y, NaN);
+      if (!Number.isFinite(ex) || !Number.isFinite(ey)) {
+        continue;
+      }
+      const ew = Math.max(0.02, toFiniteNumber(shape.width, NaN));
+      const eh = Math.max(0.02, toFiniteNumber(shape.height, NaN));
+      if (!Number.isFinite(ew) || !Number.isFinite(eh)) {
+        continue;
+      }
+      const closeEnough = Math.hypot(ex - targetX, ey - targetY) <= fallbackDistance;
+      const similarSize = Math.abs(ew - targetW) <= 0.55 && Math.abs(eh - targetH) <= 0.55;
+      if (closeEnough && similarSize) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function normalizeDegLocal(value) {
+    let deg = toFiniteNumber(value, 0) % 360;
+    if (deg < 0) {
+      deg += 360;
+    }
+    return deg;
+  }
+
+  function getShootDirRad() {
+    return degToRad(normalizeDegLocal(def.dirDeg));
+  }
+
+  function getVisualMirrorByDirection() {
+    const dirDeg = normalizeDegLocal(def.dirDeg);
+    return !(dirDeg > 90 && dirDeg < 270);
+  }
+
+  function ensureNinjaVisualEffect() {
+    const roulette = env.getRoulette();
+    if (!roulette || !Array.isArray(roulette._effects)) {
+      return;
+    }
+    if (ninjaVisualEffect && ninjaVisualEffect.isDestroy !== true) {
+      return;
+    }
+    ninjaVisualEffect = {
+      elapsed: 0,
+      duration: Number.MAX_SAFE_INTEGER,
+      isDestroy: false,
+      update(deltaMs) {
+        this.elapsed += toFiniteNumber(deltaMs, 0);
+        if (hasEntity()) {
+          missingEntityFrames = 0;
+        } else {
+          missingEntityFrames += 1;
+        }
+        if (missingEntityFrames > 720) {
+          this.isDestroy = true;
+        }
+      },
+      render(ctx) {
+        if (!ctx) {
+          return;
+        }
+        const width = Math.max(0.08, toFiniteNumber(def.width, 0.72));
+        const height = Math.max(0.08, toFiniteNumber(def.height, 0.9));
+        const x = toFiniteNumber(def.x, 0);
+        const y = toFiniteNumber(def.y, 0);
+        const mirror = getVisualMirrorByDirection();
+        ctx.save();
+        ctx.translate(x, y);
+        if (mirror) {
+          ctx.scale(-1, 1);
+        }
+        if (image && image.complete && image.naturalWidth > 0) {
+          ctx.drawImage(image, -width, -height, width * 2, height * 2);
+        } else {
+          ctx.fillStyle = 'rgba(42,52,76,0.38)';
+          ctx.strokeStyle = 'rgba(180,196,232,0.92)';
+          ctx.lineWidth = 0.08;
+          ctx.beginPath();
+          ctx.rect(-width * 0.72, -height * 0.82, width * 1.44, height * 1.64);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = 'rgba(240,244,252,0.92)';
+          ctx.beginPath();
+          ctx.arc(width * 0.62, -height * 0.12, Math.max(0.06, height * 0.2), 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      },
+    };
+    roulette._effects.push(ninjaVisualEffect);
+  }
+
+  function ensureShurikenVisualEffect() {
+    const roulette = env.getRoulette();
+    if (!roulette || !Array.isArray(roulette._effects)) {
+      return;
+    }
+    if (shurikenVisualEffect && shurikenVisualEffect.isDestroy !== true) {
+      return;
+    }
+    shurikenVisualEffect = {
+      elapsed: 0,
+      duration: Number.MAX_SAFE_INTEGER,
+      isDestroy: false,
+      update(deltaMs) {
+        this.elapsed += toFiniteNumber(deltaMs, 0);
+        if (hasEntity()) {
+          missingEntityFrames = 0;
+        } else {
+          missingEntityFrames += 1;
+        }
+        if (missingEntityFrames > 720 && shurikens.length <= 0) {
+          this.isDestroy = true;
+        }
+      },
+      render(ctx, zoomScale) {
+        if (!ctx || shurikens.length <= 0) {
+          return;
+        }
+        const safeZoom = Math.max(1, toFiniteNumber(zoomScale, 1));
+        for (let index = 0; index < shurikens.length; index += 1) {
+          const projectile = shurikens[index];
+          if (!projectile) {
+            continue;
+          }
+          const totalLifeMs = projectile.stuck
+            ? Math.max(120, toFiniteNumber(projectile.stickUntil, 0) - toFiniteNumber(projectile.stuckAt, 0))
+            : Math.max(120, toFiniteNumber(projectile.expireAt, 0) - toFiniteNumber(projectile.spawnAt, 0));
+          const remainLifeMs = projectile.stuck
+            ? Math.max(0, toFiniteNumber(projectile.stickUntil, 0) - toFiniteNumber(projectile.now, 0))
+            : Math.max(0, toFiniteNumber(projectile.expireAt, 0) - toFiniteNumber(projectile.now, 0));
+          const lifeRatio = clamp(remainLifeMs / totalLifeMs, 0, 1);
+          const alpha = projectile.stuck ? (0.58 + lifeRatio * 0.36) : (0.36 + lifeRatio * 0.64);
+          const radius = Math.max(0.05, toFiniteNumber(projectile.radius, 0.2));
+          const tailWidth = Math.max(0.035, (radius * 0.74) / safeZoom);
+          const spin = projectile.stuck
+            ? toFiniteNumber(projectile.spawnAt, 0) * 0.0013
+            : (toFiniteNumber(projectile.now, 0) - toFiniteNumber(projectile.spawnAt, 0)) * 0.011;
+          const travelDir = Math.atan2(
+            toFiniteNumber(projectile.vy, 0),
+            toFiniteNumber(projectile.vx, 0),
+          );
+          const rotation = (Number.isFinite(travelDir) ? travelDir : 0) + spin;
+          if (!projectile.stuck) {
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.strokeStyle = `rgba(224,236,255,${0.3 * alpha})`;
+            ctx.lineWidth = tailWidth;
+            ctx.beginPath();
+            ctx.moveTo(
+              toFiniteNumber(projectile.prevX, projectile.x),
+              toFiniteNumber(projectile.prevY, projectile.y),
+            );
+            ctx.lineTo(toFiniteNumber(projectile.x, 0), toFiniteNumber(projectile.y, 0));
+            ctx.stroke();
+            ctx.restore();
+          }
+
+          const outerRadius = radius * 1.5;
+          const innerRadius = radius * 0.55;
+          ctx.save();
+          ctx.translate(toFiniteNumber(projectile.x, 0), toFiniteNumber(projectile.y, 0));
+          ctx.rotate(rotation);
+          ctx.globalCompositeOperation = projectile.stuck ? 'source-over' : 'lighter';
+          ctx.beginPath();
+          for (let pointIndex = 0; pointIndex < 8; pointIndex += 1) {
+            const useOuter = pointIndex % 2 === 0;
+            const rr = useOuter ? outerRadius : innerRadius;
+            const angle = (Math.PI * 2 * pointIndex) / 8;
+            const px = Math.cos(angle) * rr;
+            const py = Math.sin(angle) * rr;
+            if (pointIndex === 0) {
+              ctx.moveTo(px, py);
+            } else {
+              ctx.lineTo(px, py);
+            }
+          }
+          ctx.closePath();
+          ctx.fillStyle = `rgba(170,186,214,${0.84 * alpha})`;
+          ctx.strokeStyle = `rgba(242,248,255,${0.92 * alpha})`;
+          ctx.lineWidth = Math.max(0.02, radius * 0.26);
+          ctx.fill();
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(0, 0, radius * 0.34, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(80,98,126,${0.92 * alpha})`;
+          ctx.fill();
+          if (projectile.stuck) {
+            ctx.beginPath();
+            ctx.arc(0, 0, outerRadius * 1.08, 0, Math.PI * 2);
+            ctx.lineWidth = Math.max(0.01, radius * 0.16);
+            ctx.strokeStyle = `rgba(228,236,248,${0.35 * alpha})`;
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
+      },
+    };
+    roulette._effects.push(shurikenVisualEffect);
+  }
+
+  function emitImpactEffect(x, y, baseRadius, isWallImpact = false) {
+    const roulette = env.getRoulette();
+    if (!roulette || !Array.isArray(roulette._effects)) {
+      return;
+    }
+    const radius = Math.max(0.08, toFiniteNumber(baseRadius, 0.22));
+    const duration = isWallImpact ? 220 : 170;
+    roulette._effects.push({
+      elapsed: 0,
+      duration,
+      isDestroy: false,
+      update(deltaMs) {
+        this.elapsed += toFiniteNumber(deltaMs, 0);
+        if (this.elapsed >= this.duration) {
+          this.isDestroy = true;
+        }
+      },
+      render(ctx, zoomScale) {
+        if (!ctx) {
+          return;
+        }
+        const ratio = clamp(this.elapsed / Math.max(1, this.duration), 0, 1);
+        const alpha = Math.max(0, 1 - ratio);
+        const ringRadius = radius * (0.88 + ratio * 1.9);
+        const safeZoom = Math.max(1, toFiniteNumber(zoomScale, 1));
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.strokeStyle = `rgba(214,226,246,${0.72 * alpha})`;
+        ctx.lineWidth = Math.max(0.02, (radius * 0.42) / safeZoom);
+        ctx.beginPath();
+        ctx.arc(x, y, ringRadius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = `rgba(94,114,146,${0.28 * alpha})`;
+        ctx.beginPath();
+        ctx.arc(x, y, ringRadius * 0.58, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      },
+    });
+  }
+
+  function readEntityPose(entry) {
+    if (!entry || typeof entry !== 'object') {
+      return null;
+    }
+    const body = entry.body;
+    let x = toFiniteNumber(entry.x, 0);
+    let y = toFiniteNumber(entry.y, 0);
+    let angle = toFiniteNumber(entry.angle, 0);
+    if (body && typeof body.GetPosition === 'function') {
+      try {
+        const pos = body.GetPosition();
+        x = toFiniteNumber(pos && pos.x, x);
+        y = toFiniteNumber(pos && pos.y, y);
+      } catch (_) {
+      }
+    }
+    if (body && typeof body.GetAngle === 'function') {
+      try {
+        angle = toFiniteNumber(body.GetAngle(), angle);
+      } catch (_) {
+      }
+    }
+    return { x, y, angle };
+  }
+
+  function pointToSegmentDistanceSq(px, py, ax, ay, bx, by) {
+    const abx = bx - ax;
+    const aby = by - ay;
+    const lengthSq = (abx * abx) + (aby * aby);
+    if (!(lengthSq > 0)) {
+      const dx0 = px - ax;
+      const dy0 = py - ay;
+      return {
+        distanceSq: (dx0 * dx0) + (dy0 * dy0),
+        closestX: ax,
+        closestY: ay,
+      };
+    }
+    const t = clamp((((px - ax) * abx) + ((py - ay) * aby)) / lengthSq, 0, 1);
+    const closestX = ax + abx * t;
+    const closestY = ay + aby * t;
+    const dx = px - closestX;
+    const dy = py - closestY;
+    return {
+      distanceSq: (dx * dx) + (dy * dy),
+      closestX,
+      closestY,
+    };
+  }
+
+  function pointToBoxDistanceSq(px, py, cx, cy, halfW, halfH, angle) {
+    const cosA = Math.cos(angle);
+    const sinA = Math.sin(angle);
+    const dx = px - cx;
+    const dy = py - cy;
+    const localX = (dx * cosA) + (dy * sinA);
+    const localY = (-dx * sinA) + (dy * cosA);
+    const closestLocalX = clamp(localX, -halfW, halfW);
+    const closestLocalY = clamp(localY, -halfH, halfH);
+    const diffX = localX - closestLocalX;
+    const diffY = localY - closestLocalY;
+    return {
+      distanceSq: (diffX * diffX) + (diffY * diffY),
+      closestX: cx + (closestLocalX * cosA) - (closestLocalY * sinA),
+      closestY: cy + (closestLocalX * sinA) + (closestLocalY * cosA),
+    };
+  }
+
+  function toWorldPoint(localX, localY, centerX, centerY, angle) {
+    const cosA = Math.cos(angle);
+    const sinA = Math.sin(angle);
+    return {
+      x: centerX + (localX * cosA) - (localY * sinA),
+      y: centerY + (localX * sinA) + (localY * cosA),
+    };
+  }
+
+  function findWallImpactPoint(projectile, entities) {
+    if (!Array.isArray(entities) || entities.length <= 0) {
+      return null;
+    }
+    const targetEntityId = Math.floor(toFiniteNumber(def.entityId, NaN));
+    const radius = Math.max(0.05, toFiniteNumber(projectile.radius, 0.2));
+    const prevX = toFiniteNumber(projectile.prevX, toFiniteNumber(projectile.x, 0));
+    const prevY = toFiniteNumber(projectile.prevY, toFiniteNumber(projectile.y, 0));
+    const nextX = toFiniteNumber(projectile.x, 0);
+    const nextY = toFiniteNumber(projectile.y, 0);
+    const sampleCount = 4;
+
+    for (let index = 0; index < entities.length; index += 1) {
+      const entry = entities[index];
+      const shape = entry && entry.shape ? entry.shape : null;
+      if (!shape || typeof shape.type !== 'string') {
+        continue;
+      }
+      const entityId = Math.floor(toFiniteNumber(shape.__v2eid, NaN));
+      if (Number.isFinite(targetEntityId) && Number.isFinite(entityId) && entityId === targetEntityId) {
+        continue;
+      }
+      if (shape.type === 'box' && isTransparentColorString(shape.color)) {
+        continue;
+      }
+      const pose = readEntityPose(entry);
+      if (!pose) {
+        continue;
+      }
+
+      for (let sampleIndex = 0; sampleIndex <= sampleCount; sampleIndex += 1) {
+        const ratio = sampleIndex / sampleCount;
+        const sx = prevX + (nextX - prevX) * ratio;
+        const sy = prevY + (nextY - prevY) * ratio;
+
+        if (shape.type === 'box') {
+          const halfW = Math.max(0.02, toFiniteNumber(shape.width, 0.2));
+          const halfH = Math.max(0.02, toFiniteNumber(shape.height, 0.2));
+          const boxRotation = pose.angle + toFiniteNumber(shape.rotation, 0);
+          const distance = pointToBoxDistanceSq(sx, sy, pose.x, pose.y, halfW, halfH, boxRotation);
+          if (distance.distanceSq <= radius * radius) {
+            return { x: distance.closestX, y: distance.closestY };
+          }
+          continue;
+        }
+
+        if (shape.type === 'circle') {
+          const entityRadius = Math.max(0.02, toFiniteNumber(shape.radius, 0.2));
+          const dx = sx - pose.x;
+          const dy = sy - pose.y;
+          const limit = entityRadius + radius;
+          if ((dx * dx) + (dy * dy) <= limit * limit) {
+            const dist = Math.hypot(dx, dy);
+            if (dist > 0.0001) {
+              return {
+                x: pose.x + (dx / dist) * entityRadius,
+                y: pose.y + (dy / dist) * entityRadius,
+              };
+            }
+            return { x: pose.x, y: pose.y - entityRadius };
+          }
+          continue;
+        }
+
+        if (shape.type === 'polyline') {
+          const points = Array.isArray(shape.points) ? shape.points : [];
+          if (points.length < 2) {
+            continue;
+          }
+          let bestDistanceSq = Number.POSITIVE_INFINITY;
+          let bestX = sx;
+          let bestY = sy;
+          for (let pointIndex = 0; pointIndex < points.length - 1; pointIndex += 1) {
+            const pointA = points[pointIndex];
+            const pointB = points[pointIndex + 1];
+            if (!Array.isArray(pointA) || !Array.isArray(pointB)) {
+              continue;
+            }
+            const worldA = toWorldPoint(
+              toFiniteNumber(pointA[0], 0),
+              toFiniteNumber(pointA[1], 0),
+              pose.x,
+              pose.y,
+              pose.angle,
+            );
+            const worldB = toWorldPoint(
+              toFiniteNumber(pointB[0], 0),
+              toFiniteNumber(pointB[1], 0),
+              pose.x,
+              pose.y,
+              pose.angle,
+            );
+            const distance = pointToSegmentDistanceSq(sx, sy, worldA.x, worldA.y, worldB.x, worldB.y);
+            if (distance.distanceSq < bestDistanceSq) {
+              bestDistanceSq = distance.distanceSq;
+              bestX = distance.closestX;
+              bestY = distance.closestY;
+            }
+          }
+          if (bestDistanceSq <= radius * radius) {
+            return { x: bestX, y: bestY };
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  function applyImpulseToMarble(body, impulseX, impulseY, box2d) {
+    if (!body || !box2d || typeof box2d.b2Vec2 !== 'function') {
+      return false;
+    }
+    if (!Number.isFinite(impulseX) || !Number.isFinite(impulseY)) {
+      return false;
+    }
+    try {
+      if (typeof body.SetEnabled === 'function') {
+        body.SetEnabled(true);
+      }
+      if (typeof body.SetAwake === 'function') {
+        body.SetAwake(true);
+      }
+      body.ApplyLinearImpulseToCenter(new box2d.b2Vec2(impulseX, impulseY), true);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function hitMarbles(projectile, now, physics, box2d, marbles, impulsePower, cooldownMs = 90) {
+    if (!projectile || !physics || !physics.marbleMap || !box2d || !Array.isArray(marbles)) {
+      return false;
+    }
+    const radius = Math.max(0.05, toFiniteNumber(projectile.radius, 0.2));
+    const hitRadius = radius + (projectile.stuck ? 0.42 : 0.36);
+    const hitRadiusSq = hitRadius * hitRadius;
+    const cooldownByMarble = projectile.hitCooldownByMarble && typeof projectile.hitCooldownByMarble === 'object'
+      ? projectile.hitCooldownByMarble
+      : {};
+    projectile.hitCooldownByMarble = cooldownByMarble;
+    let hitAny = false;
+
+    for (let marbleIndex = 0; marbleIndex < marbles.length; marbleIndex += 1) {
+      const marble = marbles[marbleIndex];
+      if (!marble || typeof marble.id !== 'number') {
+        continue;
+      }
+      const marbleId = String(marble.id);
+      if (toFiniteNumber(cooldownByMarble[marbleId], 0) > now) {
+        continue;
+      }
+      const body = physics.marbleMap[marble.id];
+      if (!body || typeof body.GetPosition !== 'function' || typeof body.ApplyLinearImpulseToCenter !== 'function') {
+        continue;
+      }
+      const pos = body.GetPosition();
+      const mx = toFiniteNumber(pos && pos.x, NaN);
+      const my = toFiniteNumber(pos && pos.y, NaN);
+      if (!Number.isFinite(mx) || !Number.isFinite(my)) {
+        continue;
+      }
+      const dx = mx - toFiniteNumber(projectile.x, 0);
+      const dy = my - toFiniteNumber(projectile.y, 0);
+      if ((dx * dx) + (dy * dy) > hitRadiusSq) {
+        continue;
+      }
+
+      let impulseX = 0;
+      let impulseY = 0;
+      if (projectile.stuck) {
+        const distance = Math.hypot(dx, dy);
+        const dirX = distance > 0.0001 ? dx / distance : 0;
+        const dirY = distance > 0.0001 ? dy / distance : -1;
+        impulseX = dirX * impulsePower * 0.11;
+        impulseY = dirY * impulsePower * 0.11;
+      } else {
+        impulseX = toFiniteNumber(projectile.vx, 0) * impulsePower * 0.18;
+        impulseY = toFiniteNumber(projectile.vy, 0) * impulsePower * 0.18;
+        if (Math.abs(impulseX) + Math.abs(impulseY) < 0.0001) {
+          const distance = Math.hypot(dx, dy);
+          const dirX = distance > 0.0001 ? dx / distance : 0;
+          const dirY = distance > 0.0001 ? dy / distance : -1;
+          impulseX = dirX * impulsePower * 0.08;
+          impulseY = dirY * impulsePower * 0.08;
+        }
+      }
+
+      if (applyImpulseToMarble(body, impulseX, impulseY, box2d)) {
+        cooldownByMarble[marbleId] = now + cooldownMs;
+        emitImpactEffect(mx, my, radius, projectile.stuck);
+        hitAny = true;
+      }
+    }
+
+    return hitAny;
+  }
+
+  function spawnShuriken(now) {
+    const baseDir = getShootDirRad();
+    const width = Math.max(0.08, toFiniteNumber(def.width, 0.72));
+    const height = Math.max(0.08, toFiniteNumber(def.height, 0.9));
+    const originX = toFiniteNumber(def.x, 0);
+    const originY = toFiniteNumber(def.y, 0);
+    const muzzleDistance = Math.max(0.12, Math.max(width, height) * 0.62);
+    const randomEnabled = toBoolean(def.randomAngleEnabled, false);
+    const randomRangeDeg = Math.max(0, toFiniteNumber(def.randomAngleRangeDeg, 30));
+    const randomOffset = randomEnabled
+      ? degToRad((Math.random() * 2 - 1) * randomRangeDeg)
+      : 0;
+    const rawCount = Math.max(1, Math.floor(toFiniteNumber(def.shurikenCount, 1)));
+    const shurikenCount = Math.max(1, Math.min(24, rawCount));
+    const radialStep = shurikenCount > 1 ? (Math.PI * 2) / shurikenCount : 0;
+    const legacySpeed = Math.max(0.2, toFiniteNumber(def.shurikenSpeed, 7.4));
+    const radius = Math.max(0.05, toFiniteNumber(def.shurikenRadius, 0.2));
+    const lifeMs = Math.max(320, toFiniteNumber(def.shurikenLifeMs, 1300));
+    const travelDistance = toFiniteNumber(def.shurikenDistance, NaN);
+    const speed = Number.isFinite(travelDistance) && travelDistance > 0
+      ? Math.max(0.2, travelDistance / Math.max(0.05, lifeMs / 1000))
+      : legacySpeed;
+    const propelMs = Math.max(120, toFiniteNumber(def.shurikenPropelMs, Math.max(220, lifeMs * 0.45)));
+
+    for (let shotIndex = 0; shotIndex < shurikenCount; shotIndex += 1) {
+      const dirRad = baseDir + randomOffset + radialStep * shotIndex;
+      const startX = originX + Math.cos(dirRad) * muzzleDistance;
+      const startY = originY + Math.sin(dirRad) * muzzleDistance;
+      shurikens.push({
+        id: nextProjectileId,
+        x: startX,
+        y: startY,
+        prevX: startX,
+        prevY: startY,
+        vx: Math.cos(dirRad) * speed,
+        vy: Math.sin(dirRad) * speed,
+        radius,
+        spawnAt: now,
+        now,
+        expireAt: now + lifeMs,
+        propelUntil: now + propelMs,
+        stuck: false,
+        stuckAt: 0,
+        stickUntil: 0,
+        hitCooldownByMarble: {},
+      });
+      nextProjectileId += 1;
+    }
+
+    if (shurikens.length > 96) {
+      shurikens.splice(0, shurikens.length - 96);
+    }
+  }
+
+  function updateShurikens(now, deltaMs) {
+    const roulette = env.getRoulette();
+    const physics = roulette && roulette.physics ? roulette.physics : null;
+    const box2d = env.getBox2D();
+    const marbles = roulette && Array.isArray(roulette._marbles) ? roulette._marbles : [];
+    const canImpact = !!(
+      roulette
+      && physics
+      && physics.marbleMap
+      && box2d
+      && typeof box2d.b2Vec2 === 'function'
+    );
+    const entities = physics && Array.isArray(physics.entities) ? physics.entities : [];
+    const dtSec = Math.max(0.004, Math.min(0.09, toFiniteNumber(deltaMs, 16.666) / 1000));
+    const impulsePower = Math.max(0.1, toFiniteNumber(def.force, 2.8));
+    const gravity = Math.max(0, toFiniteNumber(def.shurikenGravity, 10));
+    const stickMs = Math.max(280, toFiniteNumber(def.shurikenStickMs, 2000));
+    const pierceBalls = toBoolean(def.shurikenPierceBalls, false);
+
+    for (let index = shurikens.length - 1; index >= 0; index -= 1) {
+      const projectile = shurikens[index];
+      if (!projectile) {
+        shurikens.splice(index, 1);
+        continue;
+      }
+
+      projectile.now = now;
+
+      if (projectile.stuck) {
+        if (canImpact && marbles.length > 0) {
+          hitMarbles(projectile, now, physics, box2d, marbles, impulsePower, 170);
+        }
+        const stuckExpired = now >= toFiniteNumber(projectile.stickUntil, 0);
+        const outOfBounds = projectile.x < -8 || projectile.x > 96 || projectile.y < -12 || projectile.y > 260;
+        if (stuckExpired || outOfBounds) {
+          shurikens.splice(index, 1);
+        }
+        continue;
+      }
+
+      projectile.prevX = toFiniteNumber(projectile.x, 0);
+      projectile.prevY = toFiniteNumber(projectile.y, 0);
+
+      const propelUntil = toFiniteNumber(projectile.propelUntil, toFiniteNumber(projectile.spawnAt, 0));
+      const isPropulsionPhase = now <= propelUntil;
+      const drag = Math.pow(isPropulsionPhase ? 0.9985 : 0.9935, Math.max(1, deltaMs));
+      projectile.vx = toFiniteNumber(projectile.vx, 0) * drag;
+      projectile.vy = toFiniteNumber(projectile.vy, 0) * drag;
+      if (!isPropulsionPhase) {
+        projectile.vy += gravity * dtSec;
+      }
+      projectile.x += projectile.vx * dtSec;
+      projectile.y += projectile.vy * dtSec;
+
+      const wallImpactPoint = findWallImpactPoint(projectile, entities);
+      if (wallImpactPoint) {
+        projectile.x = toFiniteNumber(wallImpactPoint.x, projectile.x);
+        projectile.y = toFiniteNumber(wallImpactPoint.y, projectile.y);
+        projectile.prevX = projectile.x;
+        projectile.prevY = projectile.y;
+        projectile.vx = 0;
+        projectile.vy = 0;
+        projectile.stuck = true;
+        projectile.stuckAt = now;
+        projectile.stickUntil = now + stickMs;
+        projectile.expireAt = Math.max(toFiniteNumber(projectile.expireAt, 0), projectile.stickUntil);
+        emitImpactEffect(projectile.x, projectile.y, projectile.radius, true);
+        continue;
+      }
+
+      let hitAny = false;
+      if (canImpact && marbles.length > 0) {
+        hitAny = hitMarbles(projectile, now, physics, box2d, marbles, impulsePower, 90);
+      }
+
+      const expired = now >= toFiniteNumber(projectile.expireAt, 0);
+      const outOfBounds = projectile.x < -8 || projectile.x > 96 || projectile.y < -12 || projectile.y > 260;
+      if (expired || outOfBounds || (hitAny && !pierceBalls)) {
+        shurikens.splice(index, 1);
+      }
+    }
+  }
+
+  return {
+    kind: 'ninja',
+    oid: def.oid,
+    tick(now) {
+      ensureNinjaVisualEffect();
+      ensureShurikenVisualEffect();
+      if (env.isPaused()) {
+        return;
+      }
+      const deltaMs = Math.max(8, Math.min(90, toFiniteNumber(now - lastTickAt, 16)));
+      lastTickAt = now;
+      updateShurikens(now, deltaMs);
+      const interval = Math.max(120, toFiniteNumber(def.fireIntervalMs, 900));
+      if (now >= nextShotAt) {
+        spawnShuriken(now);
+        nextShotAt = now + interval;
+      }
+    },
+    serializeState() {
+      return {
+        nextShotAt: toFiniteNumber(nextShotAt, 0),
+        lastTickAt: toFiniteNumber(lastTickAt, 0),
+        shurikens: shurikens.slice(0, 96).map((projectile) => ({
+          id: Math.max(1, Math.floor(toFiniteNumber(projectile && projectile.id, 1))),
+          x: toFiniteNumber(projectile && projectile.x, 0),
+          y: toFiniteNumber(projectile && projectile.y, 0),
+          prevX: toFiniteNumber(projectile && projectile.prevX, toFiniteNumber(projectile && projectile.x, 0)),
+          prevY: toFiniteNumber(projectile && projectile.prevY, toFiniteNumber(projectile && projectile.y, 0)),
+          vx: toFiniteNumber(projectile && projectile.vx, 0),
+          vy: toFiniteNumber(projectile && projectile.vy, 0),
+          radius: Math.max(0.05, toFiniteNumber(projectile && projectile.radius, 0.2)),
+          spawnAt: toFiniteNumber(projectile && projectile.spawnAt, 0),
+          expireAt: toFiniteNumber(projectile && projectile.expireAt, 0),
+          now: toFiniteNumber(projectile && projectile.now, 0),
+          propelUntil: toFiniteNumber(projectile && projectile.propelUntil, 0),
+          stuck: projectile && projectile.stuck === true,
+          stuckAt: toFiniteNumber(projectile && projectile.stuckAt, 0),
+          stickUntil: toFiniteNumber(projectile && projectile.stickUntil, 0),
+        })),
+      };
+    },
+    restoreState(rawState) {
+      const safeState = rawState && typeof rawState === 'object' ? rawState : {};
+      nextShotAt = toFiniteNumber(safeState.nextShotAt, 0);
+      lastTickAt = toFiniteNumber(safeState.lastTickAt, 0);
+      nextProjectileId = 1;
+      shurikens.length = 0;
+      const nextShurikens = Array.isArray(safeState.shurikens) ? safeState.shurikens : [];
+      for (let index = 0; index < nextShurikens.length; index += 1) {
+        const projectile = nextShurikens[index];
+        if (!projectile || typeof projectile !== 'object') {
+          continue;
+        }
+        const id = Math.max(1, Math.floor(toFiniteNumber(projectile.id, nextProjectileId)));
+        if (id >= nextProjectileId) {
+          nextProjectileId = id + 1;
+        }
+        shurikens.push({
+          id,
+          x: toFiniteNumber(projectile.x, 0),
+          y: toFiniteNumber(projectile.y, 0),
+          prevX: toFiniteNumber(projectile.prevX, toFiniteNumber(projectile.x, 0)),
+          prevY: toFiniteNumber(projectile.prevY, toFiniteNumber(projectile.y, 0)),
+          vx: toFiniteNumber(projectile.vx, 0),
+          vy: toFiniteNumber(projectile.vy, 0),
+          radius: Math.max(0.05, toFiniteNumber(projectile.radius, 0.2)),
+          spawnAt: toFiniteNumber(projectile.spawnAt, 0),
+          expireAt: toFiniteNumber(projectile.expireAt, 0),
+          now: toFiniteNumber(projectile.now, 0),
+          propelUntil: toFiniteNumber(projectile.propelUntil, 0),
+          stuck: projectile.stuck === true,
+          stuckAt: toFiniteNumber(projectile.stuckAt, 0),
+          stickUntil: toFiniteNumber(projectile.stickUntil, 0),
+          hitCooldownByMarble: {},
+        });
+      }
+      ensureNinjaVisualEffect();
+      ensureShurikenVisualEffect();
+    },
+  };
+}
+
 function createStickyPadBehavior(def, env) {
   let progress = 0;
   let direction = 1;
@@ -4814,6 +5730,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
   const magicWizardDefs = defs
     .filter((item) => item && item.kind === 'magic_wizard')
     .map((item) => ({ ...item }));
+  const ninjaDefs = defs
+    .filter((item) => item && item.kind === 'ninja')
+    .map((item) => ({ ...item }));
   const stopwatchDefs = defs
     .filter((item) => item && item.kind === 'stopwatch_bomb')
     .map((item) => ({ ...item }));
@@ -4857,6 +5776,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
   for (const magicWizardDef of magicWizardDefs) {
     behaviors.push(createMagicWizardBehavior(magicWizardDef, env));
   }
+  for (const ninjaDef of ninjaDefs) {
+    behaviors.push(createNinjaBehavior(ninjaDef, env));
+  }
   for (const stopwatchDef of stopwatchDefs) {
     behaviors.push(createStopwatchBombBehavior(stopwatchDef, env));
   }
@@ -4890,6 +5812,7 @@ export function createBehaviorRuntime(env, behaviorDefs) {
       const bottomBumper = {};
       const fan = {};
       const magicWizard = {};
+      const ninja = {};
       const stopwatch = {};
       const sticky = {};
       const diamondAutoRotate = {};
@@ -4915,6 +5838,8 @@ export function createBehaviorRuntime(env, behaviorDefs) {
           fan[behavior.oid] = state;
         } else if (behavior.kind === 'magic_wizard') {
           magicWizard[behavior.oid] = state;
+        } else if (behavior.kind === 'ninja') {
+          ninja[behavior.oid] = state;
         } else if (behavior.kind === 'stopwatch_bomb') {
           stopwatch[behavior.oid] = state;
         } else if (behavior.kind === 'sticky_pad') {
@@ -4927,7 +5852,7 @@ export function createBehaviorRuntime(env, behaviorDefs) {
           wormhole[behavior.oid] = state;
         }
       }
-      return { portal, burst, hammer, bottomBumper, fan, magicWizard, stopwatch, sticky, diamondAutoRotate, goalMarker, wormhole };
+      return { portal, burst, hammer, bottomBumper, fan, magicWizard, ninja, stopwatch, sticky, diamondAutoRotate, goalMarker, wormhole };
     },
     restoreState(rawState) {
       const safeState = rawState && typeof rawState === 'object' ? rawState : {};
@@ -4938,6 +5863,9 @@ export function createBehaviorRuntime(env, behaviorDefs) {
       const fanState = safeState.fan && typeof safeState.fan === 'object' ? safeState.fan : {};
       const magicWizardState = safeState.magicWizard && typeof safeState.magicWizard === 'object'
         ? safeState.magicWizard
+        : {};
+      const ninjaState = safeState.ninja && typeof safeState.ninja === 'object'
+        ? safeState.ninja
         : {};
       const stopwatchState = safeState.stopwatch && typeof safeState.stopwatch === 'object' ? safeState.stopwatch : {};
       const stickyState = safeState.sticky && typeof safeState.sticky === 'object' ? safeState.sticky : {};
@@ -4963,6 +5891,8 @@ export function createBehaviorRuntime(env, behaviorDefs) {
           behavior.restoreState(fanState[behavior.oid]);
         } else if (behavior.kind === 'magic_wizard') {
           behavior.restoreState(magicWizardState[behavior.oid]);
+        } else if (behavior.kind === 'ninja') {
+          behavior.restoreState(ninjaState[behavior.oid]);
         } else if (behavior.kind === 'stopwatch_bomb') {
           behavior.restoreState(stopwatchState[behavior.oid]);
         } else if (behavior.kind === 'sticky_pad') {

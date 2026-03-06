@@ -116,6 +116,7 @@ SOFTWARE.
   Map<String, String>? _candidateImageDataUrls;
   String? _goalLineImageDataUrl;
   String? _magicWizardImageDataUrl;
+  String? _ninjaImageDataUrl;
   final List<String> _runtimeDebugTrail = <String>[];
 
   List<String> get _candidates => _cachedCandidates ??= () {
@@ -141,8 +142,7 @@ SOFTWARE.
     return fromArgs.isEmpty ? 'v2_default' : fromArgs;
   }
 
-  int get _countdownTotalMs =>
-      widget.args.waitForFullRanking
+  int get _countdownTotalMs => widget.args.waitForFullRanking
       ? _fullRankingCountdownTotalMs
       : _normalCountdownTotalMs;
 
@@ -311,7 +311,10 @@ SOFTWARE.
             if (enabled is bool && !enabled) {
               continue;
             }
-            final engine = (entry['engine'] ?? '').toString().trim().toLowerCase();
+            final engine = (entry['engine'] ?? '')
+                .toString()
+                .trim()
+                .toLowerCase();
             if (engine.isNotEmpty && engine != 'v2') {
               continue;
             }
@@ -977,6 +980,25 @@ SOFTWARE.
     return imageUrl;
   }
 
+  Future<String> _resolveNinjaImageDataUrl() async {
+    if (_ninjaImageDataUrl != null) {
+      return _ninjaImageDataUrl!;
+    }
+    final baseUri = await _ensureLocalServer();
+    var imageUrl = await _resolveAppAssetUrl(
+      baseUri,
+      'assets/background/ninja.svg',
+    );
+    if (imageUrl.isEmpty) {
+      imageUrl = await _resolveAppAssetUrl(
+        baseUri,
+        'assets/ui/pinball/assets/ninja.svg',
+      );
+    }
+    _ninjaImageDataUrl = imageUrl;
+    return imageUrl;
+  }
+
   Future<String> _resolveAppAssetUrl(Uri baseUri, String assetPath) async {
     try {
       await rootBundle.load(assetPath);
@@ -1135,6 +1157,7 @@ SOFTWARE.
     final imageDataUrls = await _resolveCandidateImageDataUrls();
     final goalLineImageDataUrl = await _resolveGoalLineImageDataUrl();
     final magicWizardImageDataUrl = await _resolveMagicWizardImageDataUrl();
+    final ninjaImageDataUrl = await _resolveNinjaImageDataUrl();
     if (!mounted || _isFinishing) {
       _isStarting = false;
       return;
@@ -1150,6 +1173,7 @@ SOFTWARE.
       'imageDataUrls': imageDataUrls,
       'goalLineImageDataUrl': goalLineImageDataUrl,
       'magicWizardImageDataUrl': magicWizardImageDataUrl,
+      'ninjaImageDataUrl': ninjaImageDataUrl,
     };
     final encodedPayload = jsonEncode(payload);
 
@@ -1385,10 +1409,10 @@ SOFTWARE.
           _finish(winner, ranking: mergedRanking);
           return;
         }
-        if (widget.args.waitForFullRanking &&
-            mergedRanking.isNotEmpty) {
+        if (widget.args.waitForFullRanking && mergedRanking.isNotEmpty) {
           final rankingComplete = mergedRanking.length >= expectedCount;
-          final waitStartTick = _fullRankingWaitStartTick ?? _winnerMonitorTicks;
+          final waitStartTick =
+              _fullRankingWaitStartTick ?? _winnerMonitorTicks;
           final timedOut =
               (_winnerMonitorTicks - waitStartTick) >=
               _fullRankingWaitTimeoutTicks;
@@ -1718,9 +1742,9 @@ SOFTWARE.
                       ),
                     ),
                   ),
-                  ),
                 ),
               ),
+            ),
           if (_didStart && !_hasError && !_isFinishing)
             SafeArea(
               child: Align(

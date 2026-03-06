@@ -600,6 +600,19 @@ function setPayloadMagicWizardImage(raw) {
   }
 }
 
+function setPayloadNinjaImage(raw) {
+  const src = typeof raw === 'string' ? raw.trim() : '';
+  if (isSupportedRuntimeImageSrc(src)) {
+    window.__v2NinjaImageDataUrl = src;
+    return;
+  }
+  try {
+    delete window.__v2NinjaImageDataUrl;
+  } catch (_) {
+    window.__v2NinjaImageDataUrl = '';
+  }
+}
+
 function patchRendererMarbleImages() {
   const roulette = getRoulette();
   const renderer = roulette && roulette._renderer && typeof roulette._renderer === 'object'
@@ -2273,6 +2286,7 @@ async function init(payload = {}) {
     setPayloadMarbleImages(safePayload.imageDataUrls);
     setPayloadGoalMarkerImage(safePayload.goalLineImageDataUrl);
     setPayloadMagicWizardImage(safePayload.magicWizardImageDataUrl);
+    setPayloadNinjaImage(safePayload.ninjaImageDataUrl);
 
     const mapResult = await loadMapById(selectedMapId);
     if (!mapResult.ok) {
