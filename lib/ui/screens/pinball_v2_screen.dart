@@ -38,8 +38,8 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
   static const String _pinballAssetDir = 'assets/ui/pinball';
   static const Duration _startupTimeout = Duration(seconds: 30);
   static const int _fullRankingWaitTimeoutTicks = 180;
-  static const int _normalCountdownTotalMs = 86400;
-  static const int _fullRankingCountdownTotalMs = 162000;
+  static const int _normalCountdownTotalMs = 60000;
+  static const int _fullRankingCountdownTotalMs = 150000;
   static const Duration _countdownTickInterval = Duration(milliseconds: 50);
   static const String _thirdPartyNoticesAssetPath =
       'assets/licenses/THIRD_PARTY_NOTICES.txt';
