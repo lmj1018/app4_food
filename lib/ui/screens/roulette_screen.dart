@@ -2774,10 +2774,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
                                                   ),
                                                 ),
                                                 if (!_isMenuManual)
-                                                  Positioned(
-                                                    left: 0,
-                                                    right: 0,
-                                                    bottom: 0,
+                                                  Positioned.fill(
                                                     child: ClipRRect(
                                                       borderRadius:
                                                           BorderRadius.circular(
@@ -2785,7 +2782,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
                                                           ),
                                                       child: Image.asset(
                                                         'assets/background/random.png',
-                                                        fit: BoxFit.cover,
+                                                        fit: BoxFit.contain,
                                                         alignment: Alignment
                                                             .bottomCenter,
                                                       ),
