@@ -1134,18 +1134,23 @@ class _RouletteScreenState extends State<RouletteScreen> {
   }
 
   static final List<_PinballMapChoice> _pinballMapChoices = [
+    _PinballMapChoice(mapIndex: 1, title: 'Wheel of fortune'),
+    _PinballMapChoice(mapIndex: 2, title: 'BubblePop'),
+    _PinballMapChoice(mapIndex: 3, title: 'Pot of greed'),
     _PinballMapChoice(
-      mapIndex: 1,
-      title: '맵 1',
-      subtitle: '캐니언 플로우 (넓고 부드러운 S커브)',
+      mapIndex: 4,
+      title: 'Into The Night (by item4)',
     ),
-    _PinballMapChoice(
-      mapIndex: 2,
-      title: '맵 2',
-      subtitle: '범퍼 파크 (범퍼 가득한 놀이터)',
+  ];
+  static const List<_V2MapChoice> _preferredV2MapChoices = <_V2MapChoice>[
+    _V2MapChoice(id: 'm5_Cosmic_Odyssey', title: 'Cosmic Odyssey', sort: 110),
+    _V2MapChoice(id: 'm7_PinBall', title: 'PinBall', sort: 120),
+    _V2MapChoice(
+      id: 'm6_Spacetime_Labyrinth',
+      title: 'Spacetime Labyrinth',
+      sort: 130,
     ),
-    _PinballMapChoice(mapIndex: 3, title: '맵 3', subtitle: 'X-크로스 (교차 위빙)'),
-    _PinballMapChoice(mapIndex: 4, title: '맵 4', subtitle: '크라운 피크 (왕관 봉우리)'),
+    _V2MapChoice(id: 'm8_Sticky_Hell', title: 'Sticky Hell', sort: 140),
   ];
   static int? _lastAutoPinballMapIndex;
   static final Map<int, int> _autoPinballMapPickCounts = <int, int>{
@@ -1425,116 +1430,189 @@ class _RouletteScreenState extends State<RouletteScreen> {
   Future<_PinballLaunchConfig?> _showPinballLaunchPicker({
     required int suggestedMapIndex,
   }) async {
-    final v2Maps = await _loadV2MapChoices();
+    final loadedV2Maps = await _loadV2MapChoices();
+    final v2ById = <String, _V2MapChoice>{
+      for (final map in loadedV2Maps) map.id: map,
+    };
+    final resolvedV2Maps = <_V2MapChoice>[
+      for (final preferred in _preferredV2MapChoices)
+        v2ById[preferred.id] ?? preferred,
+    ];
+    for (final map in loadedV2Maps) {
+      final duplicated = resolvedV2Maps.any((item) => item.id == map.id);
+      if (!duplicated) {
+        resolvedV2Maps.add(map);
+      }
+      if (resolvedV2Maps.length >= 4) {
+        break;
+      }
+    }
+    final selectedV2Maps = resolvedV2Maps.take(4).toList(growable: false);
+    final launchOptions = <_MapLaunchOption>[
+      ..._pinballMapChoices.map(
+        (choice) => _MapLaunchOption(
+          number: choice.mapIndex,
+          label: 'M${choice.mapIndex} - ${choice.title}',
+          isNew: choice.mapIndex >= 4,
+          config: _PinballLaunchConfig.v1(choice.mapIndex),
+        ),
+      ),
+      for (var i = 0; i < selectedV2Maps.length; i++)
+        _MapLaunchOption(
+          number: 5 + i,
+          label: 'M${5 + i} - ${_displayV2MapTitle(selectedV2Maps[i])}',
+          isNew: true,
+          config: _PinballLaunchConfig.v2(selectedV2Maps[i].id),
+        ),
+    ];
     if (!mounted) {
       return null;
     }
     return showDialog<_PinballLaunchConfig>(
       context: context,
       builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF101214),
-          title: const Text(
-            '맵 선택 (임시 테스트)',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-          ),
-          content: SizedBox(
-            width: 440,
-            child: SingleChildScrollView(
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 430, maxHeight: 620),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF7FBFF),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: const Color(0xFFE9D5E5), width: 1.2),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x331A0A14),
+                  blurRadius: 28,
+                  offset: Offset(0, 12),
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
               child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    '기존 V1 맵',
-                    style: TextStyle(
-                      color: Color(0xFF9EC0FF),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  for (final mapChoice in _pinballMapChoices)
-                    ListTile(
-                      dense: true,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      title: Text(
-                        mapChoice.title,
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                      subtitle: Text(
-                        mapChoice.subtitle,
-                        style: const TextStyle(
-                          color: Color(0xFF9FB0C7),
-                          fontSize: 12,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '맵선택',
+                          style: Theme.of(dialogContext).textTheme.titleLarge
+                              ?.copyWith(
+                                fontWeight: FontWeight.w900,
+                                color: const Color(0xFFE6006E),
+                              ),
                         ),
                       ),
-                      trailing: mapChoice.mapIndex == suggestedMapIndex
-                          ? const Icon(
-                              Icons.recommend_rounded,
-                              color: Color(0xFF64D5FF),
-                              size: 18,
-                            )
-                          : null,
-                      onTap: () {
-                        Navigator.of(
-                          dialogContext,
-                        ).pop(_PinballLaunchConfig.v1(mapChoice.mapIndex));
-                      },
-                    ),
-                  const SizedBox(height: 10),
-                  const Text(
-                    'V2 사용자 맵 (assets/ui/pinball/maps)',
-                    style: TextStyle(
-                      color: Color(0xFF9EC0FF),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  for (final map in v2Maps)
-                    ListTile(
-                      dense: true,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      title: Text(
-                        map.id,
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                      subtitle: Text(
-                        map.title,
-                        style: const TextStyle(
-                          color: Color(0xFF9FB0C7),
-                          fontSize: 12,
+                      IconButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        icon: const Icon(
+                          Icons.close_rounded,
+                          color: Color(0xFF6E6271),
                         ),
                       ),
-                      trailing: const Icon(
-                        Icons.build_circle_outlined,
-                        color: Color(0xFFC7A8FF),
-                        size: 18,
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        children: [
+                          for (final option in launchOptions)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(14),
+                                onTap: () {
+                                  Navigator.of(dialogContext).pop(option.config);
+                                },
+                                child: Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 12,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFFFFFF),
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: option.number == suggestedMapIndex
+                                          ? const Color(0xFFFF63A8)
+                                          : const Color(0xFFE2E8EF),
+                                      width: option.number == suggestedMapIndex
+                                          ? 1.4
+                                          : 1.0,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          option.label,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            color: Color(0xFF2D3340),
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                      ),
+                                      if (option.isNew)
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 7,
+                                            vertical: 3,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFFF2E84),
+                                            borderRadius: BorderRadius.circular(
+                                              999,
+                                            ),
+                                          ),
+                                          child: const Text(
+                                            'NEW',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
-                      onTap: () {
-                        Navigator.of(
-                          dialogContext,
-                        ).pop(_PinballLaunchConfig.v2(map.id));
-                      },
                     ),
+                  ),
                 ],
               ),
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('취소'),
-            ),
-          ],
         );
       },
     );
+  }
+
+  String _displayV2MapTitle(_V2MapChoice map) {
+    const idOverrides = <String, String>{
+      'm5_Cosmic_Odyssey': 'Cosmic Odyssey',
+      'm6_Spacetime_Labyrinth': 'Spacetime Labyrinth',
+      'm7_PinBall': 'PinBall',
+      'm8_Sticky_Hell': 'Sticky Hell',
+    };
+    final fromId = idOverrides[map.id];
+    if (fromId != null && fromId.isNotEmpty) {
+      return fromId;
+    }
+    final raw = map.title.trim().isNotEmpty ? map.title.trim() : map.id.trim();
+    if (raw.isEmpty) {
+      return map.id;
+    }
+    return raw.replaceAll('_', ' ');
   }
 
   bool get _isSpinGateMode =>
@@ -3034,15 +3112,24 @@ class _PinballOutcome {
 }
 
 class _PinballMapChoice {
-  const _PinballMapChoice({
-    required this.mapIndex,
-    required this.title,
-    required this.subtitle,
-  });
+  const _PinballMapChoice({required this.mapIndex, required this.title});
 
   final int mapIndex;
   final String title;
-  final String subtitle;
+}
+
+class _MapLaunchOption {
+  const _MapLaunchOption({
+    required this.number,
+    required this.label,
+    required this.isNew,
+    required this.config,
+  });
+
+  final int number;
+  final String label;
+  final bool isNew;
+  final _PinballLaunchConfig config;
 }
 
 class _PinballLaunchConfig {
