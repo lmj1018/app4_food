@@ -863,7 +863,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
     final entries = <String>[];
     for (int i = 0; i < _customItemControllers.length; i++) {
       final text = _customItemControllers[i].text.trim();
-      entries.add(text.isEmpty ? '음식이름 ${i + 1}' : text);
+      entries.add(text.isEmpty ? '후보${i + 1}' : text);
     }
     return entries;
   }
@@ -2545,7 +2545,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
                                                       horizontal: 16,
                                                       vertical: 12,
                                                     ),
-                                                hintText: '음식이름 ${index + 1}',
+                                                hintText: '후보${index + 1}',
                                                 hintStyle: TextStyle(
                                                   color: Colors.grey.withValues(
                                                     alpha: 0.5,
@@ -2756,7 +2756,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 28),
+                SizedBox(height: isCustomMode ? 14 : 28),
                 if (isCustomMode)
                   Align(
                     alignment: Alignment.centerRight,
@@ -2769,14 +2769,14 @@ class _RouletteScreenState extends State<RouletteScreen> {
                         });
                       },
                       child: Padding(
-                        padding: const EdgeInsets.fromLTRB(4, 0, 0, 10),
+                        padding: const EdgeInsets.fromLTRB(4, 0, 0, 8),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 10,
                             vertical: 6,
                           ),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFFFEEF6),
+                            color: const Color(0xFFF7F8FB),
                             borderRadius: BorderRadius.circular(13),
                             border: Border.all(
                               color: const Color(0xFFFF4D98),
