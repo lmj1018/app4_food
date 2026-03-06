@@ -38,6 +38,9 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
   static const String _pinballAssetDir = 'assets/ui/pinball';
   static const Duration _startupTimeout = Duration(seconds: 30);
   static const int _fullRankingWaitTimeoutTicks = 120;
+  static const int _normalCountdownTotalMs = 57600;
+  static const int _fullRankingCountdownTotalMs = 108000;
+  static const Duration _countdownTickInterval = Duration(milliseconds: 50);
   static const String _thirdPartyNoticesAssetPath =
       'assets/licenses/THIRD_PARTY_NOTICES.txt';
   static const List<String> _slowMotionBannerAssets = <String>[
@@ -104,6 +107,9 @@ SOFTWARE.
   String? _queuedSlowMotionBannerAsset;
   Offset _slowMotionBannerOffset = Offset.zero;
   Timer? _slowMotionBannerTimer;
+  Timer? _countdownTimer;
+  DateTime? _countdownStartedAt;
+  int _countdownRemainingMs = 0;
 
   List<String>? _cachedCandidates;
   String? _candidateImageKey;
@@ -134,6 +140,11 @@ SOFTWARE.
     final fromArgs = widget.args.mapId.trim();
     return fromArgs.isEmpty ? 'v2_default' : fromArgs;
   }
+
+  int get _countdownTotalMs =>
+      widget.args.waitForFullRanking
+      ? _fullRankingCountdownTotalMs
+      : _normalCountdownTotalMs;
 
   String _normalizeCandidate(String value) {
     var out = value.trim();
@@ -210,6 +221,56 @@ SOFTWARE.
   void _clearMapLabelOverlayTimer() {
     _mapLabelOverlayTimer?.cancel();
     _mapLabelOverlayTimer = null;
+  }
+
+  void _clearCountdownTimer() {
+    _countdownTimer?.cancel();
+    _countdownTimer = null;
+  }
+
+  void _resetCountdown() {
+    _clearCountdownTimer();
+    _countdownStartedAt = null;
+    _countdownRemainingMs = _countdownTotalMs;
+  }
+
+  void _ensureCountdownStarted() {
+    if (_countdownStartedAt != null) {
+      return;
+    }
+    _countdownStartedAt = DateTime.now();
+    _countdownRemainingMs = _countdownTotalMs;
+    _countdownTimer = Timer.periodic(_countdownTickInterval, (_) {
+      if (!mounted || _isFinishing) {
+        _clearCountdownTimer();
+        return;
+      }
+      final startedAt = _countdownStartedAt;
+      if (startedAt == null) {
+        _clearCountdownTimer();
+        return;
+      }
+      final elapsedMs = DateTime.now().difference(startedAt).inMilliseconds;
+      final remainingMs = max(0, _countdownTotalMs - elapsedMs);
+      if (remainingMs == _countdownRemainingMs) {
+        return;
+      }
+      setState(() {
+        _countdownRemainingMs = remainingMs;
+      });
+      if (remainingMs == 0) {
+        _clearCountdownTimer();
+      }
+    });
+  }
+
+  String get _countdownText {
+    final remaining = max(0, _countdownRemainingMs);
+    final minutes = remaining ~/ 60000;
+    final secondText = ((remaining % 60000) / 1000)
+        .toStringAsFixed(2)
+        .padLeft(5, '0');
+    return '${minutes.toString().padLeft(2, '0')}:$secondText초';
   }
 
   void _clearLicenseHoldTimer() {
@@ -365,6 +426,7 @@ SOFTWARE.
     _clearStartupTimer();
     _clearWinnerMonitor();
     _clearMapLabelOverlayTimer();
+    _resetCountdown();
     _resetSlowMotionBannerState();
     setState(() {
       _selectedMapIdOverride = nextMapId;
@@ -1239,6 +1301,7 @@ SOFTWARE.
 
   void _startWinnerMonitor() {
     _clearWinnerMonitor();
+    _ensureCountdownStarted();
     _winnerMonitorTimer = Timer.periodic(const Duration(milliseconds: 220), (
       _,
     ) async {
@@ -1434,6 +1497,7 @@ SOFTWARE.
       return;
     }
     _isFinishing = true;
+    _clearCountdownTimer();
     _clearStartupTimer();
     _clearWinnerMonitor();
     _clearSlowMotionBannerTimer();
@@ -1507,6 +1571,7 @@ SOFTWARE.
     _clearStartupTimer();
     _clearWinnerMonitor();
     _clearMapLabelOverlayTimer();
+    _resetCountdown();
     _resetSlowMotionBannerState();
     setState(() {
       _hasError = false;
@@ -1524,6 +1589,7 @@ SOFTWARE.
   @override
   void initState() {
     super.initState();
+    _resetCountdown();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
@@ -1545,6 +1611,7 @@ SOFTWARE.
               return;
             }
             _pushRuntimeDebug('page_started');
+            _resetCountdown();
             setState(() {
               _pageLoaded = false;
               _didStart = false;
@@ -1595,6 +1662,7 @@ SOFTWARE.
 
   @override
   void dispose() {
+    _clearCountdownTimer();
     _clearStartupTimer();
     _clearWinnerMonitor();
     _clearMapLabelOverlayTimer();
@@ -1646,6 +1714,38 @@ SOFTWARE.
                           color: Colors.white,
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                  ),
+                ),
+              ),
+          if (_didStart && !_hasError && !_isFinishing)
+            SafeArea(
+              child: Align(
+                alignment: Alignment.topRight,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 12, top: 10),
+                  child: IgnorePointer(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.55),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.22),
+                        ),
+                      ),
+                      child: Text(
+                        _countdownText,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
                     ),
