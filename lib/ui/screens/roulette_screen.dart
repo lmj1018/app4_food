@@ -2756,7 +2756,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
                     ],
                   ),
                 ),
-                SizedBox(height: isCustomMode ? 14 : 28),
+                SizedBox(height: isCustomMode ? 8 : 28),
                 if (isCustomMode)
                   Align(
                     alignment: Alignment.centerRight,
@@ -2769,7 +2769,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
                         });
                       },
                       child: Padding(
-                        padding: const EdgeInsets.fromLTRB(4, 6, 0, 6),
+                        padding: const EdgeInsets.fromLTRB(4, 2, 0, 14),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 10,
