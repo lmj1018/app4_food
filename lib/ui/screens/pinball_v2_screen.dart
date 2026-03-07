@@ -2368,8 +2368,8 @@ SOFTWARE.
           final bottom = height * (1 - layout.topFactor - layout.heightFactor);
           final bubbleWidth = max(1.0, width * layout.widthFactor);
           final bubbleHeight = max(1.0, height * layout.heightFactor);
-          final horizontalPadding = bubbleWidth * 0.04;
-          final verticalPadding = bubbleHeight * 0.08;
+          final horizontalPadding = max(8.0, bubbleWidth * 0.065);
+          final verticalPadding = max(6.0, bubbleHeight * 0.15);
           final availableWidth = max(
             1.0,
             bubbleWidth - (horizontalPadding * 2),
