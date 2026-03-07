@@ -48,7 +48,7 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
   ];
   static const int _v2ZoomPresetDefault = 0;
   static const int _v2ZoomPresetMin = 0;
-  static const int _v2ZoomPresetMax = _v2ZoomPresetLabels.length - 1;
+  static final int _v2ZoomPresetMax = _v2ZoomPresetLabels.length - 1;
   static const Duration _zoomPresetOverlayDuration =
       Duration(milliseconds: 1500);
   static const Duration _startupTimeout = Duration(seconds: 30);
