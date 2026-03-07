@@ -8108,7 +8108,7 @@ SOFTWARE.
                                 ),
                               ),
                               child: const Text(
-                                'map',
+                                'MAP',
                                 style: TextStyle(
                                   color: Colors.white,
                                   fontSize: 12,

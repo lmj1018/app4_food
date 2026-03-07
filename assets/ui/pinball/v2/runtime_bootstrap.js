@@ -150,8 +150,14 @@ function applyAppVisualCompatibility() {
   if (!roulette) {
     return;
   }
-  if (Array.isArray(roulette._uiObjects) && roulette._uiObjects.length > 0) {
-    roulette._uiObjects = [];
+  const keepMiniMap = control.appMiniMapVisible === true;
+  if (Array.isArray(roulette._uiObjects)) {
+    const miniMapUiObject = cacheMiniMapUiObject();
+    if (keepMiniMap && miniMapUiObject) {
+      roulette._uiObjects = [miniMapUiObject];
+    } else if (roulette._uiObjects.length > 0) {
+      roulette._uiObjects = [];
+    }
   }
   if (roulette.__v2AppUiObjectMuted !== true && typeof roulette.addUiObject === 'function') {
     roulette.__v2AppUiObjectMuted = true;
@@ -966,15 +972,18 @@ function setMiniMapUiVisibility(visible = true) {
 
   if (shouldShow) {
     if (existingIndex >= 0) {
+      control.appMiniMapVisible = true;
       patchMiniMapUiObject();
       return { ok: true, visible: true };
     }
     const cachedMiniMap = cacheMiniMapUiObject();
     if (!cachedMiniMap) {
+      control.appMiniMapVisible = false;
       return { ok: false, reason: 'mini map ui unavailable' };
     }
     patchMiniMapUiObject();
     uiObjects.push(cachedMiniMap);
+    control.appMiniMapVisible = true;
     return { ok: true, visible: true };
   }
 
@@ -984,6 +993,7 @@ function setMiniMapUiVisibility(visible = true) {
       roulette.__v2MiniMapUiObject = removed;
     }
   }
+  control.appMiniMapVisible = false;
   return { ok: true, visible: false };
 }
 
