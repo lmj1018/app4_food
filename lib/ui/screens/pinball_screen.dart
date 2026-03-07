@@ -209,6 +209,7 @@ SOFTWARE.
   Timer? _countdownTimer;
   DateTime? _countdownStartedAt;
   int _countdownRemainingMs = 0;
+  bool _miniMapVisible = false;
 
   void _logPinballStatus(String value) {
     debugPrint('[Pinball][status] $value');
@@ -669,7 +670,7 @@ SOFTWARE.
     final secondText = ((remaining % 60000) / 1000)
         .toStringAsFixed(2)
         .padLeft(5, '0');
-    return '${minutes.toString().padLeft(2, '0')}:$secondText초';
+    return '${minutes.toString().padLeft(2, '0')}:$secondText';
   }
 
   void _resetSlowMotionBannerState() {
@@ -7160,6 +7161,86 @@ SOFTWARE.
         });
       });
     }
+  }
+
+  void _syncMiniMapVisible(Map<String, dynamic>? state) {
+    final visible = state?['miniMapVisible'] == true;
+    if (visible == _miniMapVisible) {
+      return;
+    }
+    if (!mounted) {
+      _miniMapVisible = visible;
+      return;
+    }
+    setState(() {
+      _miniMapVisible = visible;
+    });
+  }
+
+  Future<void> _setMiniMapVisible(bool visible) async {
+    try {
+      final raw = await _controller.runJavaScriptReturningResult('''
+(() => {
+  const isMiniMapUiObject = (value) => {
+    if (!value || typeof value !== 'object') {
+      return false;
+    }
+    return typeof value.render === 'function'
+      && typeof value.drawMarbles === 'function'
+      && typeof value.drawViewport === 'function'
+      && typeof value.onMouseMove === 'function';
+  };
+  const roulette = window.roulette;
+  const control = window.__appPinballControl || {};
+  if (!roulette || typeof roulette !== 'object') {
+    return JSON.stringify({ ok: false, visible: false, reason: 'roulette unavailable' });
+  }
+  if (!Array.isArray(roulette._uiObjects)) {
+    roulette._uiObjects = [];
+  }
+  const uiObjects = roulette._uiObjects;
+  const shouldShow = ${visible ? 'true' : 'false'};
+  if (shouldShow) {
+    const cached = isMiniMapUiObject(roulette.__appMiniMapUiObject)
+      ? roulette.__appMiniMapUiObject
+      : (uiObjects.find((item) => isMiniMapUiObject(item)) || null);
+    if (!cached) {
+      return JSON.stringify({ ok: false, visible: false, reason: 'mini map ui unavailable' });
+    }
+    roulette.__appMiniMapUiObject = cached;
+    if (!uiObjects.some((item) => item === cached)) {
+      uiObjects.push(cached);
+    }
+    control.miniMapVisible = true;
+    window.__appPinballControl = control;
+    return JSON.stringify({ ok: true, visible: true });
+  }
+  const existingIndex = uiObjects.findIndex((item) => isMiniMapUiObject(item));
+  if (existingIndex >= 0) {
+    const removed = uiObjects.splice(existingIndex, 1)[0];
+    if (removed) {
+      roulette.__appMiniMapUiObject = removed;
+    }
+  }
+  control.miniMapVisible = false;
+  window.__appPinballControl = control;
+  return JSON.stringify({ ok: true, visible: false });
+})()
+''');
+      final parsed = _decodeJsMap(raw);
+      final nextVisible = parsed?['visible'] == true;
+      if (!mounted) {
+        _miniMapVisible = nextVisible;
+        return;
+      }
+      setState(() {
+        _miniMapVisible = nextVisible;
+      });
+    } catch (_) {}
+  }
+
+  void _toggleMiniMapVisible() {
+    unawaited(_setMiniMapVisible(!_miniMapVisible));
   }
 
   Future<Map<String, String>> _resolveCandidateImageDataUrls() async {
