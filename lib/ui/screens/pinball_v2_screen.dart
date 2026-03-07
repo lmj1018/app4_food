@@ -906,9 +906,9 @@ SOFTWARE.
     if (_isManagerSlowMotionBanner(assetPath)) {
       return const _SlowMotionDialogueBubbleLayout(
         leftFactor: 0.44,
-        topFactor: 0.15,
+        topFactor: 0.14,
         widthFactor: 0.49,
-        heightFactor: 0.21,
+        heightFactor: 0.24,
       );
     }
     return const _SlowMotionDialogueBubbleLayout(
