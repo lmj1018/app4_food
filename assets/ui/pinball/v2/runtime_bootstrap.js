@@ -12,7 +12,7 @@ import {
   stableHash,
 } from './snapshot_manager.js';
 
-const RUNTIME_REVISION = 'v2-runtime-r20260307-05';
+const RUNTIME_REVISION = 'v2-runtime-r20260307-06';
 const STATUS_ELEMENT_ID = 'v2Status';
 const DEFAULT_MARBLE_RADIUS = 0.25;
 const MIN_MARBLE_RADIUS = 0.05;
@@ -74,6 +74,7 @@ const control = {
   mapId: '',
   mapJson: null,
   compiledMap: null,
+  miniMapWorldBounds: null,
   marbleRadius: DEFAULT_MARBLE_RADIUS,
   candidates: [],
   winningRank: 1,
@@ -511,8 +512,8 @@ function computeMiniMapEntityBoundsX(entity) {
   return null;
 }
 
-function resolveMiniMapWorldBounds(params) {
-  const entities = Array.isArray(params && params.entities) ? params.entities : [];
+function resolveMiniMapWorldBoundsFromEntities(entitiesInput) {
+  const entities = Array.isArray(entitiesInput) ? entitiesInput : [];
   let minX = 0;
   let maxX = MINIMAP_BASE_WORLD_WIDTH;
   for (let index = 0; index < entities.length; index += 1) {
@@ -536,6 +537,34 @@ function resolveMiniMapWorldBounds(params) {
   const width = Math.max(1, maxX - minX);
   const fitScale = Math.min(1, MINIMAP_BASE_WORLD_WIDTH / width);
   return { minX, maxX, width, fitScale };
+}
+
+function resolveMiniMapWorldBounds(params) {
+  const stable = control && control.miniMapWorldBounds && typeof control.miniMapWorldBounds === 'object'
+    ? control.miniMapWorldBounds
+    : null;
+  if (stable) {
+    return {
+      minX: toFiniteNumber(stable.minX, 0),
+      maxX: toFiniteNumber(stable.maxX, MINIMAP_BASE_WORLD_WIDTH),
+      width: Math.max(1, toFiniteNumber(stable.width, MINIMAP_BASE_WORLD_WIDTH)),
+      fitScale: Math.max(0.0001, Math.min(1, toFiniteNumber(stable.fitScale, 1))),
+    };
+  }
+  const entities = Array.isArray(params && params.entities) ? params.entities : [];
+  return resolveMiniMapWorldBoundsFromEntities(entities);
+}
+
+function buildStableMiniMapWorldBoundsFromCompiled(compiledMap) {
+  const compiled = compiledMap && typeof compiledMap === 'object' ? compiledMap : null;
+  const stage = compiled && compiled.stage && typeof compiled.stage === 'object'
+    ? compiled.stage
+    : null;
+  const entities = stage && Array.isArray(stage.entities) ? stage.entities : [];
+  if (entities.length <= 0) {
+    return null;
+  }
+  return resolveMiniMapWorldBoundsFromEntities(entities);
 }
 
 function patchMiniMapUiObject() {
@@ -1797,6 +1826,7 @@ async function applyMapJson(rawMapJson) {
   control.mapId = compiled.mapId;
   control.mapJson = mapJson;
   control.compiledMap = compiled;
+  control.miniMapWorldBounds = buildStableMiniMapWorldBoundsFromCompiled(compiled);
   control.marbleRadius = mapMarbleRadius;
   control.mapDisableSkills = compiled && compiled.stage && compiled.stage.disableSkills === true;
   control.mapDisableSkillsInSlowMotion = !(compiled && compiled.stage && compiled.stage.disableSkillsInSlowMotion === false);
@@ -1870,6 +1900,7 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
   control.mapId = compiled.mapId;
   control.mapJson = mapJson;
   control.compiledMap = compiled;
+  control.miniMapWorldBounds = buildStableMiniMapWorldBoundsFromCompiled(compiled);
   control.marbleRadius = mapMarbleRadius;
   control.mapDisableSkills = compiled && compiled.stage && compiled.stage.disableSkills === true;
   control.mapDisableSkillsInSlowMotion = !(compiled && compiled.stage && compiled.stage.disableSkillsInSlowMotion === false);
