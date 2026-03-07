@@ -49,8 +49,9 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
   static const int _v2ZoomPresetDefault = 0;
   static const int _v2ZoomPresetMin = 0;
   static final int _v2ZoomPresetMax = _v2ZoomPresetLabels.length - 1;
-  static const Duration _zoomPresetOverlayDuration =
-      Duration(milliseconds: 1500);
+  static const Duration _zoomPresetOverlayDuration = Duration(
+    milliseconds: 1500,
+  );
   static const Duration _startupTimeout = Duration(seconds: 30);
   static const int _fullRankingWaitTimeoutTicks = 180;
   static const int _normalCountdownTotalMs = 60000;
@@ -65,6 +66,53 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
   static const Duration _slowMotionFirstTrigger = Duration(seconds: 4);
   static const Duration _slowMotionSecondTrigger = Duration(seconds: 8);
   static const Duration _slowMotionBannerDuration = Duration(seconds: 3);
+  static const Duration _slowMotionDialogueTypingInterval = Duration(
+    milliseconds: 42,
+  );
+  static const List<String> _slowMotionSubordinateDialogues = <String>[
+    '부장님... 이번엔 제발 마지막입니다 ㅜㅜ',
+    '정말... 정말 이번엔 먹는 겁니다, 흑흑',
+    '저 오늘 집에 좀 일찍 가고 싶습니다...',
+    '이번 판 끝나면 진짜 정리하겠습니다!',
+    '부장님 말씀 믿고 조용히 따라가겠습니다...',
+    '아까는 운이 나빴던 거죠? 그쵸?',
+    '제 심장은 이미 풀가동 중입니다...',
+    '이번엔 제 계좌가 웃었으면 좋겠어요...',
+    '딱 한 번만 성공하면 저도 자신감 생겨요!',
+    '저는 착하게 버텨보겠습니다 ㅜㅜ',
+    '부장님, 제발 이번엔 승리 멘트 주세요...',
+    '오늘도 정신력으로 버티는 중입니다...',
+    '이제 진짜 마지막... 진짜진짜 마지막...',
+    '이번엔 뭔가 될 것 같은데 무섭기도 해요...',
+    '저 믿고 들어갑니다... 떨려요...',
+    '실패해도 울지 않겠습니다... 아마도요...',
+    '이번엔 회식비라도 건져야 합니다...',
+    '부장님 촉, 오늘만큼은 맞아주세요!',
+    '저 아직 선량한 시민으로 살고 싶습니다...',
+    '성공하면 바로 감사 인사부터 하겠습니다!',
+  ];
+  static const List<String> _slowMotionManagerDialogues = <String>[
+    '좋아, 다시 한번 더 하자구!',
+    '이 친구 융통성이 없구만!',
+    '오늘은 느낌이 온다, 한 판 더!',
+    '승부는 끝나기 전까진 끝난 게 아니야!',
+    '이번엔 진짜로 터진다, 믿어봐!',
+    '딱 한 번만 더, 딱 한 번!',
+    '아까 그 흐름이면 무조건 된다!',
+    '실패는 데이터다, 또 돌려!',
+    '자네, 아직 포기하긴 이르지!',
+    '경마장 DNA가 꿈틀거리는데?',
+    '이건 운이 아니라 타이밍이야!',
+    '이번 배치는 거의 예술이야!',
+    '내 촉은 틀린 적이 없었어!',
+    '좋아, 집중! 지금부터 진짜다!',
+    '아까 놓친 그 한 끗만 잡자!',
+    '걱정 마, 사람은 좋은데 승부욕만 세!',
+    '이번엔 내가 커피 쏜다, 가자!',
+    '결과 나오기 전엔 아무도 몰라!',
+    '자네 표정 좋은데? 더 해보자!',
+    '그래, 오늘은 끝장을 보자고!',
+  ];
   static const String _thirdPartyNoticesFallback = '''
 Marble Roulette (Pinball Engine)
 Copyright (c) 2022 lazygyu
@@ -121,8 +169,12 @@ SOFTWARE.
   bool _slowMotionAssetsResolved = false;
   String? _slowMotionBannerAsset;
   String? _queuedSlowMotionBannerAsset;
+  String _slowMotionDialogueFullText = '';
+  int _slowMotionDialogueVisibleChars = 0;
+  String _lastSlowMotionDialogue = '';
   Offset _slowMotionBannerOffset = Offset.zero;
   Timer? _slowMotionBannerTimer;
+  Timer? _slowMotionDialogueTypingTimer;
   Timer? _countdownTimer;
   Timer? _zoomPresetOverlayTimer;
   DateTime? _countdownStartedAt;
@@ -338,10 +390,7 @@ SOFTWARE.
     return value.clamp(0.1, 6).toDouble();
   }
 
-  void _syncCountdownRate({
-    dynamic speedMultiplier,
-    dynamic timeScale,
-  }) {
+  void _syncCountdownRate({dynamic speedMultiplier, dynamic timeScale}) {
     final nextSpeed = _toDouble(speedMultiplier, fallback: double.nan);
     if (nextSpeed.isFinite && nextSpeed > 0) {
       _countdownSpeedMultiplier = nextSpeed;
@@ -598,14 +647,128 @@ SOFTWARE.
     _slowMotionBannerTimer = null;
   }
 
+  void _clearSlowMotionDialogueTypingTimer() {
+    _slowMotionDialogueTypingTimer?.cancel();
+    _slowMotionDialogueTypingTimer = null;
+  }
+
+  bool _isSubordinateSlowMotionBanner(String assetPath) {
+    return assetPath.toLowerCase().endsWith('p1_1.png');
+  }
+
+  bool _isManagerSlowMotionBanner(String assetPath) {
+    return assetPath.toLowerCase().endsWith('p2_1.png');
+  }
+
+  String _pickRandomSlowMotionDialogue(String assetPath) {
+    final source = _isSubordinateSlowMotionBanner(assetPath)
+        ? _slowMotionSubordinateDialogues
+        : _isManagerSlowMotionBanner(assetPath)
+        ? _slowMotionManagerDialogues
+        : const <String>[];
+    if (source.isEmpty) {
+      return '';
+    }
+    var index = Random().nextInt(source.length);
+    if (source.length > 1 && source[index] == _lastSlowMotionDialogue) {
+      index = (index + 1 + Random().nextInt(source.length - 1)) % source.length;
+    }
+    final picked = source[index];
+    _lastSlowMotionDialogue = picked;
+    return picked;
+  }
+
+  void _startSlowMotionDialogueTyping(String line) {
+    _clearSlowMotionDialogueTypingTimer();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _slowMotionDialogueFullText = line.trim();
+      _slowMotionDialogueVisibleChars = 0;
+    });
+    final target = _slowMotionDialogueFullText;
+    if (target.isEmpty) {
+      return;
+    }
+    _slowMotionDialogueTypingTimer = Timer.periodic(
+      _slowMotionDialogueTypingInterval,
+      (timer) {
+        if (!mounted || _slowMotionBannerAsset == null) {
+          _clearSlowMotionDialogueTypingTimer();
+          return;
+        }
+        final nextLength = min(
+          _slowMotionDialogueVisibleChars + 1,
+          _slowMotionDialogueFullText.length,
+        );
+        if (nextLength <= _slowMotionDialogueVisibleChars) {
+          _clearSlowMotionDialogueTypingTimer();
+          return;
+        }
+        setState(() {
+          _slowMotionDialogueVisibleChars = nextLength;
+        });
+        if (_slowMotionDialogueVisibleChars >=
+            _slowMotionDialogueFullText.length) {
+          _clearSlowMotionDialogueTypingTimer();
+        }
+      },
+    );
+  }
+
+  String get _slowMotionDialogueTypedText {
+    if (_slowMotionDialogueFullText.isEmpty) {
+      return '';
+    }
+    final visible = _slowMotionDialogueVisibleChars.clamp(
+      0,
+      _slowMotionDialogueFullText.length,
+    );
+    if (visible == 0) {
+      return '';
+    }
+    return _slowMotionDialogueFullText.substring(0, visible);
+  }
+
+  _SlowMotionDialogueBubbleLayout _slowMotionDialogueBubbleLayoutForAsset(
+    String assetPath,
+  ) {
+    if (_isSubordinateSlowMotionBanner(assetPath)) {
+      return const _SlowMotionDialogueBubbleLayout(
+        leftFactor: 0.38,
+        topFactor: 0.14,
+        widthFactor: 0.57,
+        heightFactor: 0.30,
+      );
+    }
+    if (_isManagerSlowMotionBanner(assetPath)) {
+      return const _SlowMotionDialogueBubbleLayout(
+        leftFactor: 0.39,
+        topFactor: 0.13,
+        widthFactor: 0.56,
+        heightFactor: 0.28,
+      );
+    }
+    return const _SlowMotionDialogueBubbleLayout(
+      leftFactor: 0.37,
+      topFactor: 0.14,
+      widthFactor: 0.58,
+      heightFactor: 0.30,
+    );
+  }
+
   void _resetSlowMotionBannerState() {
     _clearSlowMotionBannerTimer();
+    _clearSlowMotionDialogueTypingTimer();
     _slowMotionActive = false;
     _slowMotionActiveSince = null;
     _slowMotionActivationCount = 0;
     _slowMotionAssetsUsed.clear();
     _queuedSlowMotionBannerAsset = null;
     _slowMotionBannerAsset = null;
+    _slowMotionDialogueFullText = '';
+    _slowMotionDialogueVisibleChars = 0;
     _slowMotionBannerOffset = Offset.zero;
   }
 
@@ -686,11 +849,16 @@ SOFTWARE.
       return;
     }
     _clearSlowMotionBannerTimer();
+    _clearSlowMotionDialogueTypingTimer();
     final beginOffset = _entryOffsetForSlowMotionBanner(assetPath);
+    final dialogue = _pickRandomSlowMotionDialogue(assetPath);
     setState(() {
       _slowMotionBannerAsset = assetPath;
       _slowMotionBannerOffset = beginOffset;
+      _slowMotionDialogueFullText = dialogue;
+      _slowMotionDialogueVisibleChars = 0;
     });
+    _startSlowMotionDialogueTyping(dialogue);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _slowMotionBannerAsset != assetPath) {
         return;
@@ -711,6 +879,8 @@ SOFTWARE.
       }
       setState(() {
         _slowMotionBannerAsset = null;
+        _slowMotionDialogueFullText = '';
+        _slowMotionDialogueVisibleChars = 0;
         _slowMotionBannerOffset = Offset.zero;
       });
     });
@@ -1703,9 +1873,7 @@ SOFTWARE.
       if (normalized == 'true' || normalized == '1') {
         return true;
       }
-      if (normalized == 'false' ||
-          normalized == '0' ||
-          normalized.isEmpty) {
+      if (normalized == 'false' || normalized == '0' || normalized.isEmpty) {
         return false;
       }
     }
@@ -1721,9 +1889,12 @@ SOFTWARE.
     _clearStartupTimer();
     _clearWinnerMonitor();
     _clearSlowMotionBannerTimer();
+    _clearSlowMotionDialogueTypingTimer();
     _clearZoomPresetOverlayTimer();
     _showZoomPresetOverlay = false;
     _showHoldFastForwardOverlay = false;
+    _slowMotionDialogueFullText = '';
+    _slowMotionDialogueVisibleChars = 0;
     final normalizedWinner = winner.trim();
     final normalizedRanking = _normalizeRankingForResult(
       ranking,
@@ -1916,6 +2087,7 @@ SOFTWARE.
     _clearMapLabelOverlayTimer();
     _clearLicenseHoldTimer();
     _clearSlowMotionBannerTimer();
+    _clearSlowMotionDialogueTypingTimer();
     _clearZoomPresetOverlayTimer();
     final server = _localServer;
     _localServer = null;
@@ -1948,8 +2120,10 @@ SOFTWARE.
                     builder: (context, constraints) {
                       final slotWidth =
                           constraints.maxWidth / _v2ZoomPresetLabels.length;
-                      final highlightWidth =
-                          max(0.0, slotWidth - 10).toDouble();
+                      final highlightWidth = max(
+                        0.0,
+                        slotWidth - 10,
+                      ).toDouble();
                       final highlightLeft =
                           (_zoomPresetOverlayIndex * slotWidth) + 5;
                       return DecoratedBox(
@@ -2054,6 +2228,59 @@ SOFTWARE.
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildSlowMotionDialogueOverlay(String assetPath) {
+    final typedText = _slowMotionDialogueTypedText;
+    if (typedText.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final layout = _slowMotionDialogueBubbleLayoutForAsset(assetPath);
+    return Positioned.fill(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          final height = constraints.maxHeight;
+          if (!width.isFinite ||
+              !height.isFinite ||
+              width <= 1 ||
+              height <= 1) {
+            return const SizedBox.shrink();
+          }
+          final left = width * layout.leftFactor;
+          final top = height * layout.topFactor;
+          final right = width * (1 - layout.leftFactor - layout.widthFactor);
+          final bottom = height * (1 - layout.topFactor - layout.heightFactor);
+          final fontSize = (height * 0.042).clamp(12.0, 24.0).toDouble();
+          return Padding(
+            padding: EdgeInsets.fromLTRB(left, top, right, bottom),
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: Container(
+                padding: EdgeInsets.symmetric(
+                  horizontal: width * 0.012,
+                  vertical: height * 0.01,
+                ),
+                alignment: Alignment.topLeft,
+                child: Text(
+                  typedText,
+                  textAlign: TextAlign.left,
+                  maxLines: 2,
+                  softWrap: true,
+                  overflow: TextOverflow.clip,
+                  style: TextStyle(
+                    color: Colors.black.withValues(alpha: 0.88),
+                    fontSize: fontSize,
+                    height: 1.18,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -2201,30 +2428,40 @@ SOFTWARE.
                       duration: const Duration(milliseconds: 420),
                       curve: Curves.easeOutCubic,
                       offset: _slowMotionBannerOffset,
-                      child: Image.asset(
-                        _slowMotionBannerAsset!,
-                        width: double.infinity,
-                        fit: BoxFit.fitWidth,
-                        alignment: Alignment.bottomCenter,
-                        filterQuality: FilterQuality.low,
-                        cacheWidth: bannerCacheWidth,
-                        gaplessPlayback: true,
-                        errorBuilder: (context, error, stackTrace) {
-                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                            if (!mounted) {
-                              return;
-                            }
-                            _clearSlowMotionBannerTimer();
-                            if (_slowMotionBannerAsset != null) {
-                              setState(() {
-                                _slowMotionBannerAsset = null;
-                                _queuedSlowMotionBannerAsset = null;
-                                _slowMotionBannerOffset = Offset.zero;
+                      child: Stack(
+                        children: [
+                          Image.asset(
+                            _slowMotionBannerAsset!,
+                            width: double.infinity,
+                            fit: BoxFit.fitWidth,
+                            alignment: Alignment.bottomCenter,
+                            filterQuality: FilterQuality.low,
+                            cacheWidth: bannerCacheWidth,
+                            gaplessPlayback: true,
+                            errorBuilder: (context, error, stackTrace) {
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                if (!mounted) {
+                                  return;
+                                }
+                                _clearSlowMotionBannerTimer();
+                                _clearSlowMotionDialogueTypingTimer();
+                                if (_slowMotionBannerAsset != null) {
+                                  setState(() {
+                                    _slowMotionBannerAsset = null;
+                                    _slowMotionDialogueFullText = '';
+                                    _slowMotionDialogueVisibleChars = 0;
+                                    _queuedSlowMotionBannerAsset = null;
+                                    _slowMotionBannerOffset = Offset.zero;
+                                  });
+                                }
                               });
-                            }
-                          });
-                          return const SizedBox.shrink();
-                        },
+                              return const SizedBox.shrink();
+                            },
+                          ),
+                          _buildSlowMotionDialogueOverlay(
+                            _slowMotionBannerAsset!,
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -2296,4 +2533,18 @@ class _V2RuntimeMapChoice {
   final String id;
   final String title;
   final int sort;
+}
+
+class _SlowMotionDialogueBubbleLayout {
+  const _SlowMotionDialogueBubbleLayout({
+    required this.leftFactor,
+    required this.topFactor,
+    required this.widthFactor,
+    required this.heightFactor,
+  });
+
+  final double leftFactor;
+  final double topFactor;
+  final double widthFactor;
+  final double heightFactor;
 }
