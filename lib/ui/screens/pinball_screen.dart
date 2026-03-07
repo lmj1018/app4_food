@@ -272,7 +272,7 @@ SOFTWARE.
       if (!mounted) {
         return;
       }
-      if (_didStart && !_isFinishing && !_hasError) {
+      if (!_isFinishing && !_hasError) {
         final assetPath = _pickRandomAmbientBannerAsset();
         if (assetPath.isNotEmpty) {
           _queueAnySlowMotionBanner(assetPath);

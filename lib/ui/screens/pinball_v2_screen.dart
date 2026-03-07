@@ -70,7 +70,7 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
   static const int _ambientBannerFirstMaxDelayMs = 15000;
   static const int _ambientBannerSecondMinDelayMs = 30000;
   static const int _ambientBannerSecondMaxDelayMs = 40000;
-  static const int _slowMotionDialogueMaxLines = 3;
+  static const int _slowMotionDialogueMaxLines = 2;
   static const Duration _slowMotionDialogueTypingInterval = Duration(
     milliseconds: 42,
   );
@@ -707,7 +707,7 @@ SOFTWARE.
       if (!mounted) {
         return;
       }
-      if (_didStart && !_isFinishing && !_hasError) {
+      if (!_isFinishing && !_hasError) {
         final assetPath = _pickRandomAmbientBannerAsset();
         if (assetPath.isNotEmpty) {
           _queueAnySlowMotionBanner(assetPath);
@@ -764,33 +764,38 @@ SOFTWARE.
       return '';
     }
     final words = normalized.split(' ');
-    if (words.length <= 2) {
+    if (words.length <= 2 || normalized.length <= 16) {
       return normalized;
     }
-    final targetLines = normalized.length >= 24 ? 3 : 2;
-    final targetCharsPerLine = (normalized.length / targetLines).ceil();
-    final lines = <String>[];
-    var currentLine = '';
-    for (final word in words) {
-      if (currentLine.isEmpty) {
-        currentLine = word;
+    final spaces = RegExp(
+      r'\s+',
+    ).allMatches(normalized).toList(growable: false);
+    if (spaces.isEmpty) {
+      return normalized;
+    }
+    final midpoint = normalized.length ~/ 2;
+    var bestSplit = -1;
+    var bestDistance = normalized.length;
+    for (final match in spaces) {
+      final split = match.start;
+      if (split <= 0 || split >= normalized.length - 1) {
         continue;
       }
-      final candidate = '$currentLine $word';
-      final shouldBreak =
-          candidate.length > targetCharsPerLine &&
-          lines.length < targetLines - 1;
-      if (shouldBreak) {
-        lines.add(currentLine);
-        currentLine = word;
-      } else {
-        currentLine = candidate;
+      final distance = (split - midpoint).abs();
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestSplit = split;
       }
     }
-    if (currentLine.isNotEmpty) {
-      lines.add(currentLine);
+    if (bestSplit <= 0 || bestSplit >= normalized.length - 1) {
+      return normalized;
     }
-    return lines.join('\n');
+    final firstLine = normalized.substring(0, bestSplit).trim();
+    final secondLine = normalized.substring(bestSplit).trim();
+    if (firstLine.isEmpty || secondLine.isEmpty) {
+      return normalized;
+    }
+    return '$firstLine\n$secondLine';
   }
 
   void _startSlowMotionDialogueTyping(String line) {
