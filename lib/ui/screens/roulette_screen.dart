@@ -959,11 +959,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
         child: SizedBox(
           width: 44,
           height: 44,
-          child: Icon(
-            icon,
-            size: 28,
-            color: const Color(0xFF6A7E85),
-          ),
+          child: Icon(icon, size: 28, color: const Color(0xFF6A7E85)),
         ),
       ),
     );
@@ -1009,11 +1005,25 @@ class _RouletteScreenState extends State<RouletteScreen> {
   }
 
   bool _matchesManualFilter(_RouletteCandidate candidate) {
+    if (!_isMenuManual) {
+      return true;
+    }
+    final hasCuisineFilter = _selectedCuisines.isNotEmpty;
+    final hasFoodTypeFilter = _selectedFoodTypes.isNotEmpty;
+    if (!hasCuisineFilter && !hasFoodTypeFilter) {
+      return true;
+    }
     final cuisineMatched = _selectedCuisines.contains(candidate.cuisine);
     final foodTypeMatched = candidate.foodTypes.any(
       _selectedFoodTypes.contains,
     );
-    return cuisineMatched || foodTypeMatched;
+    if (hasCuisineFilter && hasFoodTypeFilter) {
+      return cuisineMatched && foodTypeMatched;
+    }
+    if (hasCuisineFilter) {
+      return cuisineMatched;
+    }
+    return foodTypeMatched;
   }
 
   bool get _hasValidGroupSelection {
@@ -1030,11 +1040,14 @@ class _RouletteScreenState extends State<RouletteScreen> {
     if (!_isMenuManual) {
       return const <_ManualGroupPool>[];
     }
+    final filtered = _baseCandidatesForMode
+        .where(_matchesManualFilter)
+        .toList();
     return <_ManualGroupPool>[
       ..._selectedCuisines.map(
         (cuisine) => _ManualGroupPool(
           label: cuisine.label,
-          candidates: _baseCandidatesForMode
+          candidates: filtered
               .where((candidate) => candidate.cuisine == cuisine)
               .toList(),
         ),
@@ -1042,7 +1055,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
       ..._selectedFoodTypes.map(
         (foodType) => _ManualGroupPool(
           label: foodType.label,
-          candidates: _baseCandidatesForMode
+          candidates: filtered
               .where((candidate) => candidate.foodTypes.contains(foodType))
               .toList(),
         ),
@@ -1137,10 +1150,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
     _PinballMapChoice(mapIndex: 1, title: 'Wheel of fortune'),
     _PinballMapChoice(mapIndex: 2, title: 'BubblePop'),
     _PinballMapChoice(mapIndex: 3, title: 'Pot of greed'),
-    _PinballMapChoice(
-      mapIndex: 4,
-      title: 'Into The Night',
-    ),
+    _PinballMapChoice(mapIndex: 4, title: 'Into The Night'),
   ];
   static const List<_V2MapChoice> _preferredV2MapChoices = <_V2MapChoice>[
     _V2MapChoice(id: 'm5_Cosmic_Odyssey', title: 'Cosmic Odyssey', sort: 110),
@@ -1473,7 +1483,10 @@ class _RouletteScreenState extends State<RouletteScreen> {
       builder: (dialogContext) {
         return Dialog(
           backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 24,
+          ),
           child: Container(
             constraints: const BoxConstraints(maxWidth: 430, maxHeight: 620),
             decoration: BoxDecoration(
@@ -1524,7 +1537,9 @@ class _RouletteScreenState extends State<RouletteScreen> {
                               child: InkWell(
                                 borderRadius: BorderRadius.circular(14),
                                 onTap: () {
-                                  Navigator.of(dialogContext).pop(option.config);
+                                  Navigator.of(
+                                    dialogContext,
+                                  ).pop(option.config);
                                 },
                                 child: Container(
                                   width: double.infinity,
@@ -2245,8 +2260,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
       return false;
     }
     final winnerName = outcome.winner;
-    final rankingNames = args.mode == RouletteMode.custom &&
-            waitForFullRanking
+    final rankingNames = args.mode == RouletteMode.custom && waitForFullRanking
         ? outcome.ranking
         : const <String>[];
     final matchedStore =
