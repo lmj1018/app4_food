@@ -12,7 +12,7 @@ import {
   stableHash,
 } from './snapshot_manager.js';
 
-const RUNTIME_REVISION = 'v2-runtime-r20260307-07';
+const RUNTIME_REVISION = 'v2-runtime-r20260307-08';
 const STATUS_ELEMENT_ID = 'v2Status';
 const DEFAULT_MARBLE_RADIUS = 0.25;
 const MIN_MARBLE_RADIUS = 0.05;
@@ -619,8 +619,8 @@ function drawMiniMapEntitiesWithFilledWalls(ctx, params, fallbackDrawEntities) {
 
 function resolveMiniMapWorldBoundsFromEntities(entitiesInput) {
   const entities = Array.isArray(entitiesInput) ? entitiesInput : [];
-  let minX = 0;
-  let maxX = MINIMAP_BASE_WORLD_WIDTH;
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
   for (let index = 0; index < entities.length; index += 1) {
     const bounds = computeMiniMapEntityBoundsX(entities[index]);
     if (!bounds) {
@@ -633,10 +633,8 @@ function resolveMiniMapWorldBoundsFromEntities(entitiesInput) {
       maxX = bounds.maxX;
     }
   }
-  if (!Number.isFinite(minX)) {
+  if (!Number.isFinite(minX) || !Number.isFinite(maxX)) {
     minX = 0;
-  }
-  if (!Number.isFinite(maxX)) {
     maxX = MINIMAP_BASE_WORLD_WIDTH;
   }
   const width = Math.max(1, maxX - minX);
