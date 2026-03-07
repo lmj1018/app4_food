@@ -12,7 +12,7 @@ import {
   stableHash,
 } from './snapshot_manager.js';
 
-const RUNTIME_REVISION = 'v2-runtime-r20260302-04';
+const RUNTIME_REVISION = 'v2-runtime-r20260307-01';
 const STATUS_ELEMENT_ID = 'v2Status';
 const DEFAULT_MARBLE_RADIUS = 0.25;
 const MIN_MARBLE_RADIUS = 0.05;
@@ -1519,6 +1519,18 @@ function buildDefaultMapIfNeeded(mapId) {
   };
 }
 
+function alignStageZoomYToGoalY(stage) {
+  if (!stage || typeof stage !== 'object') {
+    return;
+  }
+  const goalY = toFiniteNumber(stage.goalY, NaN);
+  if (!Number.isFinite(goalY) || goalY <= 0) {
+    return;
+  }
+  // Force slow-motion trigger zone to goal line vicinity.
+  stage.zoomY = goalY;
+}
+
 async function applyMapJson(rawMapJson) {
   const roulette = await ensureRouletteReady();
   patchPhysicsStep();
@@ -1535,6 +1547,7 @@ async function applyMapJson(rawMapJson) {
   const mapMarbleRadius = resolveConfiguredMarbleRadiusFromMap(mapJson);
   if (stage && typeof stage === 'object') {
     stage.marbleRadius = mapMarbleRadius;
+    alignStageZoomYToGoalY(stage);
   }
 
   control.paused = true;
@@ -1592,6 +1605,7 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
   const mapMarbleRadius = resolveConfiguredMarbleRadiusFromMap(mapJson);
   if (stage && typeof stage === 'object') {
     stage.marbleRadius = mapMarbleRadius;
+    alignStageZoomYToGoalY(stage);
   }
 
   const physics = getPhysics();
