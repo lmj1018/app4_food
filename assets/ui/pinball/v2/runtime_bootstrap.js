@@ -12,12 +12,15 @@ import {
   stableHash,
 } from './snapshot_manager.js';
 
-const RUNTIME_REVISION = 'v2-runtime-r20260307-02';
+const RUNTIME_REVISION = 'v2-runtime-r20260307-03';
 const STATUS_ELEMENT_ID = 'v2Status';
 const DEFAULT_MARBLE_RADIUS = 0.25;
 const MIN_MARBLE_RADIUS = 0.05;
 const MAX_MARBLE_RADIUS = 4;
-const SLOW_MOTION_GOAL_LEAD_Y = 8;
+const SLOW_MOTION_RANGE_Y = 6;
+const SLOW_MOTION_ENTER_MARGIN_Y = 7;
+const MINIMAP_BASE_WORLD_WIDTH = 26;
+const MINIMAP_BASE_SCREEN_SCALE = 4;
 
 function toFiniteNumber(value, fallback) {
   const num = Number(value);
@@ -451,6 +454,184 @@ function cacheMiniMapUiObject() {
   return found;
 }
 
+function computeMiniMapEntityBoundsX(entity) {
+  if (!entity || typeof entity !== 'object') {
+    return null;
+  }
+  const shape = entity.shape && typeof entity.shape === 'object'
+    ? entity.shape
+    : null;
+  if (!shape || typeof shape.type !== 'string') {
+    return null;
+  }
+  const x = toFiniteNumber(entity.x, 0);
+  const angle = toFiniteNumber(entity.angle, 0);
+  if (shape.type === 'circle') {
+    const radius = Math.max(0.001, toFiniteNumber(shape.radius, 0.2));
+    return { minX: x - radius, maxX: x + radius };
+  }
+  if (shape.type === 'box') {
+    const halfWidth = Math.max(0.001, toFiniteNumber(shape.width, 0.2));
+    const halfHeight = Math.max(0.001, toFiniteNumber(shape.height, 0.2));
+    const totalAngle = angle + toFiniteNumber(shape.rotation, 0);
+    const absCos = Math.abs(Math.cos(totalAngle));
+    const absSin = Math.abs(Math.sin(totalAngle));
+    const extentX = absCos * halfWidth + absSin * halfHeight;
+    return { minX: x - extentX, maxX: x + extentX };
+  }
+  if (shape.type === 'polyline') {
+    const points = Array.isArray(shape.points) ? shape.points : [];
+    if (points.length <= 0) {
+      return null;
+    }
+    const cosA = Math.cos(angle);
+    const sinA = Math.sin(angle);
+    let minX = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    for (let index = 0; index < points.length; index += 1) {
+      const point = points[index];
+      if (!Array.isArray(point)) {
+        continue;
+      }
+      const px = toFiniteNumber(point[0], 0);
+      const py = toFiniteNumber(point[1], 0);
+      const worldX = x + (px * cosA) - (py * sinA);
+      if (worldX < minX) {
+        minX = worldX;
+      }
+      if (worldX > maxX) {
+        maxX = worldX;
+      }
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(maxX)) {
+      return null;
+    }
+    return { minX, maxX };
+  }
+  return null;
+}
+
+function resolveMiniMapWorldBounds(params) {
+  const entities = Array.isArray(params && params.entities) ? params.entities : [];
+  let minX = 0;
+  let maxX = MINIMAP_BASE_WORLD_WIDTH;
+  for (let index = 0; index < entities.length; index += 1) {
+    const bounds = computeMiniMapEntityBoundsX(entities[index]);
+    if (!bounds) {
+      continue;
+    }
+    if (bounds.minX < minX) {
+      minX = bounds.minX;
+    }
+    if (bounds.maxX > maxX) {
+      maxX = bounds.maxX;
+    }
+  }
+  if (!Number.isFinite(minX)) {
+    minX = 0;
+  }
+  if (!Number.isFinite(maxX)) {
+    maxX = MINIMAP_BASE_WORLD_WIDTH;
+  }
+  const width = Math.max(1, maxX - minX);
+  const scaleX = MINIMAP_BASE_WORLD_WIDTH / width;
+  return { minX, maxX, width, scaleX };
+}
+
+function patchMiniMapUiObject() {
+  const miniMap = cacheMiniMapUiObject();
+  if (!miniMap) {
+    return false;
+  }
+  if (miniMap.__v2AutoFitPatched === true) {
+    return true;
+  }
+  const originalDrawEntities = typeof miniMap.drawEntities === 'function'
+    ? miniMap.drawEntities.bind(miniMap)
+    : null;
+  const originalDrawMarbles = typeof miniMap.drawMarbles === 'function'
+    ? miniMap.drawMarbles.bind(miniMap)
+    : null;
+  const originalDrawViewport = typeof miniMap.drawViewport === 'function'
+    ? miniMap.drawViewport.bind(miniMap)
+    : null;
+  if (!originalDrawEntities || !originalDrawMarbles || !originalDrawViewport) {
+    return false;
+  }
+  miniMap.__v2MiniMapWorldBounds = {
+    minX: 0,
+    maxX: MINIMAP_BASE_WORLD_WIDTH,
+    width: MINIMAP_BASE_WORLD_WIDTH,
+    scaleX: 1,
+  };
+  miniMap.render = function patchedMiniMapRender(ctx, params) {
+    if (!ctx || !params || !params.stage) {
+      return;
+    }
+    const stage = params.stage;
+    const goalY = Math.max(1, toFiniteNumber(stage.goalY, 1));
+    this.boundingBox.h = MINIMAP_BASE_SCREEN_SCALE * goalY;
+    this.lastParams = params;
+    this.ctx = ctx;
+    const bounds = resolveMiniMapWorldBounds(params);
+    this.__v2MiniMapWorldBounds = bounds;
+
+    ctx.save();
+    ctx.fillStyle = params.theme && params.theme.minimapBackground
+      ? params.theme.minimapBackground
+      : '#fefefe';
+    ctx.translate(this.boundingBox.x, this.boundingBox.y);
+    ctx.scale(MINIMAP_BASE_SCREEN_SCALE, MINIMAP_BASE_SCREEN_SCALE);
+    ctx.beginPath();
+    ctx.rect(0, 0, MINIMAP_BASE_WORLD_WIDTH, goalY);
+    ctx.clip();
+    ctx.fillRect(0, 0, MINIMAP_BASE_WORLD_WIDTH, goalY);
+    ctx.save();
+    ctx.scale(bounds.scaleX, 1);
+    ctx.translate(-bounds.minX, 0);
+    this.ctx.lineWidth = 3 / (toFiniteNumber(params.camera && params.camera.zoom, 0) + 30);
+    originalDrawEntities(params.entities, params.theme);
+    originalDrawMarbles(params);
+    originalDrawViewport(params);
+    ctx.restore();
+    ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = 'green';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(this.boundingBox.x, this.boundingBox.y, this.boundingBox.w, this.boundingBox.h);
+    ctx.restore();
+  };
+  miniMap.onMouseMove = function patchedMiniMapMouseMove(localPoint) {
+    if (!localPoint) {
+      this.mousePosition = null;
+      if (typeof this._onViewportChangeHandler === 'function') {
+        this._onViewportChangeHandler();
+      }
+      return;
+    }
+    if (!this.lastParams) {
+      return;
+    }
+    this.mousePosition = {
+      x: toFiniteNumber(localPoint.x, 0),
+      y: toFiniteNumber(localPoint.y, 0),
+    };
+    const bounds = this.__v2MiniMapWorldBounds && typeof this.__v2MiniMapWorldBounds === 'object'
+      ? this.__v2MiniMapWorldBounds
+      : { minX: 0, scaleX: 1 };
+    const scaleX = Math.max(0.0001, toFiniteNumber(bounds.scaleX, 1));
+    const worldX = toFiniteNumber(bounds.minX, 0)
+      + (this.mousePosition.x / MINIMAP_BASE_SCREEN_SCALE) / scaleX;
+    const worldY = this.mousePosition.y / MINIMAP_BASE_SCREEN_SCALE;
+    if (typeof this._onViewportChangeHandler === 'function') {
+      this._onViewportChangeHandler({ x: worldX, y: worldY });
+    }
+  };
+  miniMap.__v2AutoFitPatched = true;
+  return true;
+}
+
 function setMiniMapUiVisibility(visible = true) {
   const roulette = getRoulette();
   if (!roulette) {
@@ -465,12 +646,14 @@ function setMiniMapUiVisibility(visible = true) {
 
   if (shouldShow) {
     if (existingIndex >= 0) {
+      patchMiniMapUiObject();
       return { ok: true, visible: true };
     }
     const cachedMiniMap = cacheMiniMapUiObject();
     if (!cachedMiniMap) {
       return { ok: false, reason: 'mini map ui unavailable' };
     }
+    patchMiniMapUiObject();
     uiObjects.push(cachedMiniMap);
     return { ok: true, visible: true };
   }
@@ -796,6 +979,54 @@ function updateSkillPolicy(nowMs) {
     || toFiniteNumber(roulette._goalDist, Number.POSITIVE_INFINITY) < 5;
   const disableBySlowMotion = control.mapDisableSkillsInSlowMotion !== false && slowNearGoal;
   setSkillsEnabled(!(inWarmup || disableBySlowMotion));
+}
+
+function patchRouletteSlowMotionRange() {
+  const roulette = getRoulette();
+  if (!roulette || typeof roulette._calcTimeScale !== 'function') {
+    return false;
+  }
+  if (roulette.__v2SlowMotionRangePatched === true) {
+    return true;
+  }
+  roulette.__v2OriginalCalcTimeScale = roulette._calcTimeScale.bind(roulette);
+  roulette._calcTimeScale = function patchedCalcTimeScale() {
+    const stage = this && this._stage && typeof this._stage === 'object'
+      ? this._stage
+      : null;
+    if (!stage) {
+      return 1;
+    }
+    const winnerRank = Math.max(0, Math.floor(toFiniteNumber(this._winnerRank, 0)));
+    const winners = Array.isArray(this._winners) ? this._winners : [];
+    const marbles = Array.isArray(this._marbles) ? this._marbles : [];
+    const targetIndex = winnerRank - winners.length;
+    const targetMarble = marbles[targetIndex];
+    const hasNeighbor = !!(marbles[targetIndex - 1] || marbles[targetIndex + 1]);
+
+    const zoomY = toFiniteNumber(stage.zoomY, NaN);
+    const targetY = toFiniteNumber(targetMarble && targetMarble.y, NaN);
+    const goalDist = toFiniteNumber(this._goalDist, Number.POSITIVE_INFINITY);
+    const slowRangeY = Math.max(5, toFiniteNumber(stage.slowMotionRangeY, SLOW_MOTION_RANGE_Y));
+    const enterMarginY = Math.max(
+      slowRangeY,
+      toFiniteNumber(stage.slowMotionEnterMarginY, SLOW_MOTION_ENTER_MARGIN_Y),
+    );
+
+    if (
+      winners.length < winnerRank + 1
+      && goalDist < slowRangeY
+      && Number.isFinite(targetY)
+      && Number.isFinite(zoomY)
+      && targetY > zoomY - enterMarginY
+      && hasNeighbor
+    ) {
+      return Math.max(0.2, goalDist / slowRangeY);
+    }
+    return 1;
+  };
+  roulette.__v2SlowMotionRangePatched = true;
+  return true;
 }
 
 function getSortedMarbleIds(physics) {
@@ -1528,9 +1759,8 @@ function alignStageZoomYToGoalY(stage) {
   if (!Number.isFinite(goalY) || goalY <= 0) {
     return;
   }
-  // Keep slow-motion near goal line, but trigger a bit earlier than the exact finish.
-  const leadY = Math.max(0, toFiniteNumber(stage.slowMotionLeadY, SLOW_MOTION_GOAL_LEAD_Y));
-  stage.zoomY = Math.max(0.01, goalY - leadY);
+  // Keep slow-motion trigger location anchored to goal line.
+  stage.zoomY = goalY;
 }
 
 async function applyMapJson(rawMapJson) {
@@ -1540,6 +1770,8 @@ async function applyMapJson(rawMapJson) {
   patchPhysicsGetEntities();
   patchRendererEntityVisuals();
   wireGoalEvent();
+  patchRouletteSlowMotionRange();
+  patchMiniMapUiObject();
 
   const mapJson = rawMapJson && typeof rawMapJson === 'object'
     ? deepClone(rawMapJson)
@@ -1598,6 +1830,8 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
   patchPhysicsGetEntities();
   patchRendererEntityVisuals();
   wireGoalEvent();
+  patchRouletteSlowMotionRange();
+  patchMiniMapUiObject();
 
   const mapJson = rawMapJson && typeof rawMapJson === 'object'
     ? deepClone(rawMapJson)
@@ -2114,6 +2348,8 @@ async function start() {
   patchPhysicsStep();
   patchPhysicsCreateEntities();
   patchPhysicsGetEntities();
+  patchRouletteSlowMotionRange();
+  patchMiniMapUiObject();
   postDebug('start_begin', {
     candidateCount: Array.isArray(control.candidates) ? control.candidates.length : 0,
     marbleCountBefore: Array.isArray(roulette && roulette._marbles) ? roulette._marbles.length : 0,
@@ -2274,12 +2510,14 @@ async function init(payload = {}) {
     await ensureRouletteReady();
     ensureCanvasFillLayout();
     cacheMiniMapUiObject();
+    patchMiniMapUiObject();
     control.fromApp = detectFromAppContext(safePayload);
     applyAppVisualCompatibility();
     patchPhysicsStep();
     patchPhysicsCreateEntities();
     patchPhysicsGetEntities();
     wireGoalEvent();
+    patchRouletteSlowMotionRange();
     startTickLoop();
 
     const mapIdFromQuery = new URLSearchParams(window.location.search).get('mapId') || '';
