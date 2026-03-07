@@ -66,6 +66,9 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
   static const Duration _slowMotionFirstTrigger = Duration(seconds: 4);
   static const Duration _slowMotionSecondTrigger = Duration(seconds: 8);
   static const Duration _slowMotionBannerDuration = Duration(seconds: 3);
+  static const Duration _ambientBannerInitialDelay = Duration(seconds: 5);
+  static const int _ambientBannerMinDelayMs = 9000;
+  static const int _ambientBannerMaxDelayMs = 17000;
   static const Duration _slowMotionDialogueTypingInterval = Duration(
     milliseconds: 42,
   );
@@ -139,6 +142,7 @@ SOFTWARE.
 ''';
 
   final SharedPreferencesCacheStore _cacheStore = SharedPreferencesCacheStore();
+  final Random _random = Random();
   late final WebViewController _controller;
   HttpServer? _localServer;
   Uri? _localBaseUri;
@@ -175,6 +179,7 @@ SOFTWARE.
   Offset _slowMotionBannerOffset = Offset.zero;
   Timer? _slowMotionBannerTimer;
   Timer? _slowMotionDialogueTypingTimer;
+  Timer? _ambientBannerTimer;
   Timer? _countdownTimer;
   Timer? _zoomPresetOverlayTimer;
   DateTime? _countdownStartedAt;
@@ -652,6 +657,66 @@ SOFTWARE.
     _slowMotionDialogueTypingTimer = null;
   }
 
+  void _clearAmbientBannerTimer() {
+    _ambientBannerTimer?.cancel();
+    _ambientBannerTimer = null;
+  }
+
+  Duration _nextAmbientBannerDelay() {
+    final minMs = _ambientBannerMinDelayMs;
+    final maxMs = _ambientBannerMaxDelayMs;
+    if (maxMs <= minMs) {
+      return Duration(milliseconds: max(1, minMs));
+    }
+    final delta = maxMs - minMs + 1;
+    return Duration(milliseconds: minMs + _random.nextInt(delta));
+  }
+
+  String _pickRandomAmbientBannerAsset() {
+    final source = _slowMotionAvailableAssets.isNotEmpty
+        ? _slowMotionAvailableAssets.toList(growable: false)
+        : _slowMotionBannerAssets;
+    if (source.isEmpty) {
+      return '';
+    }
+    var index = _random.nextInt(source.length);
+    if (source.length > 1 && source[index] == _slowMotionBannerAsset) {
+      index = (index + 1 + _random.nextInt(source.length - 1)) % source.length;
+    }
+    return source[index];
+  }
+
+  void _queueAnySlowMotionBanner(String assetPath) {
+    if (assetPath.isEmpty) {
+      return;
+    }
+    if (_slowMotionBannerAsset == null) {
+      _showSlowMotionBanner(assetPath);
+      return;
+    }
+    _queuedSlowMotionBannerAsset = assetPath;
+  }
+
+  void _scheduleAmbientBanner([Duration? delay]) {
+    _clearAmbientBannerTimer();
+    _ambientBannerTimer = Timer(delay ?? _nextAmbientBannerDelay(), () {
+      if (!mounted) {
+        return;
+      }
+      if (_didStart && !_isFinishing && !_hasError) {
+        final assetPath = _pickRandomAmbientBannerAsset();
+        if (assetPath.isNotEmpty) {
+          _queueAnySlowMotionBanner(assetPath);
+        }
+      }
+      _scheduleAmbientBanner();
+    });
+  }
+
+  void _startAmbientBannerLoop() {
+    _scheduleAmbientBanner(_ambientBannerInitialDelay);
+  }
+
   bool _isSubordinateSlowMotionBanner(String assetPath) {
     return assetPath.toLowerCase().endsWith('p1_1.png');
   }
@@ -669,9 +734,9 @@ SOFTWARE.
     if (source.isEmpty) {
       return '';
     }
-    var index = Random().nextInt(source.length);
+    var index = _random.nextInt(source.length);
     if (source.length > 1 && source[index] == _lastSlowMotionDialogue) {
-      index = (index + 1 + Random().nextInt(source.length - 1)) % source.length;
+      index = (index + 1 + _random.nextInt(source.length - 1)) % source.length;
     }
     final picked = source[index];
     _lastSlowMotionDialogue = picked;
@@ -736,31 +801,32 @@ SOFTWARE.
   ) {
     if (_isSubordinateSlowMotionBanner(assetPath)) {
       return const _SlowMotionDialogueBubbleLayout(
-        leftFactor: 0.38,
-        topFactor: 0.14,
-        widthFactor: 0.57,
-        heightFactor: 0.30,
+        leftFactor: 0.41,
+        topFactor: 0.215,
+        widthFactor: 0.53,
+        heightFactor: 0.19,
       );
     }
     if (_isManagerSlowMotionBanner(assetPath)) {
       return const _SlowMotionDialogueBubbleLayout(
-        leftFactor: 0.39,
-        topFactor: 0.13,
-        widthFactor: 0.56,
-        heightFactor: 0.28,
+        leftFactor: 0.44,
+        topFactor: 0.165,
+        widthFactor: 0.49,
+        heightFactor: 0.155,
       );
     }
     return const _SlowMotionDialogueBubbleLayout(
-      leftFactor: 0.37,
-      topFactor: 0.14,
-      widthFactor: 0.58,
-      heightFactor: 0.30,
+      leftFactor: 0.41,
+      topFactor: 0.18,
+      widthFactor: 0.51,
+      heightFactor: 0.17,
     );
   }
 
   void _resetSlowMotionBannerState() {
     _clearSlowMotionBannerTimer();
     _clearSlowMotionDialogueTypingTimer();
+    _clearAmbientBannerTimer();
     _slowMotionActive = false;
     _slowMotionActiveSince = null;
     _slowMotionActivationCount = 0;
@@ -827,7 +893,7 @@ SOFTWARE.
     if (remaining.length == 1) {
       return remaining.first;
     }
-    return remaining[Random().nextInt(remaining.length)];
+    return remaining[_random.nextInt(remaining.length)];
   }
 
   void _enqueueSlowMotionBanner(String assetPath) {
@@ -845,7 +911,13 @@ SOFTWARE.
   }
 
   void _showSlowMotionBanner(String assetPath) {
-    if (!mounted || !_slowMotionAvailableAssets.contains(assetPath)) {
+    if (!mounted) {
+      return;
+    }
+    final knownAsset =
+        _slowMotionAvailableAssets.contains(assetPath) ||
+        _slowMotionBannerAssets.contains(assetPath);
+    if (!knownAsset) {
       return;
     }
     _clearSlowMotionBannerTimer();
@@ -1657,6 +1729,7 @@ SOFTWARE.
       _syncMapLabel(_coerceStringKeyMap(parsed?['state']), forceShow: true);
       _setStatus('게임 진행 중...', clearError: true);
       _startWinnerMonitor();
+      _startAmbientBannerLoop();
     } catch (error) {
       _setStatus('V2 초기화 오류: $error', error: true);
     } finally {
@@ -1890,6 +1963,7 @@ SOFTWARE.
     _clearWinnerMonitor();
     _clearSlowMotionBannerTimer();
     _clearSlowMotionDialogueTypingTimer();
+    _clearAmbientBannerTimer();
     _clearZoomPresetOverlayTimer();
     _showZoomPresetOverlay = false;
     _showHoldFastForwardOverlay = false;
@@ -2088,6 +2162,7 @@ SOFTWARE.
     _clearLicenseHoldTimer();
     _clearSlowMotionBannerTimer();
     _clearSlowMotionDialogueTypingTimer();
+    _clearAmbientBannerTimer();
     _clearZoomPresetOverlayTimer();
     final server = _localServer;
     _localServer = null;
@@ -2253,21 +2328,26 @@ SOFTWARE.
           final top = height * layout.topFactor;
           final right = width * (1 - layout.leftFactor - layout.widthFactor);
           final bottom = height * (1 - layout.topFactor - layout.heightFactor);
-          final fontSize = (height * 0.042).clamp(12.0, 24.0).toDouble();
+          final bubbleWidth = max(1.0, width * layout.widthFactor);
+          final bubbleHeight = max(1.0, height * layout.heightFactor);
+          final fontSize = min(
+            bubbleWidth / 12.5,
+            bubbleHeight / 2.4,
+          ).clamp(15.0, 32.0).toDouble();
           return Padding(
             padding: EdgeInsets.fromLTRB(left, top, right, bottom),
             child: Align(
               alignment: Alignment.topLeft,
               child: Container(
                 padding: EdgeInsets.symmetric(
-                  horizontal: width * 0.012,
-                  vertical: height * 0.01,
+                  horizontal: bubbleWidth * 0.045,
+                  vertical: bubbleHeight * 0.12,
                 ),
                 alignment: Alignment.topLeft,
                 child: Text(
                   typedText,
                   textAlign: TextAlign.left,
-                  maxLines: 2,
+                  maxLines: 3,
                   softWrap: true,
                   overflow: TextOverflow.clip,
                   style: TextStyle(
