@@ -12,7 +12,7 @@ import {
   stableHash,
 } from './snapshot_manager.js';
 
-const RUNTIME_REVISION = 'v2-runtime-r20260307-08';
+const RUNTIME_REVISION = 'v2-runtime-r20260307-09';
 const STATUS_ELEMENT_ID = 'v2Status';
 const DEFAULT_MARBLE_RADIUS = 0.25;
 const MIN_MARBLE_RADIUS = 0.05;
@@ -642,6 +642,26 @@ function resolveMiniMapWorldBoundsFromEntities(entitiesInput) {
   return { minX, maxX, width, fitScale };
 }
 
+function resolveMiniMapWorldBoundsFromStageHints(compiledMap) {
+  const compiled = compiledMap && typeof compiledMap === 'object' ? compiledMap : null;
+  const sourceStage = compiled
+    && compiled.sourceMap
+    && compiled.sourceMap.stage
+    && typeof compiled.sourceMap.stage === 'object'
+    ? compiled.sourceMap.stage
+    : null;
+  const leftWallX = toFiniteNumber(sourceStage && sourceStage.leftWallX, NaN);
+  const rightWallX = toFiniteNumber(sourceStage && sourceStage.rightWallX, NaN);
+  if (!Number.isFinite(leftWallX) || !Number.isFinite(rightWallX) || rightWallX <= leftWallX + 0.05) {
+    return null;
+  }
+  const minX = leftWallX;
+  const maxX = rightWallX;
+  const width = Math.max(1, maxX - minX);
+  const fitScale = Math.min(1, MINIMAP_BASE_WORLD_WIDTH / width);
+  return { minX, maxX, width, fitScale };
+}
+
 function resolveMiniMapWorldBounds(params) {
   const stable = control && control.miniMapWorldBounds && typeof control.miniMapWorldBounds === 'object'
     ? control.miniMapWorldBounds
@@ -660,6 +680,10 @@ function resolveMiniMapWorldBounds(params) {
 
 function buildStableMiniMapWorldBoundsFromCompiled(compiledMap) {
   const compiled = compiledMap && typeof compiledMap === 'object' ? compiledMap : null;
+  const fromStageHints = resolveMiniMapWorldBoundsFromStageHints(compiled);
+  if (fromStageHints) {
+    return fromStageHints;
+  }
   const stage = compiled && compiled.stage && typeof compiled.stage === 'object'
     ? compiled.stage
     : null;
