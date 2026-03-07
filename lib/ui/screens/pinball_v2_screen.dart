@@ -126,7 +126,12 @@ SOFTWARE.
   Timer? _countdownTimer;
   Timer? _zoomPresetOverlayTimer;
   DateTime? _countdownStartedAt;
+  DateTime? _countdownLastTickAt;
   int _countdownRemainingMs = 0;
+  double _countdownRemainingMsExact = 0;
+  double _countdownSpeedMultiplier = 1;
+  double _countdownTimeScale = 1;
+  double _countdownRate = 1;
   Future<void>? _viewPrefsLoadFuture;
   int _v2ZoomPresetIndex = _v2ZoomPresetDefault;
   int _zoomPresetOverlayIndex = _v2ZoomPresetDefault;
@@ -253,6 +258,11 @@ SOFTWARE.
   void _resetCountdown() {
     _clearCountdownTimer();
     _countdownStartedAt = null;
+    _countdownLastTickAt = null;
+    _countdownSpeedMultiplier = 1;
+    _countdownTimeScale = 1;
+    _countdownRate = 1;
+    _countdownRemainingMsExact = _countdownTotalMs.toDouble();
     _countdownRemainingMs = _countdownTotalMs;
   }
 
@@ -260,20 +270,36 @@ SOFTWARE.
     if (_countdownStartedAt != null) {
       return;
     }
-    _countdownStartedAt = DateTime.now();
+    final now = DateTime.now();
+    _countdownStartedAt = now;
+    _countdownLastTickAt = now;
+    _countdownRemainingMsExact = _countdownTotalMs.toDouble();
     _countdownRemainingMs = _countdownTotalMs;
     _countdownTimer = Timer.periodic(_countdownTickInterval, (_) {
       if (!mounted || _isFinishing) {
         _clearCountdownTimer();
         return;
       }
-      final startedAt = _countdownStartedAt;
-      if (startedAt == null) {
-        _clearCountdownTimer();
+      final lastTickAt = _countdownLastTickAt;
+      if (lastTickAt == null) {
+        _countdownLastTickAt = DateTime.now();
         return;
       }
-      final elapsedMs = DateTime.now().difference(startedAt).inMilliseconds;
-      final remainingMs = max(0, _countdownTotalMs - elapsedMs);
+      final tickNow = DateTime.now();
+      _countdownLastTickAt = tickNow;
+      final deltaMs = tickNow.difference(lastTickAt).inMicroseconds / 1000.0;
+      if (!deltaMs.isFinite || deltaMs <= 0) {
+        return;
+      }
+      final scaledDeltaMs = deltaMs * _countdownRate;
+      if (!scaledDeltaMs.isFinite || scaledDeltaMs <= 0) {
+        return;
+      }
+      _countdownRemainingMsExact = max(
+        0.0,
+        _countdownRemainingMsExact - scaledDeltaMs,
+      );
+      final remainingMs = max(0, _countdownRemainingMsExact.ceil());
       if (remainingMs == _countdownRemainingMs) {
         return;
       }
@@ -293,6 +319,40 @@ SOFTWARE.
         .toStringAsFixed(2)
         .padLeft(5, '0');
     return '${minutes.toString().padLeft(2, '0')}:$secondText초';
+  }
+
+  double _toDouble(dynamic value, {double fallback = double.nan}) {
+    if (value is num) {
+      return value.toDouble();
+    }
+    if (value is String) {
+      return double.tryParse(value.trim()) ?? fallback;
+    }
+    return fallback;
+  }
+
+  double _normalizeCountdownRate(double value) {
+    if (!value.isFinite || value <= 0) {
+      return 1;
+    }
+    return value.clamp(0.1, 6).toDouble();
+  }
+
+  void _syncCountdownRate({
+    dynamic speedMultiplier,
+    dynamic timeScale,
+  }) {
+    final nextSpeed = _toDouble(speedMultiplier, fallback: double.nan);
+    if (nextSpeed.isFinite && nextSpeed > 0) {
+      _countdownSpeedMultiplier = nextSpeed;
+    }
+    final nextScale = _toDouble(timeScale, fallback: double.nan);
+    if (nextScale.isFinite && nextScale > 0) {
+      _countdownTimeScale = nextScale;
+    }
+    _countdownRate = _normalizeCountdownRate(
+      _countdownSpeedMultiplier * _countdownTimeScale,
+    );
   }
 
   int _normalizeV2ZoomPresetIndex(dynamic value) {
@@ -1480,6 +1540,10 @@ SOFTWARE.
           ranking.isNotEmpty ? ranking : stateRanking,
           winner: winner,
         );
+        _syncCountdownRate(
+          speedMultiplier: stateMap?['speedMultiplier'],
+          timeScale: parsed?['timeScale'],
+        );
         final slowMotionActive = parsed?['slowMotionActive'] == true;
         _updateSlowMotionBanner(slowMotionActive);
         if (stateMap != null && mounted) {
@@ -1700,6 +1764,7 @@ SOFTWARE.
     if (event == 'holdFastForwardChanged') {
       final payload = _coerceStringKeyMap(parsed['payload']);
       _setHoldFastForwardOverlay(_toBool(payload?['active']));
+      _syncCountdownRate(speedMultiplier: payload?['speedMultiplier']);
       _pushRuntimeDebug('hold_fast_forward_changed', payload);
       return;
     }
