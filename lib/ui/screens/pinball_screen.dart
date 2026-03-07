@@ -1160,6 +1160,7 @@ SOFTWARE.
         lastState = state;
         _updateSlowMotionBanner(state);
         _syncMapLabel(state);
+        _syncMiniMapVisible(state);
         final hasRoulette = state?['hasRoulette'] == true;
         final running = state?['running'] == true;
         final count = _toInt(state?['count']);
@@ -1578,12 +1579,36 @@ SOFTWARE.
     return ready;
   };
 
+  const isMiniMapUiObject = (value) => {
+    if (!value || typeof value !== 'object') {
+      return false;
+    }
+    return typeof value.render === 'function'
+      && typeof value.drawMarbles === 'function'
+      && typeof value.drawViewport === 'function'
+      && typeof value.onMouseMove === 'function';
+  };
+
   const clearAuxUiObjects = () => {
     if (!window.roulette || !Array.isArray(window.roulette._uiObjects)) {
       return;
     }
-    if (window.roulette._uiObjects.length > 0) {
-      window.roulette._uiObjects = [];
+    const keepMiniMap = control.miniMapVisible === true;
+    const uiObjects = window.roulette._uiObjects;
+    let cachedMiniMap = isMiniMapUiObject(window.roulette.__appMiniMapUiObject)
+      ? window.roulette.__appMiniMapUiObject
+      : null;
+    if (!cachedMiniMap) {
+      cachedMiniMap = uiObjects.find((item) => isMiniMapUiObject(item)) || null;
+    }
+    if (cachedMiniMap) {
+      window.roulette.__appMiniMapUiObject = cachedMiniMap;
+    }
+    if (uiObjects.length > 0) {
+      window.roulette._uiObjects =
+        keepMiniMap && cachedMiniMap ? [cachedMiniMap] : [];
+    } else if (keepMiniMap && cachedMiniMap) {
+      window.roulette._uiObjects = [cachedMiniMap];
     }
     if (!control.uiObjectAddPatched && typeof window.roulette.addUiObject === 'function') {
       window.roulette.addUiObject = () => {};
@@ -6932,6 +6957,9 @@ SOFTWARE.
 
   return JSON.stringify({
     hasRoulette: !!window.roulette,
+    miniMapVisible: Array.isArray(window.roulette && window.roulette._uiObjects)
+      ? window.roulette._uiObjects.some((item) => isMiniMapUiObject(item))
+      : false,
     bridgeStartFn: typeof window.startPinballRoulette === 'function',
     prepared: !!control.prepared,
     mapReady: mapReadyNow,
@@ -7372,6 +7400,7 @@ SOFTWARE.
       final runtime = tickState ?? await _readRuntimeResult();
       _updateSlowMotionBanner(runtime);
       _syncMapLabel(runtime);
+      _syncMiniMapVisible(runtime);
       final winner = _extractWinnerName(runtime?['winner']);
       final top3 = _extractStringList(runtime?['top3']);
       final ranking = _extractStringList(runtime?['ranking']);
@@ -7433,6 +7462,15 @@ SOFTWARE.
     const js = '''
 (() => {
   const control = window.__appPinballControl || {};
+  const isMiniMapUiObject = (value) => {
+    if (!value || typeof value !== 'object') {
+      return false;
+    }
+    return typeof value.render === 'function'
+      && typeof value.drawMarbles === 'function'
+      && typeof value.drawViewport === 'function'
+      && typeof value.onMouseMove === 'function';
+  };
   const liveRanking = Array.isArray(window.roulette && window.roulette._winners)
     ? window.roulette._winners
         .map((marble) => (marble && typeof marble.name === 'string' ? marble.name.trim() : ''))
@@ -7481,6 +7519,9 @@ SOFTWARE.
     mapLabel: typeof control.mapLabel === 'string' ? control.mapLabel : '',
     mapIndex: Number.isFinite(control.lastMapIndex) ? control.lastMapIndex : -1,
     mapVariantId: typeof control.mapVariantId === 'string' ? control.mapVariantId : '',
+    miniMapVisible: Array.isArray(window.roulette && window.roulette._uiObjects)
+      ? window.roulette._uiObjects.some((item) => isMiniMapUiObject(item))
+      : false,
     running: !!(window.roulette && window.roulette._isRunning === true),
     count: window.roulette && typeof window.roulette.getCount === 'function'
       ? window.roulette.getCount()
@@ -8044,28 +8085,64 @@ SOFTWARE.
                   alignment: Alignment.topRight,
                   child: Padding(
                     padding: const EdgeInsets.only(right: 12, top: 10),
-                    child: IgnorePointer(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.55),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.22),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Material(
+                          type: MaterialType.transparency,
+                          child: InkWell(
+                            onTap: _toggleMiniMapVisible,
+                            borderRadius: BorderRadius.circular(10),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.55),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: Colors.white.withValues(
+                                    alpha: _miniMapVisible ? 0.56 : 0.22,
+                                  ),
+                                ),
+                              ),
+                              child: const Text(
+                                'map',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
                           ),
                         ),
-                        child: Text(
-                          _countdownText,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
+                        const SizedBox(width: 6),
+                        IgnorePointer(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.55),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.22),
+                              ),
+                            ),
+                            child: Text(
+                              _countdownText,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
                           ),
                         ),
-                      ),
+                      ],
                     ),
                   ),
                 ),

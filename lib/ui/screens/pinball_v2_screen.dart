@@ -201,6 +201,7 @@ SOFTWARE.
   bool _hasError = false;
   String _statusText = 'V2 엔진 로딩 중...';
   String _mapLabel = '';
+  bool _miniMapVisible = false;
   bool _showMapLabelOverlay = false;
   bool _didShowMapLabelOverlayOnce = false;
   Timer? _mapLabelOverlayTimer;
@@ -417,7 +418,7 @@ SOFTWARE.
     final secondText = ((remaining % 60000) / 1000)
         .toStringAsFixed(2)
         .padLeft(5, '0');
-    return '${minutes.toString().padLeft(2, '0')}:$secondText초';
+    return '${minutes.toString().padLeft(2, '0')}:$secondText';
   }
 
   double _toDouble(dynamic value, {double fallback = double.nan}) {
@@ -1692,6 +1693,55 @@ SOFTWARE.
     });
   }
 
+  void _syncMiniMapVisible(Map<String, dynamic>? state) {
+    final visible = state?['miniMapVisible'] == true;
+    if (visible == _miniMapVisible) {
+      return;
+    }
+    if (!mounted) {
+      _miniMapVisible = visible;
+      return;
+    }
+    setState(() {
+      _miniMapVisible = visible;
+    });
+  }
+
+  Future<void> _setMiniMapVisible(bool visible) async {
+    try {
+      final raw = await _controller.runJavaScriptReturningResult('''
+(() => {
+  const api = window.__appPinballV2;
+  if (!api || typeof api.setMiniMapVisible !== 'function') {
+    return JSON.stringify({ ok: false, visible: false, reason: 'v2 api unavailable' });
+  }
+  const result = api.setMiniMapVisible(${visible ? 'true' : 'false'});
+  const state = typeof api.getState === 'function' ? api.getState() : null;
+  const nextVisible = !!(state && state.miniMapVisible === true);
+  const ok = !!(result && result.ok === true);
+  return JSON.stringify({
+    ok,
+    visible: nextVisible,
+    reason: result && result.reason ? String(result.reason) : '',
+  });
+})()
+''');
+      final parsed = _decodeJsMap(raw);
+      final nextVisible = parsed?['visible'] == true;
+      if (!mounted) {
+        _miniMapVisible = nextVisible;
+        return;
+      }
+      setState(() {
+        _miniMapVisible = nextVisible;
+      });
+    } catch (_) {}
+  }
+
+  void _toggleMiniMapVisible() {
+    unawaited(_setMiniMapVisible(!_miniMapVisible));
+  }
+
   Future<void> _startPinball() async {
     if (!mounted ||
         _isStarting ||
@@ -1899,7 +1949,9 @@ SOFTWARE.
       });
       _didStart = true;
       _clearStartupTimer();
-      _syncMapLabel(_coerceStringKeyMap(parsed?['state']), forceShow: true);
+      final initState = _coerceStringKeyMap(parsed?['state']);
+      _syncMapLabel(initState, forceShow: true);
+      _syncMiniMapVisible(initState);
       _setStatus('게임 진행 중...', clearError: true);
       _startWinnerMonitor();
     } catch (error) {
@@ -1964,6 +2016,7 @@ SOFTWARE.
         _updateSlowMotionBanner(slowMotionActive);
         if (stateMap != null && mounted) {
           _syncMapLabel(stateMap);
+          _syncMiniMapVisible(stateMap);
           final running = stateMap['running'] == true;
           if (!running && !_hasError) {
             final text = (stateMap['statusText'] ?? '').toString().trim();
@@ -2645,28 +2698,64 @@ SOFTWARE.
                 alignment: Alignment.topRight,
                 child: Padding(
                   padding: const EdgeInsets.only(right: 12, top: 10),
-                  child: IgnorePointer(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.55),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.22),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Material(
+                        type: MaterialType.transparency,
+                        child: InkWell(
+                          onTap: _toggleMiniMapVisible,
+                          borderRadius: BorderRadius.circular(10),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.55),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: Colors.white.withValues(
+                                  alpha: _miniMapVisible ? 0.56 : 0.22,
+                                ),
+                              ),
+                            ),
+                            child: const Text(
+                              'map',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
                         ),
                       ),
-                      child: Text(
-                        _countdownText,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w800,
+                      const SizedBox(width: 6),
+                      IgnorePointer(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.55),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.22),
+                            ),
+                          ),
+                          child: Text(
+                            _countdownText,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
                         ),
                       ),
-                    ),
+                    ],
                   ),
                 ),
               ),
