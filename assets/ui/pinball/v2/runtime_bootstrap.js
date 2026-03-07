@@ -12,11 +12,12 @@ import {
   stableHash,
 } from './snapshot_manager.js';
 
-const RUNTIME_REVISION = 'v2-runtime-r20260307-01';
+const RUNTIME_REVISION = 'v2-runtime-r20260307-02';
 const STATUS_ELEMENT_ID = 'v2Status';
 const DEFAULT_MARBLE_RADIUS = 0.25;
 const MIN_MARBLE_RADIUS = 0.05;
 const MAX_MARBLE_RADIUS = 4;
+const SLOW_MOTION_GOAL_LEAD_Y = 8;
 
 function toFiniteNumber(value, fallback) {
   const num = Number(value);
@@ -1527,8 +1528,9 @@ function alignStageZoomYToGoalY(stage) {
   if (!Number.isFinite(goalY) || goalY <= 0) {
     return;
   }
-  // Force slow-motion trigger zone to goal line vicinity.
-  stage.zoomY = goalY;
+  // Keep slow-motion near goal line, but trigger a bit earlier than the exact finish.
+  const leadY = Math.max(0, toFiniteNumber(stage.slowMotionLeadY, SLOW_MOTION_GOAL_LEAD_Y));
+  stage.zoomY = Math.max(0.01, goalY - leadY);
 }
 
 async function applyMapJson(rawMapJson) {
