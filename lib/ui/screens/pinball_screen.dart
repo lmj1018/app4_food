@@ -1990,13 +1990,48 @@ SOFTWARE.
       return;
     }
     try {
+      const stage = window.roulette && window.roulette._stage && typeof window.roulette._stage === 'object'
+        ? window.roulette._stage
+        : null;
+      const spawn = stage && stage.spawn && typeof stage.spawn === 'object'
+        ? stage.spawn
+        : null;
+      let cameraPositioned = false;
+      if (spawn && typeof camera.setPosition === 'function') {
+        const marbles = Array.isArray(window.roulette._marbles) ? window.roulette._marbles : [];
+        const marbleCount = Math.max(1, marbles.length);
+        const columns = Math.max(1, Math.floor(Number(spawn.columns) || 1));
+        const spacingX = Math.max(0.08, Number(spawn.spacingX) || 0.6);
+        const spawnX = Number(spawn.x);
+        const spawnY = Number(spawn.y);
+        if (Number.isFinite(spawnX) && Number.isFinite(spawnY)) {
+          const rows = Math.max(1, Math.ceil(marbleCount / columns));
+          const visibleRows = Math.max(1, Math.floor(Number(spawn.visibleRows) || rows));
+          const rowSpacing = 1;
+          const lineDelta = -Math.max(0, Math.ceil(rows - visibleRows)) * rowSpacing;
+          const centerCols = Math.max(1, Math.min(columns, marbleCount));
+          const centerRows = Math.max(1, Math.min(rows, visibleRows));
+          camera.setPosition(
+            {
+              x: spawnX + (centerCols - 1) * spacingX * 0.5,
+              y: spawnY + lineDelta + (centerRows - 1) * rowSpacing * 0.5,
+            },
+            false,
+          );
+          cameraPositioned = true;
+        }
+      }
       const marbles = Array.isArray(window.roulette._marbles) ? window.roulette._marbles : [];
-      if (marbles.length > 0 && typeof camera.setPosition === 'function') {
+      if (!cameraPositioned && marbles.length > 0 && typeof camera.setPosition === 'function') {
         const lead = marbles[0];
         const lx = Number(lead && lead.x);
         const ly = Number(lead && lead.y);
-        if (Number.isFinite(lx) && Number.isFinite(ly)) {
-          camera.setPosition({ x: lx, y: ly });
+        if (
+          Number.isFinite(lx) &&
+          Number.isFinite(ly) &&
+          (Math.abs(lx) > 0.0001 || Math.abs(ly) > 0.0001)
+        ) {
+          camera.setPosition({ x: lx, y: ly }, false);
         }
       }
     } catch (_) {

@@ -2035,6 +2035,110 @@ function alignSpawnToStage() {
   }
 }
 
+function resolveSpawnCameraCenter(rouletteInput = null) {
+  const roulette = rouletteInput && typeof rouletteInput === 'object'
+    ? rouletteInput
+    : getRoulette();
+  if (!roulette) {
+    return null;
+  }
+
+  const marbles = Array.isArray(roulette._marbles) ? roulette._marbles : [];
+  const positioned = marbles
+    .map((marble) => ({
+      x: toFiniteNumber(marble && marble.x, NaN),
+      y: toFiniteNumber(marble && marble.y, NaN),
+    }))
+    .filter((point) => (
+      Number.isFinite(point.x)
+      && Number.isFinite(point.y)
+      && (Math.abs(point.x) > 0.0001 || Math.abs(point.y) > 0.0001)
+    ));
+  if (positioned.length > 0) {
+    let sumX = 0;
+    let sumY = 0;
+    const sampleCount = Math.min(positioned.length, 12);
+    for (let index = 0; index < sampleCount; index += 1) {
+      sumX += positioned[index].x;
+      sumY += positioned[index].y;
+    }
+    return {
+      x: sumX / sampleCount,
+      y: sumY / sampleCount,
+    };
+  }
+
+  const stage = roulette._stage && typeof roulette._stage === 'object'
+    ? roulette._stage
+    : null;
+  const spawn = stage && stage.spawn && typeof stage.spawn === 'object'
+    ? stage.spawn
+    : null;
+  if (!spawn) {
+    return null;
+  }
+
+  const marbleCount = Math.max(1, marbles.length);
+  const marbleRadius = getConfiguredMarbleRadius();
+  const columns = Math.max(1, Math.floor(toFiniteNumber(spawn.columns, 10)));
+  const spacingX = Math.max(
+    0.08,
+    toFiniteNumber(spawn.spacingX, 0.6),
+    marbleRadius * 2.05,
+  );
+  const rowSpacing = Math.max(1, marbleRadius * 2.05);
+  const spawnX = toFiniteNumber(spawn.x, NaN);
+  const spawnY = toFiniteNumber(spawn.y, NaN);
+  if (!Number.isFinite(spawnX) || !Number.isFinite(spawnY)) {
+    return null;
+  }
+
+  const visibleRows = Math.max(1, Math.floor(toFiniteNumber(spawn.visibleRows, 5)));
+  const rows = Math.max(1, Math.ceil(marbleCount / columns));
+  const lineDelta = -Math.max(0, Math.ceil(rows - visibleRows)) * rowSpacing;
+  const centerCols = Math.max(1, Math.min(columns, marbleCount));
+  const centerRows = Math.max(1, Math.min(rows, visibleRows));
+  return {
+    x: spawnX + (centerCols - 1) * spacingX * 0.5,
+    y: spawnY + lineDelta + (centerRows - 1) * rowSpacing * 0.5,
+  };
+}
+
+function focusCameraOnSpawn() {
+  const roulette = getRoulette();
+  const camera = roulette && roulette._camera && typeof roulette._camera === 'object'
+    ? roulette._camera
+    : null;
+  if (!camera) {
+    return false;
+  }
+  const center = resolveSpawnCameraCenter(roulette);
+  if (!center) {
+    return false;
+  }
+  try {
+    if (typeof camera.lock === 'function') {
+      camera.lock(false);
+    }
+  } catch (_) {
+  }
+  if (typeof camera.setPosition === 'function') {
+    try {
+      camera.setPosition({ x: center.x, y: center.y }, false);
+      return true;
+    } catch (_) {
+    }
+  }
+  if (typeof camera.initializePosition === 'function') {
+    try {
+      camera.initializePosition({ x: center.x, y: center.y });
+      return true;
+    } catch (_) {
+    }
+  }
+  return false;
+}
+
 function readStageSpawnSnapshot(stageInput) {
   const stage = stageInput && typeof stageInput === 'object' ? stageInput : null;
   const spawn = stage && stage.spawn && typeof stage.spawn === 'object'
@@ -2285,6 +2389,7 @@ async function applyMapJson(rawMapJson) {
     alignSpawnToStage();
     enforceMarbleBodyPhysics();
   }
+  focusCameraOnSpawn();
   patchRendererMarbleImages();
   setStatus(`map loaded: ${control.mapId}`);
   return { ok: true, mapId: control.mapId };
@@ -2367,6 +2472,9 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
     alignSpawnToStage();
   }
   enforceMarbleBodyPhysics();
+  if (!(preserveRunning && runningBefore)) {
+    focusCameraOnSpawn();
+  }
   patchRendererMarbleImages();
 
   setWinningRank(control.winningRank);
@@ -2417,6 +2525,7 @@ async function setCandidates(rawCandidates) {
   suppressMarbleCooldownIndicator();
   alignSpawnToStage();
   enforceMarbleBodyPhysics();
+  focusCameraOnSpawn();
   patchRendererMarbleImages();
   setWinningRank(control.winningRank);
   setStatus(`candidates set: ${candidates.length}`);
@@ -2766,6 +2875,7 @@ async function restoreSnapshot(snapshot, opts = {}) {
   if (opts.autoResume === true) {
     control.paused = false;
     control.spinStartedAt = Date.now();
+    focusCameraOnSpawn();
     roulette.start();
   }
 }
@@ -2832,6 +2942,7 @@ async function start() {
     suppressMarbleCooldownIndicator();
     alignSpawnToStage();
     enforceMarbleBodyPhysics();
+    focusCameraOnSpawn();
     patchRendererMarbleImages();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     marbles = Array.isArray(roulette._marbles) ? roulette._marbles : [];
@@ -2847,10 +2958,14 @@ async function start() {
   control.spinStartedAt = Date.now();
   setSkillsEnabled(false);
   roulette._isRunning = false;
+  focusCameraOnSpawn();
   roulette.start();
   // Some engine paths recreate marble fixtures on spin start; re-apply map radius shortly after.
   enforceMarbleBodyPhysics();
   patchRendererMarbleImages();
+  window.setTimeout(() => {
+    focusCameraOnSpawn();
+  }, 30);
   window.setTimeout(() => {
     enforceMarbleBodyPhysics();
     patchRendererMarbleImages();
@@ -2905,6 +3020,7 @@ async function reset() {
     roulette.setMarbles(control.candidates.slice());
     alignSpawnToStage();
     enforceMarbleBodyPhysics();
+    focusCameraOnSpawn();
   }
   patchRendererMarbleImages();
   setWinningRank(control.winningRank);
