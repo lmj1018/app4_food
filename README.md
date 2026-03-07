@@ -30,6 +30,30 @@ flutter run `
   --dart-define=KAKAO_REST_API_KEY=a8c6ab6cd9c6d0dc45680c5d8866e69d
 ```
 
+## 무선 디버깅 스플래시 멈춤 대응
+
+무선 디버깅에서 앱이 스플래시에서 멈추면 아래 순서로 복구합니다.
+
+```powershell
+adb kill-server
+adb start-server
+```
+
+디바이스에서 무선 디버깅을 껐다가 다시 켜고 재페어링한 뒤, 디버그 대기 관련 전역값을 초기화합니다.
+
+```powershell
+adb shell settings put global debug_app ""
+adb shell settings put global wait_for_debugger 0
+```
+
+그 다음 다시 실행합니다.
+
+```powershell
+flutter run -d <wireless-device-id>
+```
+
+참고: `adb`가 PATH에 없으면 Android SDK의 `platform-tools/adb` 절대경로로 같은 명령을 실행합니다.
+
 ## 카카오 API 설정
 
 - Kakao Developers에서 앱 생성
