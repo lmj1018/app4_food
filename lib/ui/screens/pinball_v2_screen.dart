@@ -39,9 +39,18 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
   static const String _pinballAssetDir = 'assets/ui/pinball';
   static const String _v2ZoomPresetIndexCacheKey =
       'pinball_v2_zoom_preset_index_v1';
-  static const int _v2ZoomPresetUnset = -1;
+  static const List<String> _v2ZoomPresetLabels = <String>[
+    '1',
+    '1.5',
+    '2',
+    '2.5',
+    '3',
+  ];
+  static const int _v2ZoomPresetDefault = 0;
   static const int _v2ZoomPresetMin = 0;
-  static const int _v2ZoomPresetMax = 2;
+  static const int _v2ZoomPresetMax = _v2ZoomPresetLabels.length - 1;
+  static const Duration _zoomPresetOverlayDuration =
+      Duration(milliseconds: 1500);
   static const Duration _startupTimeout = Duration(seconds: 30);
   static const int _fullRankingWaitTimeoutTicks = 180;
   static const int _normalCountdownTotalMs = 60000;
@@ -115,10 +124,14 @@ SOFTWARE.
   Offset _slowMotionBannerOffset = Offset.zero;
   Timer? _slowMotionBannerTimer;
   Timer? _countdownTimer;
+  Timer? _zoomPresetOverlayTimer;
   DateTime? _countdownStartedAt;
   int _countdownRemainingMs = 0;
   Future<void>? _viewPrefsLoadFuture;
-  int _v2ZoomPresetIndex = _v2ZoomPresetUnset;
+  int _v2ZoomPresetIndex = _v2ZoomPresetDefault;
+  int _zoomPresetOverlayIndex = _v2ZoomPresetDefault;
+  bool _showZoomPresetOverlay = false;
+  bool _showHoldFastForwardOverlay = false;
 
   List<String>? _cachedCandidates;
   String? _candidateImageKey;
@@ -283,9 +296,9 @@ SOFTWARE.
   }
 
   int _normalizeV2ZoomPresetIndex(dynamic value) {
-    final parsed = _toInt(value, fallback: _v2ZoomPresetUnset);
+    final parsed = _toInt(value, fallback: _v2ZoomPresetDefault);
     if (parsed < _v2ZoomPresetMin) {
-      return _v2ZoomPresetUnset;
+      return _v2ZoomPresetDefault;
     }
     if (parsed > _v2ZoomPresetMax) {
       return _v2ZoomPresetMax;
@@ -299,6 +312,7 @@ SOFTWARE.
       return;
     }
     _v2ZoomPresetIndex = _normalizeV2ZoomPresetIndex(raw);
+    _zoomPresetOverlayIndex = _v2ZoomPresetIndex;
   }
 
   Future<void> _ensureV2ViewPrefsLoaded() async {
@@ -310,6 +324,40 @@ SOFTWARE.
     final normalized = _normalizeV2ZoomPresetIndex(rawValue);
     _v2ZoomPresetIndex = normalized;
     await _cacheStore.write(_v2ZoomPresetIndexCacheKey, normalized.toString());
+  }
+
+  void _clearZoomPresetOverlayTimer() {
+    _zoomPresetOverlayTimer?.cancel();
+    _zoomPresetOverlayTimer = null;
+  }
+
+  void _showZoomPresetOverlayForIndex(dynamic rawValue) {
+    final normalized = _normalizeV2ZoomPresetIndex(rawValue);
+    _clearZoomPresetOverlayTimer();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _zoomPresetOverlayIndex = normalized;
+      _showZoomPresetOverlay = true;
+    });
+    _zoomPresetOverlayTimer = Timer(_zoomPresetOverlayDuration, () {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _showZoomPresetOverlay = false;
+      });
+    });
+  }
+
+  void _setHoldFastForwardOverlay(bool active) {
+    if (!mounted || _showHoldFastForwardOverlay == active) {
+      return;
+    }
+    setState(() {
+      _showHoldFastForwardOverlay = active;
+    });
   }
 
   void _clearLicenseHoldTimer() {
@@ -1562,6 +1610,27 @@ SOFTWARE.
     return fallback;
   }
 
+  bool _toBool(dynamic value, {bool fallback = false}) {
+    if (value is bool) {
+      return value;
+    }
+    if (value is num) {
+      return value != 0;
+    }
+    if (value is String) {
+      final normalized = value.trim().toLowerCase();
+      if (normalized == 'true' || normalized == '1') {
+        return true;
+      }
+      if (normalized == 'false' ||
+          normalized == '0' ||
+          normalized.isEmpty) {
+        return false;
+      }
+    }
+    return fallback;
+  }
+
   void _finish(String winner, {List<String> ranking = const <String>[]}) {
     if (_isFinishing || !mounted) {
       return;
@@ -1571,6 +1640,9 @@ SOFTWARE.
     _clearStartupTimer();
     _clearWinnerMonitor();
     _clearSlowMotionBannerTimer();
+    _clearZoomPresetOverlayTimer();
+    _showZoomPresetOverlay = false;
+    _showHoldFastForwardOverlay = false;
     final normalizedWinner = winner.trim();
     final normalizedRanking = _normalizeRankingForResult(
       ranking,
@@ -1601,7 +1673,17 @@ SOFTWARE.
       final payload = _coerceStringKeyMap(parsed['payload']);
       final presetIndex = _normalizeV2ZoomPresetIndex(payload?['presetIndex']);
       await _persistV2ZoomPresetIndex(presetIndex);
+      if (!mounted) {
+        return;
+      }
+      _showZoomPresetOverlayForIndex(presetIndex);
       _pushRuntimeDebug('zoom_preset_changed', payload);
+      return;
+    }
+    if (event == 'holdFastForwardChanged') {
+      final payload = _coerceStringKeyMap(parsed['payload']);
+      _setHoldFastForwardOverlay(_toBool(payload?['active']));
+      _pushRuntimeDebug('hold_fast_forward_changed', payload);
       return;
     }
     if (event == 'goal') {
@@ -1648,6 +1730,7 @@ SOFTWARE.
     _clearStartupTimer();
     _clearWinnerMonitor();
     _clearMapLabelOverlayTimer();
+    _clearZoomPresetOverlayTimer();
     _resetCountdown();
     _resetSlowMotionBannerState();
     setState(() {
@@ -1659,6 +1742,8 @@ SOFTWARE.
       _mapLabel = '';
       _showMapLabelOverlay = false;
       _didShowMapLabelOverlayOnce = false;
+      _showZoomPresetOverlay = false;
+      _showHoldFastForwardOverlay = false;
     });
     await _loadPage(clearCache: true);
   }
@@ -1690,6 +1775,7 @@ SOFTWARE.
             }
             _pushRuntimeDebug('page_started');
             _resetCountdown();
+            _clearZoomPresetOverlayTimer();
             setState(() {
               _pageLoaded = false;
               _didStart = false;
@@ -1699,6 +1785,8 @@ SOFTWARE.
               _mapLabel = '';
               _showMapLabelOverlay = false;
               _didShowMapLabelOverlayOnce = false;
+              _showZoomPresetOverlay = false;
+              _showHoldFastForwardOverlay = false;
             });
           },
           onPageFinished: (_) async {
@@ -1746,12 +1834,146 @@ SOFTWARE.
     _clearMapLabelOverlayTimer();
     _clearLicenseHoldTimer();
     _clearSlowMotionBannerTimer();
+    _clearZoomPresetOverlayTimer();
     final server = _localServer;
     _localServer = null;
     if (server != null) {
       unawaited(server.close(force: true));
     }
     super.dispose();
+  }
+
+  Widget _buildZoomPresetOverlay(BuildContext context) {
+    if (!_didStart || _hasError || _isFinishing) {
+      return const SizedBox.shrink();
+    }
+    return SafeArea(
+      child: IgnorePointer(
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          child: Padding(
+            padding: const EdgeInsets.only(left: 16, right: 16, bottom: 24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 320),
+              child: AnimatedOpacity(
+                opacity: _showZoomPresetOverlay ? 1 : 0,
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final slotWidth =
+                          constraints.maxWidth / _v2ZoomPresetLabels.length;
+                      final highlightWidth =
+                          max(0.0, slotWidth - 10).toDouble();
+                      final highlightLeft =
+                          (_zoomPresetOverlayIndex * slotWidth) + 5;
+                      return DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.66),
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.14),
+                          ),
+                          boxShadow: <BoxShadow>[
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.24),
+                              blurRadius: 18,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        child: Stack(
+                          children: [
+                            AnimatedPositioned(
+                              duration: const Duration(milliseconds: 240),
+                              curve: Curves.easeOutCubic,
+                              left: highlightLeft,
+                              top: 6,
+                              width: highlightWidth,
+                              height: 44,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.08),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color: Colors.white,
+                                    width: 1.35,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Row(
+                              children: List<Widget>.generate(
+                                _v2ZoomPresetLabels.length,
+                                (index) {
+                                  final isActive =
+                                      index == _zoomPresetOverlayIndex;
+                                  return Expanded(
+                                    child: Center(
+                                      child: Text(
+                                        _v2ZoomPresetLabels[index],
+                                        style: TextStyle(
+                                          color: isActive
+                                              ? Colors.white
+                                              : Colors.white.withValues(
+                                                  alpha: 0.68,
+                                                ),
+                                          fontSize: 15,
+                                          fontWeight: isActive
+                                              ? FontWeight.w800
+                                              : FontWeight.w600,
+                                          letterSpacing: -0.2,
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHoldFastForwardOverlay() {
+    if (!_didStart || _hasError || _isFinishing) {
+      return const SizedBox.shrink();
+    }
+    return IgnorePointer(
+      child: Center(
+        child: AnimatedOpacity(
+          opacity: _showHoldFastForwardOverlay ? 1 : 0,
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+          child: Container(
+            width: 128,
+            height: 128,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.black.withValues(alpha: 0.18),
+            ),
+            alignment: Alignment.center,
+            child: Icon(
+              Icons.fast_forward_rounded,
+              size: 84,
+              color: Colors.white.withValues(alpha: 0.46),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -1927,6 +2149,8 @@ SOFTWARE.
                 ),
               ),
             ),
+          _buildHoldFastForwardOverlay(),
+          _buildZoomPresetOverlay(context),
           SafeArea(
             child: Align(
               alignment: Alignment.bottomRight,

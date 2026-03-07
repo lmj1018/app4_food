@@ -12,7 +12,7 @@ import {
   stableHash,
 } from './snapshot_manager.js';
 
-const RUNTIME_REVISION = 'v2-runtime-r20260307-10';
+const RUNTIME_REVISION = 'v2-runtime-r20260307-11';
 const STATUS_ELEMENT_ID = 'v2Status';
 const DEFAULT_MARBLE_RADIUS = 0.25;
 const MIN_MARBLE_RADIUS = 0.05;
@@ -21,7 +21,7 @@ const SLOW_MOTION_RANGE_Y = 10;
 const SLOW_MOTION_ENTER_MARGIN_Y = 12;
 const MINIMAP_BASE_WORLD_WIDTH = 26;
 const MINIMAP_BASE_SCREEN_SCALE = 4;
-const APP_TOUCH_ZOOM_PRESETS = [1.3, 1.6, 2.0];
+const APP_TOUCH_ZOOM_PRESETS = [1, 1.5, 2, 2.5, 3];
 const APP_TOUCH_FAST_FORWARD_SPEED = 2;
 const APP_TOUCH_HOLD_DELAY_MS = 360;
 const APP_TOUCH_TAP_MAX_MOVE_PX = 18;
@@ -83,7 +83,7 @@ const control = {
   mapJson: null,
   compiledMap: null,
   miniMapWorldBounds: null,
-  appZoomPresetIndex: -1,
+  appZoomPresetIndex: 0,
   appZoomMultiplier: 1,
   appHoldFastForwardActive: false,
   appHoldFastForwardPrevSpeed: 1,
@@ -242,7 +242,7 @@ function normalizeAppZoomPresetIndex(value, fallback = -1) {
     return fallback;
   }
   if (numeric < 0) {
-    return -1;
+    return 0;
   }
   if (numeric >= APP_TOUCH_ZOOM_PRESETS.length) {
     return APP_TOUCH_ZOOM_PRESETS.length - 1;
@@ -251,10 +251,7 @@ function normalizeAppZoomPresetIndex(value, fallback = -1) {
 }
 
 function resolveAppZoomMultiplier(presetIndex) {
-  const normalized = normalizeAppZoomPresetIndex(presetIndex, -1);
-  if (normalized < 0) {
-    return 1;
-  }
+  const normalized = normalizeAppZoomPresetIndex(presetIndex, 0);
   return toFiniteNumber(APP_TOUCH_ZOOM_PRESETS[normalized], 1);
 }
 
@@ -340,10 +337,8 @@ function setAppZoomPresetIndex(presetIndex, options = {}) {
 }
 
 function cycleAppZoomPreset() {
-  const currentIndex = normalizeAppZoomPresetIndex(control.appZoomPresetIndex, -1);
-  const nextIndex = currentIndex < 0
-    ? 0
-    : (currentIndex + 1) % APP_TOUCH_ZOOM_PRESETS.length;
+  const currentIndex = normalizeAppZoomPresetIndex(control.appZoomPresetIndex, 0);
+  const nextIndex = (currentIndex + 1) % APP_TOUCH_ZOOM_PRESETS.length;
   return setAppZoomPresetIndex(nextIndex);
 }
 
@@ -366,17 +361,26 @@ function setAppHoldFastForwardActive(active) {
     control.appHoldFastForwardPrevSpeed = Math.max(0.1, currentSpeed);
     roulette.setSpeed(APP_TOUCH_FAST_FORWARD_SPEED);
     control.appHoldFastForwardActive = true;
+    postBridge('holdFastForwardChanged', {
+      active: true,
+      speedMultiplier: APP_TOUCH_FAST_FORWARD_SPEED,
+    });
     return { ok: true, active: true, speed: APP_TOUCH_FAST_FORWARD_SPEED };
   }
   if (control.appHoldFastForwardActive !== true) {
     return { ok: true, active: false };
   }
-  roulette.setSpeed(Math.max(0.1, toFiniteNumber(control.appHoldFastForwardPrevSpeed, 1)));
+  const restoreSpeed = Math.max(0.1, toFiniteNumber(control.appHoldFastForwardPrevSpeed, 1));
+  roulette.setSpeed(restoreSpeed);
   control.appHoldFastForwardActive = false;
+  postBridge('holdFastForwardChanged', {
+    active: false,
+    speedMultiplier: restoreSpeed,
+  });
   return {
     ok: true,
     active: false,
-    speed: Math.max(0.1, toFiniteNumber(control.appHoldFastForwardPrevSpeed, 1)),
+    speed: restoreSpeed,
   };
 }
 
