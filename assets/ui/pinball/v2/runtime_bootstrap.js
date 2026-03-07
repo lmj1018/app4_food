@@ -12,7 +12,7 @@ import {
   stableHash,
 } from './snapshot_manager.js';
 
-const RUNTIME_REVISION = 'v2-runtime-r20260307-09';
+const RUNTIME_REVISION = 'v2-runtime-r20260307-10';
 const STATUS_ELEMENT_ID = 'v2Status';
 const DEFAULT_MARBLE_RADIUS = 0.25;
 const MIN_MARBLE_RADIUS = 0.05;
@@ -21,6 +21,10 @@ const SLOW_MOTION_RANGE_Y = 10;
 const SLOW_MOTION_ENTER_MARGIN_Y = 12;
 const MINIMAP_BASE_WORLD_WIDTH = 26;
 const MINIMAP_BASE_SCREEN_SCALE = 4;
+const APP_TOUCH_ZOOM_PRESETS = [1.3, 1.6, 2.0];
+const APP_TOUCH_FAST_FORWARD_SPEED = 2;
+const APP_TOUCH_HOLD_DELAY_MS = 360;
+const APP_TOUCH_TAP_MAX_MOVE_PX = 18;
 const MINIMAP_FILLED_WALL_TYPES = new Set([
   'wall_polyline',
   'wall_filled_polyline',
@@ -79,6 +83,10 @@ const control = {
   mapJson: null,
   compiledMap: null,
   miniMapWorldBounds: null,
+  appZoomPresetIndex: -1,
+  appZoomMultiplier: 1,
+  appHoldFastForwardActive: false,
+  appHoldFastForwardPrevSpeed: 1,
   marbleRadius: DEFAULT_MARBLE_RADIUS,
   candidates: [],
   winningRank: 1,
@@ -226,6 +234,150 @@ function setStatus(text) {
   if (element) {
     element.textContent = message;
   }
+}
+
+function normalizeAppZoomPresetIndex(value, fallback = -1) {
+  const numeric = Math.floor(toFiniteNumber(value, fallback));
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+  if (numeric < 0) {
+    return -1;
+  }
+  if (numeric >= APP_TOUCH_ZOOM_PRESETS.length) {
+    return APP_TOUCH_ZOOM_PRESETS.length - 1;
+  }
+  return numeric;
+}
+
+function resolveAppZoomMultiplier(presetIndex) {
+  const normalized = normalizeAppZoomPresetIndex(presetIndex, -1);
+  if (normalized < 0) {
+    return 1;
+  }
+  return toFiniteNumber(APP_TOUCH_ZOOM_PRESETS[normalized], 1);
+}
+
+function forEachCameraZoomField(camera, visitor) {
+  if (!camera || typeof visitor !== 'function') {
+    return;
+  }
+  const keys = ['_zoom', '_targetZoom', 'zoom'];
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index];
+    let value = NaN;
+    try {
+      value = toFiniteNumber(camera[key], NaN);
+    } catch (_) {
+      value = NaN;
+    }
+    if (!Number.isFinite(value) || value <= 0) {
+      continue;
+    }
+    visitor(key, value);
+  }
+}
+
+function restoreCameraZoomScale(camera) {
+  const appliedScale = Math.max(0.0001, toFiniteNumber(camera && camera.__v2AppZoomScaleApplied, 1));
+  if (!camera || Math.abs(appliedScale - 1) <= 0.0001) {
+    return;
+  }
+  forEachCameraZoomField(camera, (key, value) => {
+    try {
+      camera[key] = value / appliedScale;
+    } catch (_) {
+    }
+  });
+  camera.__v2AppZoomScaleApplied = 1;
+}
+
+function applyCameraZoomScale(camera) {
+  const nextScale = Math.max(0.0001, toFiniteNumber(control.appZoomMultiplier, 1));
+  if (!camera) {
+    return;
+  }
+  forEachCameraZoomField(camera, (key, value) => {
+    try {
+      camera[key] = value * nextScale;
+    } catch (_) {
+    }
+  });
+  camera.__v2AppZoomScaleApplied = nextScale;
+}
+
+function resyncCameraZoomScale(cameraInput = null) {
+  const roulette = getRoulette();
+  const camera = cameraInput && typeof cameraInput === 'object'
+    ? cameraInput
+    : roulette && roulette._camera && typeof roulette._camera === 'object'
+      ? roulette._camera
+      : null;
+  if (!camera) {
+    return false;
+  }
+  restoreCameraZoomScale(camera);
+  applyCameraZoomScale(camera);
+  return true;
+}
+
+function setAppZoomPresetIndex(presetIndex, options = {}) {
+  const normalized = normalizeAppZoomPresetIndex(presetIndex, control.appZoomPresetIndex);
+  control.appZoomPresetIndex = normalized;
+  control.appZoomMultiplier = resolveAppZoomMultiplier(normalized);
+  resyncCameraZoomScale();
+  if (options.broadcast !== false) {
+    postBridge('zoomPresetChanged', {
+      presetIndex: control.appZoomPresetIndex,
+      zoomMultiplier: control.appZoomMultiplier,
+    });
+  }
+  return {
+    ok: true,
+    presetIndex: control.appZoomPresetIndex,
+    zoomMultiplier: control.appZoomMultiplier,
+  };
+}
+
+function cycleAppZoomPreset() {
+  const currentIndex = normalizeAppZoomPresetIndex(control.appZoomPresetIndex, -1);
+  const nextIndex = currentIndex < 0
+    ? 0
+    : (currentIndex + 1) % APP_TOUCH_ZOOM_PRESETS.length;
+  return setAppZoomPresetIndex(nextIndex);
+}
+
+function setAppHoldFastForwardActive(active) {
+  const roulette = getRoulette();
+  if (!roulette || typeof roulette.setSpeed !== 'function') {
+    return { ok: false, reason: 'roulette unavailable' };
+  }
+  const shouldEnable = active === true;
+  if (shouldEnable) {
+    if (control.paused || roulette._isRunning !== true) {
+      return { ok: true, active: false };
+    }
+    if (control.appHoldFastForwardActive === true) {
+      return { ok: true, active: true };
+    }
+    const currentSpeed = typeof roulette.getSpeed === 'function'
+      ? toFiniteNumber(roulette.getSpeed(), 1)
+      : 1;
+    control.appHoldFastForwardPrevSpeed = Math.max(0.1, currentSpeed);
+    roulette.setSpeed(APP_TOUCH_FAST_FORWARD_SPEED);
+    control.appHoldFastForwardActive = true;
+    return { ok: true, active: true, speed: APP_TOUCH_FAST_FORWARD_SPEED };
+  }
+  if (control.appHoldFastForwardActive !== true) {
+    return { ok: true, active: false };
+  }
+  roulette.setSpeed(Math.max(0.1, toFiniteNumber(control.appHoldFastForwardPrevSpeed, 1)));
+  control.appHoldFastForwardActive = false;
+  return {
+    ok: true,
+    active: false,
+    speed: Math.max(0.1, toFiniteNumber(control.appHoldFastForwardPrevSpeed, 1)),
+  };
 }
 
 function normalizeMarbleRadius(rawRadius, fallback = DEFAULT_MARBLE_RADIUS) {
@@ -1479,6 +1631,146 @@ function patchPhysicsGetEntities() {
   physics.__v2GetEntitiesPatched = true;
 }
 
+function patchCameraZoomControls() {
+  const roulette = getRoulette();
+  const camera = roulette && roulette._camera && typeof roulette._camera === 'object'
+    ? roulette._camera
+    : null;
+  if (!camera) {
+    return false;
+  }
+  if (camera.__v2AppZoomPatched !== true) {
+    if (typeof camera.initializePosition === 'function') {
+      camera.__v2OriginalInitializePosition = camera.initializePosition.bind(camera);
+      camera.initializePosition = function patchedInitializePosition(center, zoom) {
+        restoreCameraZoomScale(camera);
+        const result = camera.__v2OriginalInitializePosition(center, zoom);
+        applyCameraZoomScale(camera);
+        return result;
+      };
+    }
+    if (typeof camera.update === 'function') {
+      camera.__v2OriginalUpdate = camera.update.bind(camera);
+      camera.update = function patchedCameraUpdate(options) {
+        restoreCameraZoomScale(camera);
+        const result = camera.__v2OriginalUpdate(options);
+        applyCameraZoomScale(camera);
+        return result;
+      };
+    }
+    camera.__v2AppZoomPatched = true;
+  }
+  resyncCameraZoomScale(camera);
+  return true;
+}
+
+function installAppTouchControls() {
+  if (control.fromApp !== true) {
+    return false;
+  }
+  const roulette = getRoulette();
+  const renderer = roulette && roulette._renderer && typeof roulette._renderer === 'object'
+    ? roulette._renderer
+    : null;
+  const canvas = renderer && renderer.canvas
+    ? renderer.canvas
+    : document.querySelector('canvas');
+  if (!canvas || canvas.__v2AppTouchControlsInstalled === true) {
+    return !!canvas;
+  }
+
+  const gesture = {
+    pointerId: null,
+    startX: 0,
+    startY: 0,
+    moved: false,
+    holdActive: false,
+    holdTimerId: 0,
+  };
+
+  const clearHoldTimer = () => {
+    if (gesture.holdTimerId) {
+      window.clearTimeout(gesture.holdTimerId);
+      gesture.holdTimerId = 0;
+    }
+  };
+
+  const resetGesture = () => {
+    clearHoldTimer();
+    gesture.pointerId = null;
+    gesture.startX = 0;
+    gesture.startY = 0;
+    gesture.moved = false;
+    gesture.holdActive = false;
+  };
+
+  const isTouchGesture = (event) => !!event && event.pointerType === 'touch';
+
+  const handlePointerDown = (event) => {
+    if (!isTouchGesture(event) || gesture.pointerId !== null) {
+      return;
+    }
+    gesture.pointerId = event.pointerId;
+    gesture.startX = toFiniteNumber(event.clientX, 0);
+    gesture.startY = toFiniteNumber(event.clientY, 0);
+    gesture.moved = false;
+    gesture.holdActive = false;
+    clearHoldTimer();
+    gesture.holdTimerId = window.setTimeout(() => {
+      if (gesture.pointerId !== event.pointerId || gesture.moved) {
+        return;
+      }
+      gesture.holdActive = true;
+      setAppHoldFastForwardActive(true);
+    }, APP_TOUCH_HOLD_DELAY_MS);
+  };
+
+  const handlePointerMove = (event) => {
+    if (!isTouchGesture(event) || gesture.pointerId !== event.pointerId || gesture.holdActive) {
+      return;
+    }
+    const dx = toFiniteNumber(event.clientX, 0) - gesture.startX;
+    const dy = toFiniteNumber(event.clientY, 0) - gesture.startY;
+    if (Math.hypot(dx, dy) > APP_TOUCH_TAP_MAX_MOVE_PX) {
+      gesture.moved = true;
+      clearHoldTimer();
+    }
+  };
+
+  const finishGesture = (event) => {
+    if (!event || gesture.pointerId !== event.pointerId) {
+      return;
+    }
+    const shouldCycleZoom = gesture.holdActive !== true && gesture.moved !== true;
+    const wasHolding = gesture.holdActive === true;
+    resetGesture();
+    if (wasHolding) {
+      setAppHoldFastForwardActive(false);
+      return;
+    }
+    if (shouldCycleZoom) {
+      cycleAppZoomPreset();
+      if (typeof event.preventDefault === 'function') {
+        event.preventDefault();
+      }
+    }
+  };
+
+  canvas.style.touchAction = 'none';
+  canvas.addEventListener('pointerdown', handlePointerDown, { passive: true });
+  window.addEventListener('pointermove', handlePointerMove, { passive: true });
+  window.addEventListener('pointerup', finishGesture, { passive: false });
+  window.addEventListener('pointercancel', finishGesture, { passive: false });
+  window.addEventListener('blur', () => {
+    if (gesture.holdActive) {
+      setAppHoldFastForwardActive(false);
+    }
+    resetGesture();
+  });
+  canvas.__v2AppTouchControlsInstalled = true;
+  return true;
+}
+
 function buildEntityTypeMapFromCompiled() {
   const compiled = control.compiledMap && typeof control.compiledMap === 'object'
     ? control.compiledMap
@@ -1821,6 +2113,12 @@ function startTickLoop() {
     applyAppVisualCompatibility();
     patchRendererMarbleImages();
     suppressMarbleCooldownIndicator();
+    if (control.appHoldFastForwardActive) {
+      const roulette = getRoulette();
+      if (!roulette || control.paused || roulette._isRunning !== true) {
+        setAppHoldFastForwardActive(false);
+      }
+    }
     updateSkillPolicy(now);
     if (control.behaviorRuntime && typeof control.behaviorRuntime.tick === 'function') {
       control.behaviorRuntime.tick(now);
@@ -1930,10 +2228,12 @@ async function applyMapJson(rawMapJson) {
   patchPhysicsStep();
   patchPhysicsCreateEntities();
   patchPhysicsGetEntities();
+  patchCameraZoomControls();
   patchRendererEntityVisuals();
   wireGoalEvent();
   patchRouletteSlowMotionRange();
   patchMiniMapUiObject();
+  installAppTouchControls();
 
   const mapJson = rawMapJson && typeof rawMapJson === 'object'
     ? deepClone(rawMapJson)
@@ -1991,10 +2291,12 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
   patchPhysicsStep();
   patchPhysicsCreateEntities();
   patchPhysicsGetEntities();
+  patchCameraZoomControls();
   patchRendererEntityVisuals();
   wireGoalEvent();
   patchRouletteSlowMotionRange();
   patchMiniMapUiObject();
+  installAppTouchControls();
 
   const mapJson = rawMapJson && typeof rawMapJson === 'object'
     ? deepClone(rawMapJson)
@@ -2512,8 +2814,10 @@ async function start() {
   patchPhysicsStep();
   patchPhysicsCreateEntities();
   patchPhysicsGetEntities();
+  patchCameraZoomControls();
   patchRouletteSlowMotionRange();
   patchMiniMapUiObject();
+  installAppTouchControls();
   postDebug('start_begin', {
     candidateCount: Array.isArray(control.candidates) ? control.candidates.length : 0,
     marbleCountBefore: Array.isArray(roulette && roulette._marbles) ? roulette._marbles.length : 0,
@@ -2567,6 +2871,7 @@ async function pause() {
   await ensureRouletteReady();
   control.paused = true;
   control.spinStartedAt = 0;
+  setAppHoldFastForwardActive(false);
   setSkillsEnabled(false);
   const roulette = getRoulette();
   if (roulette) {
@@ -2581,6 +2886,7 @@ async function reset() {
   control.paused = true;
   control.goalReceived = false;
   control.spinStartedAt = 0;
+  setAppHoldFastForwardActive(false);
   setSkillsEnabled(false);
   if (control.compiledMap && control.compiledMap.sourceMap) {
     await applyMapJson(control.compiledMap.sourceMap);
@@ -2643,6 +2949,11 @@ function getState() {
     candidateCount: control.candidates.length,
     marbleCount: marbles.length,
     winningRank: control.winningRank,
+    zoomPresetIndex: control.appZoomPresetIndex,
+    zoomMultiplier: control.appZoomMultiplier,
+    speedMultiplier: roulette && typeof roulette.getSpeed === 'function'
+      ? toFiniteNumber(roulette.getSpeed(), 1)
+      : 1,
     skillPolicy: {
       disableAll: control.mapDisableSkills,
       disableInSlowMotion: control.mapDisableSkillsInSlowMotion,
@@ -2676,12 +2987,18 @@ async function init(payload = {}) {
     cacheMiniMapUiObject();
     patchMiniMapUiObject();
     control.fromApp = detectFromAppContext(safePayload);
+    setAppZoomPresetIndex(
+      normalizeAppZoomPresetIndex(safePayload.zoomPresetIndex, control.appZoomPresetIndex),
+      { broadcast: false },
+    );
     applyAppVisualCompatibility();
     patchPhysicsStep();
     patchPhysicsCreateEntities();
     patchPhysicsGetEntities();
+    patchCameraZoomControls();
     wireGoalEvent();
     patchRouletteSlowMotionRange();
+    installAppTouchControls();
     startTickLoop();
 
     const mapIdFromQuery = new URLSearchParams(window.location.search).get('mapId') || '';
@@ -2778,6 +3095,12 @@ const api = {
   pause,
   reset,
   setSpeed,
+  setZoomPresetIndex(presetIndex) {
+    return setAppZoomPresetIndex(presetIndex);
+  },
+  cycleZoomPreset() {
+    return cycleAppZoomPreset();
+  },
   setMiniMapVisible(visible = true) {
     return setMiniMapUiVisibility(visible);
   },

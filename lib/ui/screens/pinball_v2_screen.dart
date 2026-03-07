@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/food_image_catalog.dart';
+import '../../services/shared_preferences_cache_store.dart';
 
 class PinballV2ScreenArgs {
   const PinballV2ScreenArgs({
@@ -36,6 +37,11 @@ class PinballV2Screen extends StatefulWidget {
 
 class _PinballV2ScreenState extends State<PinballV2Screen> {
   static const String _pinballAssetDir = 'assets/ui/pinball';
+  static const String _v2ZoomPresetIndexCacheKey =
+      'pinball_v2_zoom_preset_index_v1';
+  static const int _v2ZoomPresetUnset = -1;
+  static const int _v2ZoomPresetMin = 0;
+  static const int _v2ZoomPresetMax = 2;
   static const Duration _startupTimeout = Duration(seconds: 30);
   static const int _fullRankingWaitTimeoutTicks = 180;
   static const int _normalCountdownTotalMs = 60000;
@@ -75,6 +81,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ''';
 
+  final SharedPreferencesCacheStore _cacheStore = SharedPreferencesCacheStore();
   late final WebViewController _controller;
   HttpServer? _localServer;
   Uri? _localBaseUri;
@@ -110,6 +117,8 @@ SOFTWARE.
   Timer? _countdownTimer;
   DateTime? _countdownStartedAt;
   int _countdownRemainingMs = 0;
+  Future<void>? _viewPrefsLoadFuture;
+  int _v2ZoomPresetIndex = _v2ZoomPresetUnset;
 
   List<String>? _cachedCandidates;
   String? _candidateImageKey;
@@ -271,6 +280,36 @@ SOFTWARE.
         .toStringAsFixed(2)
         .padLeft(5, '0');
     return '${minutes.toString().padLeft(2, '0')}:$secondText초';
+  }
+
+  int _normalizeV2ZoomPresetIndex(dynamic value) {
+    final parsed = _toInt(value, fallback: _v2ZoomPresetUnset);
+    if (parsed < _v2ZoomPresetMin) {
+      return _v2ZoomPresetUnset;
+    }
+    if (parsed > _v2ZoomPresetMax) {
+      return _v2ZoomPresetMax;
+    }
+    return parsed;
+  }
+
+  Future<void> _loadPersistedV2ViewPrefs() async {
+    final raw = await _cacheStore.read(_v2ZoomPresetIndexCacheKey);
+    if (!mounted) {
+      return;
+    }
+    _v2ZoomPresetIndex = _normalizeV2ZoomPresetIndex(raw);
+  }
+
+  Future<void> _ensureV2ViewPrefsLoaded() async {
+    final future = _viewPrefsLoadFuture ??= _loadPersistedV2ViewPrefs();
+    await future;
+  }
+
+  Future<void> _persistV2ZoomPresetIndex(dynamic rawValue) async {
+    final normalized = _normalizeV2ZoomPresetIndex(rawValue);
+    _v2ZoomPresetIndex = normalized;
+    await _cacheStore.write(_v2ZoomPresetIndexCacheKey, normalized.toString());
   }
 
   void _clearLicenseHoldTimer() {
@@ -1143,11 +1182,17 @@ SOFTWARE.
       return;
     }
 
+    await _ensureV2ViewPrefsLoaded();
+    if (!mounted || _isFinishing) {
+      return;
+    }
+
     _pushRuntimeDebug('start_pinball_requested', <String, Object>{
       'pageLoaded': _pageLoaded,
       'candidateCount': _candidates.length,
       'autoStart': widget.args.autoStart,
       'mapId': _effectiveMapId,
+      'zoomPresetIndex': _v2ZoomPresetIndex,
     });
     _isStarting = true;
     _resetSlowMotionBannerState();
@@ -1168,6 +1213,7 @@ SOFTWARE.
       'candidates': _candidates,
       'winningRank': 1,
       'autoStart': widget.args.autoStart,
+      'zoomPresetIndex': _v2ZoomPresetIndex,
       'fromApp': true,
       'isPinballApp': true,
       'imageDataUrls': imageDataUrls,
@@ -1551,6 +1597,13 @@ SOFTWARE.
       _pushRuntimeDebug('runtime', parsed['payload']);
       return;
     }
+    if (event == 'zoomPresetChanged') {
+      final payload = _coerceStringKeyMap(parsed['payload']);
+      final presetIndex = _normalizeV2ZoomPresetIndex(payload?['presetIndex']);
+      await _persistV2ZoomPresetIndex(presetIndex);
+      _pushRuntimeDebug('zoom_preset_changed', payload);
+      return;
+    }
     if (event == 'goal') {
       final winner = _extractWinnerName(parsed['payload']);
       if (winner.isNotEmpty) {
@@ -1614,6 +1667,7 @@ SOFTWARE.
   void initState() {
     super.initState();
     _resetCountdown();
+    _viewPrefsLoadFuture = _loadPersistedV2ViewPrefs();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
