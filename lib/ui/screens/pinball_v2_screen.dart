@@ -807,26 +807,7 @@ SOFTWARE.
     if (words.length <= 2 || normalized.length <= 16) {
       return normalized;
     }
-    final spaces = RegExp(
-      r'\s+',
-    ).allMatches(normalized).toList(growable: false);
-    if (spaces.isEmpty) {
-      return normalized;
-    }
-    final midpoint = normalized.length ~/ 2;
-    var bestSplit = -1;
-    var bestDistance = normalized.length;
-    for (final match in spaces) {
-      final split = match.start;
-      if (split <= 0 || split >= normalized.length - 1) {
-        continue;
-      }
-      final distance = (split - midpoint).abs();
-      if (distance < bestDistance) {
-        bestDistance = distance;
-        bestSplit = split;
-      }
-    }
+    final bestSplit = _findDialogueSplitIndex(normalized);
     if (bestSplit <= 0 || bestSplit >= normalized.length - 1) {
       return normalized;
     }
@@ -836,6 +817,102 @@ SOFTWARE.
       return normalized;
     }
     return '$firstLine\n$secondLine';
+  }
+
+  int _findDialogueSplitIndex(String normalized) {
+    final spaces = RegExp(
+      r'\s+',
+    ).allMatches(normalized).toList(growable: false);
+    if (spaces.isEmpty) {
+      return -1;
+    }
+    final midpoint = normalized.length * 0.56;
+    var bestSplit = -1;
+    var bestScore = double.infinity;
+    for (final match in spaces) {
+      final split = match.start;
+      if (split <= 0 || split >= normalized.length - 1) {
+        continue;
+      }
+      final firstLine = normalized.substring(0, split).trim();
+      final secondLine = normalized.substring(split).trim();
+      if (firstLine.isEmpty || secondLine.isEmpty) {
+        continue;
+      }
+      final firstWordCount = firstLine
+          .split(RegExp(r'\s+'))
+          .where((word) => word.isNotEmpty)
+          .length;
+      final secondWordCount = secondLine
+          .split(RegExp(r'\s+'))
+          .where((word) => word.isNotEmpty)
+          .length;
+      if (firstWordCount < 2 || secondWordCount < 1) {
+        continue;
+      }
+      final distanceScore = (split - midpoint).abs();
+      var score = distanceScore.toDouble();
+      if (_endsWithDialogueSentenceBreak(firstLine)) {
+        score -= 8.0;
+      }
+      if (_startsWithDialogueSecondLineCue(secondLine)) {
+        score -= 2.5;
+      }
+      if (firstLine.length < 10) {
+        score += 8.0;
+      }
+      if (secondLine.length < 6) {
+        score += 12.0;
+      }
+      if (firstLine.length > secondLine.length * 2.2) {
+        score += 6.0;
+      }
+      if (secondLine.length > firstLine.length * 2.2) {
+        score += 6.0;
+      }
+      if (score < bestScore) {
+        bestScore = score;
+        bestSplit = split;
+      }
+    }
+    return bestSplit;
+  }
+
+  bool _endsWithDialogueSentenceBreak(String value) {
+    final trimmed = value.trimRight();
+    if (trimmed.isEmpty) {
+      return false;
+    }
+    return trimmed.endsWith('!') ||
+        trimmed.endsWith('?') ||
+        trimmed.endsWith('.') ||
+        trimmed.endsWith('...') ||
+        trimmed.endsWith('…');
+  }
+
+  bool _startsWithDialogueSecondLineCue(String value) {
+    final trimmed = value.trimLeft();
+    if (trimmed.isEmpty) {
+      return false;
+    }
+    const starters = <String>[
+      '다시',
+      '이번엔',
+      '진짜',
+      '한 번',
+      '한번',
+      '근데',
+      '제발',
+      '부탁',
+      '그래도',
+      '하지만',
+    ];
+    for (final starter in starters) {
+      if (trimmed.startsWith(starter)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   void _startSlowMotionDialogueTyping(String line) {
