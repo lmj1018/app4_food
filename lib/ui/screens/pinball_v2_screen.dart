@@ -69,6 +69,7 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
   static const Duration _ambientBannerInitialDelay = Duration(seconds: 5);
   static const int _ambientBannerMinDelayMs = 9000;
   static const int _ambientBannerMaxDelayMs = 17000;
+  static const int _slowMotionDialogueMaxLines = 4;
   static const Duration _slowMotionDialogueTypingInterval = Duration(
     milliseconds: 42,
   );
@@ -802,24 +803,24 @@ SOFTWARE.
     if (_isSubordinateSlowMotionBanner(assetPath)) {
       return const _SlowMotionDialogueBubbleLayout(
         leftFactor: 0.41,
-        topFactor: 0.215,
+        topFactor: 0.20,
         widthFactor: 0.53,
-        heightFactor: 0.19,
+        heightFactor: 0.24,
       );
     }
     if (_isManagerSlowMotionBanner(assetPath)) {
       return const _SlowMotionDialogueBubbleLayout(
         leftFactor: 0.44,
-        topFactor: 0.165,
+        topFactor: 0.15,
         widthFactor: 0.49,
-        heightFactor: 0.155,
+        heightFactor: 0.21,
       );
     }
     return const _SlowMotionDialogueBubbleLayout(
       leftFactor: 0.41,
-      topFactor: 0.18,
+      topFactor: 0.17,
       widthFactor: 0.51,
-      heightFactor: 0.17,
+      heightFactor: 0.22,
     );
   }
 
@@ -2307,6 +2308,43 @@ SOFTWARE.
     );
   }
 
+  double _resolveSlowMotionDialogueFontSize({
+    required BuildContext context,
+    required String text,
+    required double maxWidth,
+    required double maxHeight,
+  }) {
+    if (text.trim().isEmpty || maxWidth <= 0 || maxHeight <= 0) {
+      return 14;
+    }
+    const double minFontSize = 12.5;
+    const double maxFontSize = 30.0;
+    const double lineHeight = 1.16;
+    final textDirection = Directionality.maybeOf(context) ?? TextDirection.ltr;
+    for (
+      double fontSize = maxFontSize;
+      fontSize >= minFontSize;
+      fontSize -= 0.5
+    ) {
+      final painter = TextPainter(
+        text: TextSpan(
+          text: text,
+          style: TextStyle(
+            fontSize: fontSize,
+            fontWeight: FontWeight.w700,
+            height: lineHeight,
+          ),
+        ),
+        textDirection: textDirection,
+        maxLines: _slowMotionDialogueMaxLines,
+      )..layout(maxWidth: maxWidth);
+      if (!painter.didExceedMaxLines && painter.height <= maxHeight + 0.5) {
+        return fontSize;
+      }
+    }
+    return minFontSize;
+  }
+
   Widget _buildSlowMotionDialogueOverlay(String assetPath) {
     final typedText = _slowMotionDialogueTypedText;
     if (typedText.isEmpty) {
@@ -2330,30 +2368,45 @@ SOFTWARE.
           final bottom = height * (1 - layout.topFactor - layout.heightFactor);
           final bubbleWidth = max(1.0, width * layout.widthFactor);
           final bubbleHeight = max(1.0, height * layout.heightFactor);
-          final fontSize = min(
-            bubbleWidth / 12.5,
-            bubbleHeight / 2.4,
-          ).clamp(15.0, 32.0).toDouble();
+          final horizontalPadding = bubbleWidth * 0.04;
+          final verticalPadding = bubbleHeight * 0.08;
+          final availableWidth = max(
+            1.0,
+            bubbleWidth - (horizontalPadding * 2),
+          );
+          final availableHeight = max(
+            1.0,
+            bubbleHeight - (verticalPadding * 2),
+          );
+          final fullText = _slowMotionDialogueFullText.isNotEmpty
+              ? _slowMotionDialogueFullText
+              : typedText;
+          final fontSize = _resolveSlowMotionDialogueFontSize(
+            context: context,
+            text: fullText,
+            maxWidth: availableWidth,
+            maxHeight: availableHeight,
+          );
           return Padding(
             padding: EdgeInsets.fromLTRB(left, top, right, bottom),
             child: Align(
               alignment: Alignment.topLeft,
               child: Container(
                 padding: EdgeInsets.symmetric(
-                  horizontal: bubbleWidth * 0.045,
-                  vertical: bubbleHeight * 0.12,
+                  horizontal: horizontalPadding,
+                  vertical: verticalPadding,
                 ),
                 alignment: Alignment.topLeft,
                 child: Text(
                   typedText,
                   textAlign: TextAlign.left,
-                  maxLines: 3,
+                  maxLines: _slowMotionDialogueMaxLines,
                   softWrap: true,
-                  overflow: TextOverflow.clip,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: Colors.black.withValues(alpha: 0.88),
                     fontSize: fontSize,
-                    height: 1.18,
+                    height: 1.16,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
