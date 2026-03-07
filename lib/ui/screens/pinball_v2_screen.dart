@@ -2555,8 +2555,23 @@ SOFTWARE.
         textDirection: textDirection,
         textAlign: TextAlign.center,
         maxLines: _slowMotionDialogueMaxLines,
-      )..layout(maxWidth: maxWidth);
-      if (!painter.didExceedMaxLines && painter.height <= maxHeight + 0.5) {
+      )..layout(maxWidth: double.infinity);
+      if (painter.didExceedMaxLines) {
+        continue;
+      }
+      final lineMetrics = painter.computeLineMetrics();
+      if (lineMetrics.isEmpty ||
+          lineMetrics.length > _slowMotionDialogueMaxLines) {
+        continue;
+      }
+      final widestLine = lineMetrics.fold<double>(
+        0,
+        (current, metric) => max(current, metric.width),
+      );
+      if (widestLine > maxWidth + 0.5) {
+        continue;
+      }
+      if (painter.height <= maxHeight + 0.5) {
         return fontSize;
       }
     }
@@ -2622,8 +2637,8 @@ SOFTWARE.
                   typedText,
                   textAlign: TextAlign.center,
                   maxLines: _slowMotionDialogueMaxLines,
-                  softWrap: true,
-                  overflow: TextOverflow.ellipsis,
+                  softWrap: false,
+                  overflow: TextOverflow.clip,
                   style: TextStyle(
                     color: Colors.black.withValues(alpha: 0.88),
                     fontSize: effectiveFontSize,
