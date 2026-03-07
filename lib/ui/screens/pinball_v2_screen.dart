@@ -66,10 +66,12 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
   static const Duration _slowMotionFirstTrigger = Duration(seconds: 4);
   static const Duration _slowMotionSecondTrigger = Duration(seconds: 8);
   static const Duration _slowMotionBannerDuration = Duration(seconds: 3);
-  static const Duration _ambientBannerInitialDelay = Duration(seconds: 5);
-  static const int _ambientBannerMinDelayMs = 9000;
-  static const int _ambientBannerMaxDelayMs = 17000;
-  static const int _slowMotionDialogueMaxLines = 4;
+  static const Duration _ambientBannerInitialDelay = Duration(
+    milliseconds: 2500,
+  );
+  static const int _ambientBannerMinDelayMs = 4500;
+  static const int _ambientBannerMaxDelayMs = 8500;
+  static const int _slowMotionDialogueMaxLines = 3;
   static const Duration _slowMotionDialogueTypingInterval = Duration(
     milliseconds: 42,
   );
@@ -744,13 +746,52 @@ SOFTWARE.
     return picked;
   }
 
+  String _formatDialogueForBubble(String rawLine) {
+    final normalized = rawLine
+        .replaceAll('\n', ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (normalized.isEmpty) {
+      return '';
+    }
+    final words = normalized.split(' ');
+    if (words.length <= 2) {
+      return normalized;
+    }
+    final targetLines = normalized.length >= 24 ? 3 : 2;
+    final targetCharsPerLine = (normalized.length / targetLines).ceil();
+    final lines = <String>[];
+    var currentLine = '';
+    for (final word in words) {
+      if (currentLine.isEmpty) {
+        currentLine = word;
+        continue;
+      }
+      final candidate = '$currentLine $word';
+      final shouldBreak =
+          candidate.length > targetCharsPerLine &&
+          lines.length < targetLines - 1;
+      if (shouldBreak) {
+        lines.add(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = candidate;
+      }
+    }
+    if (currentLine.isNotEmpty) {
+      lines.add(currentLine);
+    }
+    return lines.join('\n');
+  }
+
   void _startSlowMotionDialogueTyping(String line) {
     _clearSlowMotionDialogueTypingTimer();
     if (!mounted) {
       return;
     }
+    final formattedLine = _formatDialogueForBubble(line);
     setState(() {
-      _slowMotionDialogueFullText = line.trim();
+      _slowMotionDialogueFullText = formattedLine;
       _slowMotionDialogueVisibleChars = 0;
     });
     final target = _slowMotionDialogueFullText;
@@ -2336,6 +2377,7 @@ SOFTWARE.
           ),
         ),
         textDirection: textDirection,
+        textAlign: TextAlign.center,
         maxLines: _slowMotionDialogueMaxLines,
       )..layout(maxWidth: maxWidth);
       if (!painter.didExceedMaxLines && painter.height <= maxHeight + 0.5) {
@@ -2390,18 +2432,18 @@ SOFTWARE.
           return Padding(
             padding: EdgeInsets.fromLTRB(left, top, right, bottom),
             child: Align(
-              alignment: Alignment.topLeft,
+              alignment: Alignment.topCenter,
               child: Container(
                 padding: EdgeInsets.symmetric(
                   horizontal: horizontalPadding,
                   vertical: verticalPadding,
                 ),
-                alignment: Alignment.topLeft,
+                alignment: Alignment.topCenter,
                 child: Text(
                   typedText,
-                  textAlign: TextAlign.left,
+                  textAlign: TextAlign.center,
                   maxLines: _slowMotionDialogueMaxLines,
-                  softWrap: true,
+                  softWrap: false,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: Colors.black.withValues(alpha: 0.88),
