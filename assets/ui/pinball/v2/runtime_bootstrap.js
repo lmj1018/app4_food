@@ -12,7 +12,7 @@ import {
   stableHash,
 } from './snapshot_manager.js';
 
-const RUNTIME_REVISION = 'v2-runtime-r20260307-06';
+const RUNTIME_REVISION = 'v2-runtime-r20260307-07';
 const STATUS_ELEMENT_ID = 'v2Status';
 const DEFAULT_MARBLE_RADIUS = 0.25;
 const MIN_MARBLE_RADIUS = 0.05;
@@ -21,6 +21,10 @@ const SLOW_MOTION_RANGE_Y = 10;
 const SLOW_MOTION_ENTER_MARGIN_Y = 12;
 const MINIMAP_BASE_WORLD_WIDTH = 26;
 const MINIMAP_BASE_SCREEN_SCALE = 4;
+const MINIMAP_FILLED_WALL_TYPES = new Set([
+  'wall_polyline',
+  'wall_filled_polyline',
+]);
 
 function toFiniteNumber(value, fallback) {
   const num = Number(value);
@@ -512,6 +516,107 @@ function computeMiniMapEntityBoundsX(entity) {
   return null;
 }
 
+function isClosedMiniMapPolyline(points) {
+  const list = Array.isArray(points) ? points : [];
+  if (list.length < 3) {
+    return false;
+  }
+  const first = list[0];
+  const last = list[list.length - 1];
+  const dx = toFiniteNumber(last && last[0], NaN) - toFiniteNumber(first && first[0], NaN);
+  const dy = toFiniteNumber(last && last[1], NaN) - toFiniteNumber(first && first[1], NaN);
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
+    return false;
+  }
+  return Math.hypot(dx, dy) <= 0.12;
+}
+
+function drawMiniMapEntitiesWithFilledWalls(ctx, params, fallbackDrawEntities) {
+  if (!ctx) {
+    return;
+  }
+  const entities = Array.isArray(params && params.entities) ? params.entities : [];
+  const theme = params && params.theme && typeof params.theme === 'object'
+    ? params.theme
+    : null;
+  const themeEntities = theme && theme.entity && typeof theme.entity === 'object'
+    ? theme.entity
+    : {};
+  if (entities.length <= 0 || !theme) {
+    if (typeof fallbackDrawEntities === 'function') {
+      fallbackDrawEntities(entities, theme);
+    }
+    return;
+  }
+  const entityTypeMap = buildEntityTypeMapFromCompiled();
+  ctx.save();
+  for (let index = 0; index < entities.length; index += 1) {
+    const entry = entities[index];
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+    const shape = entry.shape && typeof entry.shape === 'object'
+      ? entry.shape
+      : null;
+    if (!shape || typeof shape.type !== 'string') {
+      continue;
+    }
+    const themeEntity = themeEntities[shape.type] && typeof themeEntities[shape.type] === 'object'
+      ? themeEntities[shape.type]
+      : { fill: 'white', outline: 'white' };
+    ctx.save();
+    ctx.fillStyle = shape.color ?? themeEntity.fill;
+    ctx.strokeStyle = shape.color ?? themeEntity.outline;
+    ctx.translate(toFiniteNumber(entry.x, 0), toFiniteNumber(entry.y, 0));
+    ctx.rotate(toFiniteNumber(entry.angle, 0));
+
+    if (shape.type === 'box') {
+      const width = Math.max(0.001, toFiniteNumber(shape.width, 0.2)) * 2;
+      const height = Math.max(0.001, toFiniteNumber(shape.height, 0.2)) * 2;
+      ctx.rotate(toFiniteNumber(shape.rotation, 0));
+      ctx.fillRect(-width / 2, -height / 2, width, height);
+    } else if (shape.type === 'circle') {
+      ctx.beginPath();
+      ctx.arc(0, 0, Math.max(0.001, toFiniteNumber(shape.radius, 0.2)), 0, Math.PI * 2, false);
+      ctx.stroke();
+    } else if (shape.type === 'polyline') {
+      const points = Array.isArray(shape.points) ? shape.points : [];
+      if (points.length > 0) {
+        ctx.beginPath();
+        ctx.moveTo(toFiniteNumber(points[0] && points[0][0], 0), toFiniteNumber(points[0] && points[0][1], 0));
+        for (let pointIndex = 1; pointIndex < points.length; pointIndex += 1) {
+          ctx.lineTo(
+            toFiniteNumber(points[pointIndex] && points[pointIndex][0], 0),
+            toFiniteNumber(points[pointIndex] && points[pointIndex][1], 0),
+          );
+        }
+        const eid = Math.floor(toFiniteNumber(shape.__v2eid, NaN));
+        const entityType = Number.isFinite(eid) ? entityTypeMap.get(eid) : '';
+        const closed = isClosedMiniMapPolyline(points);
+        const shouldFillWall = closed && (
+          shape.filled === true
+          || MINIMAP_FILLED_WALL_TYPES.has(entityType)
+        );
+        if (shouldFillWall) {
+          const fillOpacityRaw = toFiniteNumber(
+            shape.fillOpacity,
+            shape.filled === true ? 1 : 0.55,
+          );
+          const fillOpacity = Math.max(0.2, Math.min(1, fillOpacityRaw));
+          ctx.save();
+          ctx.globalAlpha *= fillOpacity;
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        }
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
 function resolveMiniMapWorldBoundsFromEntities(entitiesInput) {
   const entities = Array.isArray(entitiesInput) ? entitiesInput : [];
   let minX = 0;
@@ -621,7 +726,7 @@ function patchMiniMapUiObject() {
     ctx.scale(fitScale, fitScale);
     ctx.translate(-bounds.minX, 0);
     this.ctx.lineWidth = (3 / (toFiniteNumber(params.camera && params.camera.zoom, 0) + 30)) / fitScale;
-    originalDrawEntities(params.entities, params.theme);
+    drawMiniMapEntitiesWithFilledWalls(this.ctx, params, originalDrawEntities);
     originalDrawMarbles(params);
     originalDrawViewport(params);
     ctx.restore();
