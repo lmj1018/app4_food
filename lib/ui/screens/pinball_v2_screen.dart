@@ -66,11 +66,10 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
   static const Duration _slowMotionFirstTrigger = Duration(seconds: 4);
   static const Duration _slowMotionSecondTrigger = Duration(seconds: 8);
   static const Duration _slowMotionBannerDuration = Duration(seconds: 3);
-  static const Duration _ambientBannerInitialDelay = Duration(
-    milliseconds: 2500,
-  );
-  static const int _ambientBannerMinDelayMs = 4500;
-  static const int _ambientBannerMaxDelayMs = 8500;
+  static const int _ambientBannerFirstMinDelayMs = 10000;
+  static const int _ambientBannerFirstMaxDelayMs = 15000;
+  static const int _ambientBannerSecondMinDelayMs = 30000;
+  static const int _ambientBannerSecondMaxDelayMs = 40000;
   static const int _slowMotionDialogueMaxLines = 3;
   static const Duration _slowMotionDialogueTypingInterval = Duration(
     milliseconds: 42,
@@ -182,7 +181,7 @@ SOFTWARE.
   Offset _slowMotionBannerOffset = Offset.zero;
   Timer? _slowMotionBannerTimer;
   Timer? _slowMotionDialogueTypingTimer;
-  Timer? _ambientBannerTimer;
+  final List<Timer> _ambientBannerTimers = <Timer>[];
   Timer? _countdownTimer;
   Timer? _zoomPresetOverlayTimer;
   DateTime? _countdownStartedAt;
@@ -661,13 +660,13 @@ SOFTWARE.
   }
 
   void _clearAmbientBannerTimer() {
-    _ambientBannerTimer?.cancel();
-    _ambientBannerTimer = null;
+    for (final timer in _ambientBannerTimers) {
+      timer.cancel();
+    }
+    _ambientBannerTimers.clear();
   }
 
-  Duration _nextAmbientBannerDelay() {
-    final minMs = _ambientBannerMinDelayMs;
-    final maxMs = _ambientBannerMaxDelayMs;
+  Duration _randomDurationBetween(int minMs, int maxMs) {
     if (maxMs <= minMs) {
       return Duration(milliseconds: max(1, minMs));
     }
@@ -700,9 +699,11 @@ SOFTWARE.
     _queuedSlowMotionBannerAsset = assetPath;
   }
 
-  void _scheduleAmbientBanner([Duration? delay]) {
-    _clearAmbientBannerTimer();
-    _ambientBannerTimer = Timer(delay ?? _nextAmbientBannerDelay(), () {
+  void _scheduleAmbientBannerWindow({
+    required int minDelayMs,
+    required int maxDelayMs,
+  }) {
+    final timer = Timer(_randomDurationBetween(minDelayMs, maxDelayMs), () {
       if (!mounted) {
         return;
       }
@@ -712,12 +713,20 @@ SOFTWARE.
           _queueAnySlowMotionBanner(assetPath);
         }
       }
-      _scheduleAmbientBanner();
     });
+    _ambientBannerTimers.add(timer);
   }
 
   void _startAmbientBannerLoop() {
-    _scheduleAmbientBanner(_ambientBannerInitialDelay);
+    _clearAmbientBannerTimer();
+    _scheduleAmbientBannerWindow(
+      minDelayMs: _ambientBannerFirstMinDelayMs,
+      maxDelayMs: _ambientBannerFirstMaxDelayMs,
+    );
+    _scheduleAmbientBannerWindow(
+      minDelayMs: _ambientBannerSecondMinDelayMs,
+      maxDelayMs: _ambientBannerSecondMaxDelayMs,
+    );
   }
 
   bool _isSubordinateSlowMotionBanner(String assetPath) {
