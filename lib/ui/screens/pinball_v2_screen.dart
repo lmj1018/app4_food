@@ -66,10 +66,10 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
   static const Duration _slowMotionFirstTrigger = Duration(seconds: 4);
   static const Duration _slowMotionSecondTrigger = Duration(seconds: 8);
   static const Duration _slowMotionBannerDuration = Duration(seconds: 3);
-  static const int _ambientBannerFirstMinDelayMs = 10000;
-  static const int _ambientBannerFirstMaxDelayMs = 15000;
-  static const int _ambientBannerSecondMinDelayMs = 30000;
-  static const int _ambientBannerSecondMaxDelayMs = 40000;
+  static const int _ambientBannerFirstMinDelayMs = 1000;
+  static const int _ambientBannerFirstMaxDelayMs = 12000;
+  static const int _ambientBannerSecondMinDelayMs = 25000;
+  static const int _ambientBannerSecondMaxDelayMs = 35000;
   static const int _slowMotionDialogueMaxLines = 2;
   static const Duration _slowMotionDialogueTypingInterval = Duration(
     milliseconds: 42,

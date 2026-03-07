@@ -51,10 +51,10 @@ class _PinballScreenState extends State<PinballScreen> {
   static const Duration _slowMotionFirstTrigger = Duration(seconds: 4);
   static const Duration _slowMotionSecondTrigger = Duration(seconds: 8);
   static const Duration _slowMotionBannerDuration = Duration(seconds: 3);
-  static const int _ambientBannerFirstMinDelayMs = 10000;
-  static const int _ambientBannerFirstMaxDelayMs = 15000;
-  static const int _ambientBannerSecondMinDelayMs = 30000;
-  static const int _ambientBannerSecondMaxDelayMs = 40000;
+  static const int _ambientBannerFirstMinDelayMs = 1000;
+  static const int _ambientBannerFirstMaxDelayMs = 12000;
+  static const int _ambientBannerSecondMinDelayMs = 25000;
+  static const int _ambientBannerSecondMaxDelayMs = 35000;
   static const String _thirdPartyNoticesFallback = '''
 Marble Roulette (Pinball Engine)
 Copyright (c) 2022 lazygyu
