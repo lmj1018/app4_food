@@ -7799,6 +7799,9 @@ SOFTWARE.
             maxWidth: availableWidth,
             maxHeight: availableHeight,
           );
+          final effectiveFontSize = _isManagerSlowMotionBanner(assetPath)
+              ? max(11.0, fontSize * 0.9)
+              : fontSize;
           return Padding(
             padding: EdgeInsets.fromLTRB(left, top, right, bottom),
             child: Align(
@@ -7813,11 +7816,11 @@ SOFTWARE.
                   typedText,
                   textAlign: TextAlign.center,
                   maxLines: _slowMotionDialogueMaxLines,
-                  softWrap: false,
+                  softWrap: true,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: Colors.black.withValues(alpha: 0.88),
-                    fontSize: fontSize,
+                    fontSize: effectiveFontSize,
                     height: 1.16,
                     fontWeight: FontWeight.w700,
                   ),
