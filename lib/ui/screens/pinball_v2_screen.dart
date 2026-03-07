@@ -1827,14 +1827,6 @@ SOFTWARE.
     if (!roulette || typeof roulette !== 'object') {
       return;
     }
-    if (Array.isArray(roulette._uiObjects)) {
-      roulette._uiObjects = [];
-    }
-    if (typeof roulette.addUiObject === 'function' && roulette.__appV2UiMuted !== true) {
-      roulette.__appV2UiMuted = true;
-      roulette.__appV2OriginalAddUiObject = roulette.addUiObject.bind(roulette);
-      roulette.addUiObject = () => {};
-    }
     const particleManager = roulette._particleManager;
     if (particleManager && typeof particleManager.shot === 'function' && particleManager.__appV2ShotMuted !== true) {
       particleManager.__appV2ShotMuted = true;

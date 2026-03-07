@@ -85,6 +85,7 @@ const control = {
   miniMapWorldBounds: null,
   appZoomPresetIndex: 0,
   appZoomMultiplier: 1,
+  appMiniMapVisible: false,
   appHoldFastForwardActive: false,
   appHoldFastForwardPrevSpeed: 1,
   marbleRadius: DEFAULT_MARBLE_RADIUS,
@@ -162,7 +163,21 @@ function applyAppVisualCompatibility() {
   if (roulette.__v2AppUiObjectMuted !== true && typeof roulette.addUiObject === 'function') {
     roulette.__v2AppUiObjectMuted = true;
     roulette.__v2AppOriginalAddUiObject = roulette.addUiObject.bind(roulette);
-    roulette.addUiObject = () => {};
+    roulette.addUiObject = (uiObject) => {
+      if (isMiniMapUiObject(uiObject)) {
+        roulette.__v2MiniMapUiObject = uiObject;
+        if (!Array.isArray(roulette._uiObjects)) {
+          roulette._uiObjects = [];
+        }
+        if (control.appMiniMapVisible === true) {
+          const exists = roulette._uiObjects.some((item) => item === uiObject);
+          if (!exists) {
+            roulette._uiObjects.push(uiObject);
+          }
+        }
+      }
+      // App mode keeps legacy UI muted. Only minimap object is cached/handled.
+    };
   }
   const particleManager = roulette._particleManager;
   if (particleManager && particleManager.__v2AppGoalFxMuted !== true && typeof particleManager.shot === 'function') {
@@ -600,10 +615,18 @@ function isMiniMapUiObject(value) {
   if (!value || typeof value !== 'object') {
     return false;
   }
-  return typeof value.onViewportChange === 'function'
-    && typeof value.drawViewport === 'function'
-    && typeof value.drawEntities === 'function'
-    && typeof value.drawMarbles === 'function';
+  const hasDrawViewport = typeof value.drawViewport === 'function';
+  const hasDrawMarbles = typeof value.drawMarbles === 'function';
+  const hasDrawEntities = typeof value.drawEntities === 'function';
+  const hasOnViewportChange = typeof value.onViewportChange === 'function';
+  const hasRender = typeof value.render === 'function';
+  const hasMouseMove = typeof value.onMouseMove === 'function';
+  return hasDrawViewport
+    && hasDrawMarbles
+    && (
+      (hasDrawEntities && hasOnViewportChange)
+      || (hasRender && hasMouseMove)
+    );
 }
 
 function cacheMiniMapUiObject() {
