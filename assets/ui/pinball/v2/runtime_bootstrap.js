@@ -12,13 +12,13 @@ import {
   stableHash,
 } from './snapshot_manager.js';
 
-const RUNTIME_REVISION = 'v2-runtime-r20260307-04';
+const RUNTIME_REVISION = 'v2-runtime-r20260307-05';
 const STATUS_ELEMENT_ID = 'v2Status';
 const DEFAULT_MARBLE_RADIUS = 0.25;
 const MIN_MARBLE_RADIUS = 0.05;
 const MAX_MARBLE_RADIUS = 4;
-const SLOW_MOTION_RANGE_Y = 6;
-const SLOW_MOTION_ENTER_MARGIN_Y = 7;
+const SLOW_MOTION_RANGE_Y = 10;
+const SLOW_MOTION_ENTER_MARGIN_Y = 12;
 const MINIMAP_BASE_WORLD_WIDTH = 26;
 const MINIMAP_BASE_SCREEN_SCALE = 4;
 
@@ -1010,8 +1010,6 @@ function patchRouletteSlowMotionRange() {
     const marbles = Array.isArray(this._marbles) ? this._marbles : [];
     const targetIndex = winnerRank - winners.length;
     const targetMarble = marbles[targetIndex];
-    const hasNeighbor = !!(marbles[targetIndex - 1] || marbles[targetIndex + 1]);
-
     const zoomY = toFiniteNumber(stage.zoomY, NaN);
     const targetY = toFiniteNumber(targetMarble && targetMarble.y, NaN);
     const goalDist = toFiniteNumber(this._goalDist, Number.POSITIVE_INFINITY);
@@ -1027,9 +1025,9 @@ function patchRouletteSlowMotionRange() {
       && Number.isFinite(targetY)
       && Number.isFinite(zoomY)
       && targetY > zoomY - enterMarginY
-      && hasNeighbor
     ) {
-      return Math.max(0.2, goalDist / slowRangeY);
+      const normalized = Math.max(0, Math.min(1, goalDist / slowRangeY));
+      return Math.max(0.2, Math.pow(normalized, 1.25));
     }
     return 1;
   };
