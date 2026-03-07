@@ -12,7 +12,7 @@ import {
   stableHash,
 } from './snapshot_manager.js';
 
-const RUNTIME_REVISION = 'v2-runtime-r20260307-03';
+const RUNTIME_REVISION = 'v2-runtime-r20260307-04';
 const STATUS_ELEMENT_ID = 'v2Status';
 const DEFAULT_MARBLE_RADIUS = 0.25;
 const MIN_MARBLE_RADIUS = 0.05;
@@ -534,8 +534,8 @@ function resolveMiniMapWorldBounds(params) {
     maxX = MINIMAP_BASE_WORLD_WIDTH;
   }
   const width = Math.max(1, maxX - minX);
-  const scaleX = MINIMAP_BASE_WORLD_WIDTH / width;
-  return { minX, maxX, width, scaleX };
+  const fitScale = Math.min(1, MINIMAP_BASE_WORLD_WIDTH / width);
+  return { minX, maxX, width, fitScale };
 }
 
 function patchMiniMapUiObject() {
@@ -562,7 +562,7 @@ function patchMiniMapUiObject() {
     minX: 0,
     maxX: MINIMAP_BASE_WORLD_WIDTH,
     width: MINIMAP_BASE_WORLD_WIDTH,
-    scaleX: 1,
+    fitScale: 1,
   };
   miniMap.render = function patchedMiniMapRender(ctx, params) {
     if (!ctx || !params || !params.stage) {
@@ -570,10 +570,12 @@ function patchMiniMapUiObject() {
     }
     const stage = params.stage;
     const goalY = Math.max(1, toFiniteNumber(stage.goalY, 1));
-    this.boundingBox.h = MINIMAP_BASE_SCREEN_SCALE * goalY;
     this.lastParams = params;
     this.ctx = ctx;
     const bounds = resolveMiniMapWorldBounds(params);
+    const fitScale = Math.max(0.0001, toFiniteNumber(bounds.fitScale, 1));
+    const miniMapHeightWorld = goalY * fitScale;
+    this.boundingBox.h = MINIMAP_BASE_SCREEN_SCALE * miniMapHeightWorld;
     this.__v2MiniMapWorldBounds = bounds;
 
     ctx.save();
@@ -583,13 +585,13 @@ function patchMiniMapUiObject() {
     ctx.translate(this.boundingBox.x, this.boundingBox.y);
     ctx.scale(MINIMAP_BASE_SCREEN_SCALE, MINIMAP_BASE_SCREEN_SCALE);
     ctx.beginPath();
-    ctx.rect(0, 0, MINIMAP_BASE_WORLD_WIDTH, goalY);
+    ctx.rect(0, 0, MINIMAP_BASE_WORLD_WIDTH, miniMapHeightWorld);
     ctx.clip();
-    ctx.fillRect(0, 0, MINIMAP_BASE_WORLD_WIDTH, goalY);
+    ctx.fillRect(0, 0, MINIMAP_BASE_WORLD_WIDTH, miniMapHeightWorld);
     ctx.save();
-    ctx.scale(bounds.scaleX, 1);
+    ctx.scale(fitScale, fitScale);
     ctx.translate(-bounds.minX, 0);
-    this.ctx.lineWidth = 3 / (toFiniteNumber(params.camera && params.camera.zoom, 0) + 30);
+    this.ctx.lineWidth = (3 / (toFiniteNumber(params.camera && params.camera.zoom, 0) + 30)) / fitScale;
     originalDrawEntities(params.entities, params.theme);
     originalDrawMarbles(params);
     originalDrawViewport(params);
@@ -619,11 +621,17 @@ function patchMiniMapUiObject() {
     };
     const bounds = this.__v2MiniMapWorldBounds && typeof this.__v2MiniMapWorldBounds === 'object'
       ? this.__v2MiniMapWorldBounds
-      : { minX: 0, scaleX: 1 };
-    const scaleX = Math.max(0.0001, toFiniteNumber(bounds.scaleX, 1));
-    const worldX = toFiniteNumber(bounds.minX, 0)
-      + (this.mousePosition.x / MINIMAP_BASE_SCREEN_SCALE) / scaleX;
-    const worldY = this.mousePosition.y / MINIMAP_BASE_SCREEN_SCALE;
+      : { minX: 0, maxX: MINIMAP_BASE_WORLD_WIDTH, fitScale: 1 };
+    const fitScale = Math.max(0.0001, toFiniteNumber(bounds.fitScale, 1));
+    const worldXRaw = toFiniteNumber(bounds.minX, 0)
+      + (this.mousePosition.x / (MINIMAP_BASE_SCREEN_SCALE * fitScale));
+    const worldYRaw = this.mousePosition.y / (MINIMAP_BASE_SCREEN_SCALE * fitScale);
+    const worldX = Math.max(
+      toFiniteNumber(bounds.minX, 0),
+      Math.min(toFiniteNumber(bounds.maxX, MINIMAP_BASE_WORLD_WIDTH), worldXRaw),
+    );
+    const goalY = Math.max(1, toFiniteNumber(this.lastParams && this.lastParams.stage && this.lastParams.stage.goalY, 1));
+    const worldY = Math.max(0, Math.min(goalY, worldYRaw));
     if (typeof this._onViewportChangeHandler === 'function') {
       this._onViewportChangeHandler({ x: worldX, y: worldY });
     }
