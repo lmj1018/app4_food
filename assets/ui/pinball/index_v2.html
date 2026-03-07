@@ -38,6 +38,13 @@
       overflow: hidden;
       font-family: Segoe UI, Arial, sans-serif;
     }
+    html.v2-app-canvas-hidden canvas {
+      opacity: 0;
+      visibility: hidden;
+    }
+    canvas {
+      transition: opacity 120ms ease-out;
+    }
     .status {
       position: fixed;
       left: 10px;
@@ -113,6 +120,27 @@
         element.textContent = `v2 error: ${message}`;
       }
     });
+    (() => {
+      const hiddenClassName = 'v2-app-canvas-hidden';
+      const searchParams = new URLSearchParams(window.location.search);
+      const fromApp = searchParams.get('fromApp') === '1' || searchParams.get('isPinballApp') === '1';
+      const applyVisibility = (visible) => {
+        if (!fromApp) {
+          return;
+        }
+        const shouldShow = visible === true;
+        document.documentElement.classList.toggle(hiddenClassName, !shouldShow);
+        const canvas = document.querySelector('canvas');
+        if (canvas) {
+          canvas.style.opacity = shouldShow ? '1' : '0';
+          canvas.style.visibility = shouldShow ? 'visible' : 'hidden';
+        }
+      };
+      window.__pinballV2SetCanvasVisible = (visible) => {
+        applyVisibility(visible === true);
+      };
+      applyVisibility(false);
+    })();
   </script>
 </body>
 </html>

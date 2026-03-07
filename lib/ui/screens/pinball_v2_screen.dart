@@ -1276,6 +1276,21 @@ SOFTWARE.
 (() => {
   const payload = $encodedPayload;
   const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+  const setCanvasVisible = (visible) => {
+    try {
+      if (typeof window.__pinballV2SetCanvasVisible === 'function') {
+        window.__pinballV2SetCanvasVisible(visible === true);
+        return;
+      }
+    } catch (_) {
+    }
+    const canvas = document.querySelector('canvas');
+    if (!canvas) {
+      return;
+    }
+    canvas.style.opacity = visible === true ? '1' : '0';
+    canvas.style.visibility = visible === true ? 'visible' : 'hidden';
+  };
   const suppressUi = () => {
     const status = document.getElementById('v2Status');
     if (status) {
@@ -1303,6 +1318,7 @@ SOFTWARE.
     }
   };
   const run = async () => {
+    setCanvasVisible(false);
     const ensureStarted = async (api, state) => {
       if (!payload.autoStart) {
         return { ok: true, state, fallbackStartCount: 0 };
@@ -1357,6 +1373,7 @@ SOFTWARE.
               attempt,
             });
           }
+          setCanvasVisible(true);
           return JSON.stringify({
             ok: true,
             initResult,
