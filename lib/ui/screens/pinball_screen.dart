@@ -51,6 +51,10 @@ class _PinballScreenState extends State<PinballScreen> {
   static const Duration _slowMotionFirstTrigger = Duration(seconds: 4);
   static const Duration _slowMotionSecondTrigger = Duration(seconds: 8);
   static const Duration _slowMotionBannerDuration = Duration(seconds: 3);
+  static const int _ambientBannerFirstMinDelayMs = 10000;
+  static const int _ambientBannerFirstMaxDelayMs = 15000;
+  static const int _ambientBannerSecondMinDelayMs = 30000;
+  static const int _ambientBannerSecondMaxDelayMs = 40000;
   static const String _thirdPartyNoticesFallback = '''
 Marble Roulette (Pinball Engine)
 Copyright (c) 2022 lazygyu
@@ -77,6 +81,7 @@ SOFTWARE.
 ''';
 
   late final WebViewController _controller;
+  final Random _random = Random();
   bool _pageLoaded = false;
   bool _isFinishing = false;
   bool _hasError = false;
@@ -108,6 +113,7 @@ SOFTWARE.
   String? _queuedSlowMotionBannerAsset;
   Offset _slowMotionBannerOffset = Offset.zero;
   Timer? _slowMotionBannerTimer;
+  final List<Timer> _ambientBannerTimers = <Timer>[];
   Timer? _countdownTimer;
   DateTime? _countdownStartedAt;
   int _countdownRemainingMs = 0;
@@ -218,8 +224,77 @@ SOFTWARE.
     _slowMotionBannerTimer = null;
   }
 
-  int get _countdownTotalMs =>
-      _waitForFullRanking
+  void _clearAmbientBannerTimer() {
+    for (final timer in _ambientBannerTimers) {
+      timer.cancel();
+    }
+    _ambientBannerTimers.clear();
+  }
+
+  Duration _randomDurationBetween(int minDelayMs, int maxDelayMs) {
+    if (maxDelayMs <= minDelayMs) {
+      return Duration(milliseconds: max(1, minDelayMs));
+    }
+    final delta = maxDelayMs - minDelayMs + 1;
+    return Duration(milliseconds: minDelayMs + _random.nextInt(delta));
+  }
+
+  String _pickRandomAmbientBannerAsset() {
+    final source = _slowMotionAvailableAssets.isNotEmpty
+        ? _slowMotionAvailableAssets.toList(growable: false)
+        : _slowMotionBannerAssets;
+    if (source.isEmpty) {
+      return '';
+    }
+    var index = _random.nextInt(source.length);
+    if (source.length > 1 && source[index] == _slowMotionBannerAsset) {
+      index = (index + 1 + _random.nextInt(source.length - 1)) % source.length;
+    }
+    return source[index];
+  }
+
+  void _queueAnySlowMotionBanner(String assetPath) {
+    if (assetPath.isEmpty) {
+      return;
+    }
+    if (_slowMotionBannerAsset == null) {
+      _showSlowMotionBanner(assetPath);
+      return;
+    }
+    _queuedSlowMotionBannerAsset = assetPath;
+  }
+
+  void _scheduleAmbientBannerWindow({
+    required int minDelayMs,
+    required int maxDelayMs,
+  }) {
+    final timer = Timer(_randomDurationBetween(minDelayMs, maxDelayMs), () {
+      if (!mounted) {
+        return;
+      }
+      if (_didStart && !_isFinishing && !_hasError) {
+        final assetPath = _pickRandomAmbientBannerAsset();
+        if (assetPath.isNotEmpty) {
+          _queueAnySlowMotionBanner(assetPath);
+        }
+      }
+    });
+    _ambientBannerTimers.add(timer);
+  }
+
+  void _startAmbientBannerLoop() {
+    _clearAmbientBannerTimer();
+    _scheduleAmbientBannerWindow(
+      minDelayMs: _ambientBannerFirstMinDelayMs,
+      maxDelayMs: _ambientBannerFirstMaxDelayMs,
+    );
+    _scheduleAmbientBannerWindow(
+      minDelayMs: _ambientBannerSecondMinDelayMs,
+      maxDelayMs: _ambientBannerSecondMaxDelayMs,
+    );
+  }
+
+  int get _countdownTotalMs => _waitForFullRanking
       ? _fullRankingCountdownTotalMs
       : _normalCountdownTotalMs;
 
@@ -275,6 +350,7 @@ SOFTWARE.
 
   void _resetSlowMotionBannerState() {
     _clearSlowMotionBannerTimer();
+    _clearAmbientBannerTimer();
     _slowMotionActive = false;
     _slowMotionActiveSince = null;
     _slowMotionActivationCount = 0;
@@ -339,7 +415,7 @@ SOFTWARE.
     if (remaining.length == 1) {
       return remaining.first;
     }
-    return remaining[Random().nextInt(remaining.length)];
+    return remaining[_random.nextInt(remaining.length)];
   }
 
   void _enqueueSlowMotionBanner(String assetPath) {
@@ -357,7 +433,13 @@ SOFTWARE.
   }
 
   void _showSlowMotionBanner(String assetPath) {
-    if (!mounted || !_slowMotionAvailableAssets.contains(assetPath)) {
+    if (!mounted) {
+      return;
+    }
+    final knownAsset =
+        _slowMotionAvailableAssets.contains(assetPath) ||
+        _slowMotionBannerAssets.contains(assetPath);
+    if (!knownAsset) {
       return;
     }
     _clearSlowMotionBannerTimer();
@@ -6820,6 +6902,7 @@ SOFTWARE.
 
   void _startWinnerMonitor(int generation) {
     _ensureCountdownStarted();
+    _startAmbientBannerLoop();
     final ticket = ++_winnerMonitorTicket;
     unawaited(_monitorWinnerFallback(generation, ticket));
   }
@@ -7198,6 +7281,8 @@ SOFTWARE.
     _isFinishing = true;
     _clearCountdownTimer();
     _clearStartupTimeout();
+    _clearSlowMotionBannerTimer();
+    _clearAmbientBannerTimer();
     _winnerMonitorTicket += 1;
     final normalizedWinner = winner.trim();
     final normalizedRanking = _normalizeRankingForResult(
@@ -7220,6 +7305,7 @@ SOFTWARE.
 
   Future<void> _retry() async {
     _resetCountdown();
+    _resetSlowMotionBannerState();
     setState(() {
       _hasError = false;
       _logPinballStatus('핀볼 게임 페이지 로딩 중...');
@@ -7328,6 +7414,7 @@ SOFTWARE.
     _clearMapLabelOverlayTimer();
     _clearLicenseHoldTimer();
     _clearSlowMotionBannerTimer();
+    _clearAmbientBannerTimer();
     _isFinishing = true;
     _localPinballBaseUri = null;
     final server = _localPinballServer;

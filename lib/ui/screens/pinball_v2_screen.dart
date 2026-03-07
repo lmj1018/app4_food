@@ -1780,7 +1780,6 @@ SOFTWARE.
       _syncMapLabel(_coerceStringKeyMap(parsed?['state']), forceShow: true);
       _setStatus('게임 진행 중...', clearError: true);
       _startWinnerMonitor();
-      _startAmbientBannerLoop();
     } catch (error) {
       _setStatus('V2 초기화 오류: $error', error: true);
     } finally {
@@ -1791,6 +1790,7 @@ SOFTWARE.
   void _startWinnerMonitor() {
     _clearWinnerMonitor();
     _ensureCountdownStarted();
+    _startAmbientBannerLoop();
     _winnerMonitorTimer = Timer.periodic(const Duration(milliseconds: 220), (
       _,
     ) async {
