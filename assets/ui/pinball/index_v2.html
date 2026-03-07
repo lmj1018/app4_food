@@ -102,6 +102,17 @@
     });
   </script>
   <script type="module" src="./roulette.99856b00.js"></script>
-  <script type="module" src="./v2/runtime_bootstrap.js"></script>
+  <script type="module">
+    const params = new URLSearchParams(window.location.search);
+    const cacheBust = params.get('appCacheBust') || Date.now().toString();
+    import(`./v2/runtime_bootstrap.js?v=${encodeURIComponent(cacheBust)}`).catch((error) => {
+      const message = String(error && error.message ? error.message : error);
+      window.__v2BootError = message;
+      const element = document.getElementById('v2Status');
+      if (element) {
+        element.textContent = `v2 error: ${message}`;
+      }
+    });
+  </script>
 </body>
 </html>
