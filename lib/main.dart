@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
@@ -7,10 +8,10 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'app.dart';
 
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  final binding = WidgetsFlutterBinding.ensureInitialized();
   await _setPreferredOrientationsSafely();
   runApp(const FoodDecisionApp());
-  unawaited(_initMobileAdsSafely());
+  _scheduleMobileAdsInitialization(binding);
 }
 
 Future<void> _setPreferredOrientationsSafely() async {
@@ -21,6 +22,20 @@ Future<void> _setPreferredOrientationsSafely() async {
   } catch (_) {
     // Keep app boot resilient even if orientation channel response is delayed.
   }
+}
+
+void _scheduleMobileAdsInitialization(WidgetsBinding binding) {
+  if (kDebugMode) {
+    return;
+  }
+  binding.addPostFrameCallback((_) {
+    unawaited(_initMobileAdsSafelyWithDelay());
+  });
+}
+
+Future<void> _initMobileAdsSafelyWithDelay() async {
+  await Future<void>.delayed(const Duration(milliseconds: 1200));
+  await _initMobileAdsSafely();
 }
 
 Future<void> _initMobileAdsSafely() async {
@@ -40,21 +55,33 @@ Future<void> _initMobileAdsSafely() async {
         }
       },
     );
-    await completer.future;
+    await completer.future.timeout(
+      const Duration(seconds: 6),
+      onTimeout: () {},
+    );
 
-    if (await consentInfo.isConsentFormAvailable()) {
+    final isConsentFormAvailable = await consentInfo
+        .isConsentFormAvailable()
+        .timeout(const Duration(seconds: 4), onTimeout: () => false);
+    if (isConsentFormAvailable) {
       final formCompleter = Completer<void>();
       await ConsentForm.loadAndShowConsentFormIfRequired((_) {
         if (!formCompleter.isCompleted) {
           formCompleter.complete();
         }
-      });
-      await formCompleter.future;
+      }).timeout(const Duration(seconds: 8), onTimeout: () {});
+      await formCompleter.future.timeout(
+        const Duration(seconds: 8),
+        onTimeout: () {},
+      );
     }
 
-    final canRequestAds = await consentInfo.canRequestAds();
+    final canRequestAds = await consentInfo.canRequestAds().timeout(
+      const Duration(seconds: 4),
+      onTimeout: () => false,
+    );
     if (canRequestAds) {
-      await MobileAds.instance.initialize();
+      await MobileAds.instance.initialize().timeout(const Duration(seconds: 5));
     }
   } catch (_) {}
 }

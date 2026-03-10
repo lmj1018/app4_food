@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 430 120" preserveAspectRatio="none">
+  <defs>
+    <linearGradient id="barFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#120C06" stop-opacity="0.90"/>
+      <stop offset="45%" stop-color="#100A05" stop-opacity="0.97"/>
+      <stop offset="100%" stop-color="#0F0904" stop-opacity="1"/>
+    </linearGradient>
+  </defs>
+  <path
+    fill="url(#barFill)"
+    d="
+      M 0 34
+      H 130
+      C 145 34, 155 46, 158 52
+      A 60 72 0 0 0 272 52
+      C 275 46, 285 34, 300 34
+      H 430
+      V 120
+      H 0
+      Z
+    "
+  />
+</svg>

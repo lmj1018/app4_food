@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>Marble Roulette</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="apple-touch-icon" sizes="57x57" href="assets/apple-icon-57x57.png">
+  <link rel="apple-touch-icon" sizes="60x60" href="assets/apple-icon-60x60.png">
+  <link rel="apple-touch-icon" sizes="72x72" href="assets/apple-icon-72x72.png">
+  <link rel="apple-touch-icon" sizes="76x76" href="assets/apple-icon-76x76.png">
+  <link rel="apple-touch-icon" sizes="114x114" href="assets/apple-icon-114x114.png">
+  <link rel="apple-touch-icon" sizes="120x120" href="assets/apple-icon-120x120.png">
+  <link rel="apple-touch-icon" sizes="144x144" href="assets/apple-icon-144x144.png">
+  <link rel="apple-touch-icon" sizes="152x152" href="assets/apple-icon-152x152.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-icon-180x180.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/android-icon-192x192.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="96x96" href="assets/favicon-96x96.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16x16.png">
+  <link rel="manifest" href="assets/manifest.json">
+
+  <meta name="msapplication-TileColor" content="#ffffff">
+  <meta name="msapplication-TileImage" content="assets/ms-icon-144x144.png">
+  <meta name="theme-color" content="#ffffff">
+
+  <meta name="description" content="A lucky draw by dropping marbles, made by lazygyu">
+  <meta property="og:url" content="https://lazygyu.github.io/roulette/">
+  <meta property="og:title" content="Marble Roulette">
+  <meta property="og:description" content="A lucky draw by dropping marbles, made by lazygyu">
+  <meta property="og:site_name" content="lazygyu.github.io">
+  <meta property="og:type" content="website">
+
+  <link rel='stylesheet' href='assets/style.scss' />
+</head>
+<body>
+<script type="module" src="./src/index.ts"></script>
+<script type="text/javascript">
+  let ready = false;
+  let winnerType = 'first';
+  let initialized = false;
+  let pendingBridgePayload = null;
+  let pendingBridgeAutoStart = false;
+  const pinballQuery = new URLSearchParams(window.location.search);
+  const isFromApp = pinballQuery.get('fromApp') === '1' || pinballQuery.get('isPinballApp') === '1';
+
+  function notifyHost(eventName, payload) {
+    const message = {
+      source: 'pinball',
+      event: eventName,
+      payload: payload || {},
+      timestamp: new Date().toISOString(),
+    };
+
+    try {
+      window.dispatchEvent(new CustomEvent('pinball:event', { detail: message }));
+    } catch (error) {
+      console.warn('[pinballBridge] failed to dispatch local event', error);
+    }
+
+    const jsonMessage = JSON.stringify(message);
+
+    try {
+      if (window.PinballBridge && typeof window.PinballBridge.postMessage === 'function') {
+        window.PinballBridge.postMessage(jsonMessage);
+      }
+    } catch (error) {
+      console.warn('[pinballBridge] PinballBridge.postMessage failed', error);
+    }
+
+    try {
+      if (window.flutter_inappwebview && typeof window.flutter_inappwebview.callHandler === 'function') {
+        window.flutter_inappwebview.callHandler('PinballBridge', message);
+      }
+    } catch (error) {
+      console.warn('[pinballBridge] flutter_inappwebview.callHandler failed', error);
+    }
+
+    try {
+      if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
+        window.ReactNativeWebView.postMessage(jsonMessage);
+      }
+    } catch (error) {
+      console.warn('[pinballBridge] ReactNativeWebView.postMessage failed', error);
+    }
+
+    try {
+      if (window.chrome && window.chrome.webview && typeof window.chrome.webview.postMessage === 'function') {
+        window.chrome.webview.postMessage(message);
+      }
+    } catch (error) {
+      console.warn('[pinballBridge] chrome.webview.postMessage failed', error);
+    }
+
+    try {
+      if (window.parent && window.parent !== window && typeof window.parent.postMessage === 'function') {
+        window.parent.postMessage(message, '*');
+      }
+    } catch (error) {
+      console.warn('[pinballBridge] window.parent.postMessage failed', error);
+    }
+  }
+
+  function getNameInput() {
+    return document.querySelector('#in_names');
+  }
+
+  function getNames() {
+    const nameInput = getNameInput();
+    const value = nameInput ? nameInput.value.trim() : '';
+    return value
+      .split(/[,\r\n]/g)
+      .map(v => sanitizeCandidate(v))
+      .filter(v => !!v);
+  }
+
+  function extractCandidatesFromPayload(payload) {
+    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+      if (payload.candidates !== undefined) {
+        return payload.candidates;
+      }
+      if (payload.names !== undefined) {
+        return payload.names;
+      }
+      return [];
+    }
+    return payload;
+  }
+
+  function normalizeCandidateInput(input) {
+    if (input === undefined || input === null) {
+      return [];
+    }
+
+    if (Array.isArray(input)) {
+      return input
+        .map(v => (typeof v === 'string' ? v : String(v)))
+        .map(v => sanitizeCandidate(v))
+        .filter(v => !!v);
+    }
+
+    if (typeof input === 'string') {
+      return input
+        .split(/[,\r\n]/g)
+        .map(v => sanitizeCandidate(v))
+        .filter(v => !!v);
+    }
+
+    if (typeof input === 'object') {
+      const extracted = extractCandidatesFromPayload(input);
+      return normalizeCandidateInput(extracted);
+    }
+
+    return [sanitizeCandidate(String(input))].filter(v => !!v);
+  }
+
+  function sanitizeCandidate(value) {
+    if (typeof value !== 'string') {
+      return '';
+    }
+    return String(value)
+      .trim()
+      .replace(/^\d+\s*[`\.\-\s:)]\s*/, '')
+      .trim();
+  }
+
+  function queueBridgePayload(payload, autoStart) {
+    const data =
+      payload && typeof payload === 'object' && !Array.isArray(payload)
+        ? { ...payload }
+        : { candidates: payload };
+
+    pendingBridgePayload = { ...(pendingBridgePayload || {}), ...data };
+    if (autoStart) {
+      pendingBridgeAutoStart = true;
+    }
+  }
+
+  function applyCandidateNames(rawCandidates, options) {
+    const normalized = normalizeCandidateInput(rawCandidates);
+    const nameInput = getNameInput();
+    if (!nameInput) {
+      return [];
+    }
+    nameInput.value = normalized.join('\n');
+    if (!options || options.persist !== false) {
+      localStorage.setItem('mbr_names', normalized.join(','));
+    }
+    if (initialized && window.roulette && window.roulette.isReady) {
+      getReady();
+    }
+    return normalized;
+  }
+
+  function parseName(nameStr) {
+    const weightRegex = /(\/\d+)/;
+    const countRegex = /(\*\d+)/;
+    const hasWeight = weightRegex.test(nameStr);
+    const hasCount = countRegex.test(nameStr);
+    const match = /^\s*([^\/*]+)?/.exec(nameStr);
+    const name = match && match[1] ? match[1] : '';
+    const weight = hasWeight ? parseInt(weightRegex.exec(nameStr)[1].replace('/', '')) : 1;
+    const count = hasCount ? parseInt(countRegex.exec(nameStr)[1].replace('*', '')) : 1;
+    return {
+      name,
+      weight,
+      count,
+    };
+  }
+
+  function getReady() {
+    const names = getNames();
+    window.roulette.setMarbles(names);
+    ready = names.length > 0;
+    localStorage.setItem('mbr_names', names.join(','));
+    switch (winnerType) {
+      case 'first':
+        setWinnerRank(1);
+        break;
+      case 'last':
+        const total = window.roulette.getCount();
+        setWinnerRank(total);
+        break;
+    }
+
+    notifyHost('candidatesUpdated', {
+      count: names.length,
+      candidates: names.slice(),
+    });
+  }
+
+  function setWinnerRank(rank) {
+    const normalizedRank = Math.max(1, parseInt(rank, 10) || 1);
+    document.querySelector('#in_winningRank').value = normalizedRank;
+    window.options.winningRank = normalizedRank - 1;
+    window.roulette.setWinningRank(window.options.winningRank);
+
+    if (winnerType === 'first') {
+      document.querySelector('.btn-first-winner').classList.toggle('active', true);
+      document.querySelector('.btn-last-winner').classList.toggle('active', false);
+      document.querySelector('#in_winningRank').classList.toggle('active', false);
+    } else if (winnerType === 'last') {
+      document.querySelector('.btn-first-winner').classList.toggle('active', false);
+      document.querySelector('.btn-last-winner').classList.toggle('active', true);
+      document.querySelector('#in_winningRank').classList.toggle('active', false);
+    } else if (winnerType === 'custom') {
+      document.querySelector('.btn-first-winner').classList.toggle('active', false);
+      document.querySelector('.btn-last-winner').classList.toggle('active', false);
+      document.querySelector('#in_winningRank').classList.toggle('active', true);
+    }
+
+    notifyHost('winnerRankChanged', {
+      winnerType,
+      winningRank: window.options.winningRank + 1,
+    });
+  }
+
+  function applyFromAppMode() {
+    if (!isFromApp) {
+      return;
+    }
+
+    const hiddenSelectors = [
+      '#settings',
+      '#donate',
+      '#notice',
+      '#btnNotice',
+      '.toast',
+      '.result',
+      '.history',
+      '.copyright',
+      '#btnToggleSettings',
+      '#btnShuffle',
+    ];
+    const hideFromApp = () => {
+      hiddenSelectors.forEach((selector) => {
+        const el = document.querySelector(selector);
+        if (el) {
+          el.style.display = 'none';
+          el.style.pointerEvents = 'none';
+        }
+      });
+      if (document.body) {
+        document.body.style.overflow = 'hidden';
+      }
+    };
+    hideFromApp();
+    if (window.roulette && typeof window.roulette.setAutoRecording === 'function') {
+      window.roulette.setAutoRecording(false);
+    }
+    if (window.options && typeof window.options === 'object') {
+      window.options.autoRecording = false;
+    }
+    const timer = window.setInterval(() => {
+      hideFromApp();
+      const inNames = document.querySelector('#in_names');
+      if (inNames) {
+        inNames.readOnly = true;
+      }
+    }, 250);
+    window.setTimeout(() => {
+      window.clearInterval(timer);
+    }, 4000);
+    document.documentElement.classList.add('from-app');
+    window.__pinballFromApp = true;
+  }
+
+  function applyBridgeSettings(payload) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return;
+    }
+
+    const requestedType =
+      payload.winnerType !== undefined ? String(payload.winnerType).toLowerCase() : '';
+    if (requestedType === 'first' || requestedType === 'last' || requestedType === 'custom') {
+      winnerType = requestedType;
+      if (requestedType === 'first') {
+        setWinnerRank(1);
+      } else if (requestedType === 'last') {
+        setWinnerRank(window.roulette.getCount());
+      } else if (requestedType === 'custom' && payload.winningRank === undefined) {
+        setWinnerRank(parseInt(document.querySelector('#in_winningRank').value, 10) || 1);
+      }
+    }
+
+    if (payload.winningRank !== undefined) {
+      winnerType = 'custom';
+      setWinnerRank(payload.winningRank);
+    }
+
+    if (payload.mapIndex !== undefined && payload.mapIndex !== null) {
+      const mapIndex = parseInt(payload.mapIndex, 10);
+      if (!isNaN(mapIndex)) {
+        const mapSelector = document.querySelector('#sltMap');
+        if (mapSelector) {
+          mapSelector.value = String(mapIndex);
+        }
+        window.roulette.setMap(mapIndex);
+      }
+    }
+  }
+
+  function startRoulette(triggerSource) {
+    if (!ready) {
+      notifyHost('startRejected', { reason: 'emptyCandidates' });
+      return false;
+    }
+
+    if (window.__pinballStartRequested) {
+      return false;
+    }
+    window.__pinballStartRequested = true;
+
+    if (window.roulette && typeof window.roulette.setAutoRecording === 'function') {
+      window.roulette.setAutoRecording(false);
+    }
+    if (window.options && typeof window.options === 'object') {
+      window.options.autoRecording = false;
+    }
+
+    try {
+      gtag && gtag('event', 'start', {
+        'event_category': 'roulette',
+        'event_label': 'start',
+        'value': window.roulette.getCount(),
+      });
+      window.roulette.start();
+    } finally {
+      window.__pinballStartRequested = false;
+    }
+
+    const settings = document.querySelector('#settings');
+    const donate = document.querySelector('#donate');
+    if (settings) {
+      settings.classList.add('hide');
+    }
+    if (donate) {
+      donate.classList.add('hide');
+    }
+
+    notifyHost('spinStarted', {
+      trigger: triggerSource || 'ui',
+      count: window.roulette.getCount(),
+      candidates: getNames().slice(),
+      winnerType,
+      winningRank: window.options.winningRank + 1,
+    });
+
+    return true;
+  }
+
+  function normalizeStartResult(result) {
+    if (!result) {
+      return { started: false };
+    }
+    if (typeof result === 'object') {
+      if (typeof result.started === 'boolean') {
+        return { started: result.started };
+      }
+      if (typeof result.queued === 'boolean') {
+        return { started: false, queued: result.queued };
+      }
+      return { started: true };
+    }
+    return { started: !!result };
+  }
+
+  function setCandidatesFromBridge(payload) {
+    const candidates = extractCandidatesFromPayload(payload);
+    if (!initialized || !window.roulette || !window.roulette.isReady) {
+      const queuePayload =
+        payload && typeof payload === 'object' && !Array.isArray(payload)
+          ? payload
+          : { candidates };
+      queueBridgePayload(queuePayload, false);
+      return { queued: true, count: normalizeCandidateInput(candidates).length };
+    }
+
+    const normalized = applyCandidateNames(candidates);
+    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+      applyBridgeSettings(payload);
+    }
+    return { queued: false, count: normalized.length };
+  }
+
+  function syncFromBridge(payload) {
+    const sourcePayload =
+      payload && typeof payload === 'object' && !Array.isArray(payload)
+        ? payload
+        : { candidates: payload };
+
+    if (!initialized || !window.roulette || !window.roulette.isReady) {
+      queueBridgePayload(sourcePayload, !!sourcePayload.autoStart);
+      return { queued: true, started: false };
+    }
+
+    const candidates = extractCandidatesFromPayload(sourcePayload);
+    if (candidates !== undefined) {
+      applyCandidateNames(candidates);
+    }
+    applyBridgeSettings(sourcePayload);
+
+    if (sourcePayload.autoStart) {
+      if (!ready) {
+        getReady();
+      }
+      return {
+        queued: false,
+        ...normalizeStartResult(startRoulette('bridge-sync')),
+      };
+    }
+
+    return { queued: false, started: false, count: window.roulette.getCount() };
+  }
+
+  function startFromBridge(payload) {
+    const sourcePayload =
+      payload && typeof payload === 'object' && !Array.isArray(payload)
+        ? payload
+        : { candidates: payload };
+
+    if (!initialized || !window.roulette || !window.roulette.isReady) {
+      queueBridgePayload(sourcePayload, true);
+      return { queued: true, started: false };
+    }
+
+    const candidates = extractCandidatesFromPayload(sourcePayload);
+    if (candidates !== undefined) {
+      applyCandidateNames(candidates);
+    }
+    applyBridgeSettings(sourcePayload);
+
+    if (!ready) {
+      getReady();
+    }
+    return {
+      queued: false,
+      ...normalizeStartResult(startRoulette('bridge')),
+    };
+  }
+
+  function parseBridgeMessage(rawData) {
+    if (!rawData) {
+      return null;
+    }
+    if (typeof rawData === 'string') {
+      try {
+        return JSON.parse(rawData);
+      } catch (error) {
+        return null;
+      }
+    }
+    if (typeof rawData === 'object') {
+      return rawData;
+    }
+    return null;
+  }
+
+  function handleBridgeMessage(rawData) {
+    const data = parseBridgeMessage(rawData);
+    if (!data) {
+      return;
+    }
+
+    const command = String(data.type || data.command || data.event || '').toLowerCase();
+    const payload = data.payload !== undefined ? data.payload : data;
+
+    if (!command) {
+      if (payload && (payload.candidates !== undefined || payload.names !== undefined)) {
+        syncFromBridge(payload);
+      }
+      return;
+    }
+
+    switch (command) {
+      case 'pinball:setcandidates':
+      case 'setcandidates':
+      case 'set_candidates':
+        setCandidatesFromBridge(payload);
+        break;
+      case 'pinball:sync':
+      case 'sync':
+        syncFromBridge(payload);
+        break;
+      case 'pinball:start':
+      case 'start':
+        startFromBridge(payload);
+        break;
+      case 'pinball:ping':
+      case 'ping':
+        notifyHost('pong', window.pinballBridge.getState());
+        break;
+    }
+  }
+
+  window.addEventListener('message', (event) => {
+    handleBridgeMessage(event.data);
+  });
+
+  window.pinballBridge = {
+    isReady: function () {
+      return !!(initialized && window.roulette && window.roulette.isReady);
+    },
+    setCandidates: function (payload) {
+      return setCandidatesFromBridge(payload);
+    },
+    sync: function (payload) {
+      return syncFromBridge(payload || {});
+    },
+    start: function (payload) {
+      return startFromBridge(payload || {});
+    },
+    getCandidates: function () {
+      return getNames().slice();
+    },
+    getState: function () {
+      return {
+        initialized: !!(initialized && window.roulette && window.roulette.isReady),
+        ready,
+        count: window.roulette && window.roulette.isReady ? window.roulette.getCount() : 0,
+        winnerType,
+        winningRank: window.options ? window.options.winningRank + 1 : 1,
+      };
+    },
+  };
+
+  window.setPinballCandidates = function (candidates) {
+    return window.pinballBridge.setCandidates(candidates);
+  };
+
+  window.startPinballRoulette = function (payload) {
+    return window.pinballBridge.start(payload || {});
+  };
+
+  function simpleToast(msg) {
+    const toast = document.createElement('div');
+    toast.classList.add('toast');
+    toast.innerHTML = msg;
+
+    if (window.translateElement) {
+      console.log('try to translate');
+      window.translateElement(toast);
+    }
+
+    document.body.appendChild(toast);
+    setTimeout(() => {
+      if (toast.parentNode) {
+        toast.parentNode.removeChild(toast);
+      }
+    }, 1200);
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    initialize();
+  });
+
+  function initialize() {
+    if (!window.roulette || !window.roulette.isReady) {
+      console.log('does not loaded yet');
+      setTimeout(initialize, 100);
+      return;
+    }
+    console.log('initializing start');
+
+    applyFromAppMode();
+
+    const urlParams = pinballQuery;
+    const namesFromUrl = urlParams.get('names');
+
+    const nameInput = getNameInput();
+    if (nameInput) {
+      if (namesFromUrl) {
+        nameInput.value = namesFromUrl.replace(/,/g, '\n');
+      } else {
+        const savedNames = localStorage.getItem('mbr_names');
+        if (savedNames) {
+          nameInput.value = savedNames;
+        }
+      }
+    }
+
+    const bootPayload =
+      pendingBridgePayload ||
+      (window.__PINBALL_CANDIDATES__ !== undefined
+        ? { candidates: window.__PINBALL_CANDIDATES__ }
+        : null) ||
+      (window.__ROULETTE_CANDIDATES__ !== undefined
+        ? { candidates: window.__ROULETTE_CANDIDATES__ }
+        : null);
+
+    if (bootPayload) {
+      const bootCandidates = extractCandidatesFromPayload(bootPayload);
+      if (bootCandidates !== undefined) {
+        applyCandidateNames(bootCandidates, { persist: false });
+      }
+    }
+
+    document.querySelector('#in_names').addEventListener('input', () => {
+      getReady();
+    });
+
+    document.querySelector('#in_names').addEventListener('blur', () => {
+      const nameSource = getNames();
+      const nameSet = new Set();
+      const nameCounts = {};
+      nameSource.forEach(nameSrc => {
+        const name = parseName(nameSrc);
+        const key = name.weight > 1 ? `${name.name}/${name.weight}` : name.name;
+        if (!nameSet.has(key)) {
+          nameSet.add(key);
+          nameCounts[key] = 0;
+        }
+        nameCounts[key] += name.count;
+      });
+      const result = [];
+      Object.keys(nameCounts).forEach(key => {
+        if (nameCounts[key] > 1) {
+          result.push(`${key}*${nameCounts[key]}`);
+        } else {
+          result.push(key);
+        }
+      });
+
+      const oldValue = document.querySelector('#in_names').value;
+      const newValue = result.join(',');
+
+      if (oldValue !== newValue) {
+        document.querySelector('#in_names').value = newValue;
+        getReady();
+      }
+    });
+
+    document.querySelector('#btnShuffle').addEventListener('click', () => {
+      getReady();
+    });
+
+    document.querySelector('#btnStart').addEventListener('click', () => {
+      startRoulette('ui');
+    });
+
+    document.querySelector('#chkAutoRecording').addEventListener('change', (e) => {
+      window.options.autoRecording = e.target.matches(':checked');
+      window.roulette.setAutoRecording(window.options.autoRecording);
+    });
+
+    document.querySelector('#chkSkill').addEventListener('change', (e) => {
+      window.options.useSkills = e.target.matches(':checked');
+      window.roulette.setWinningRank(window.options.winningRank);
+    });
+
+    document.querySelector('#chkDarkMode').addEventListener('change', (e) => {
+      window.options.darkMode = e.target.matches(':checked');
+      window.roulette.setTheme(window.options.darkMode ? 'dark' : 'light');
+      document.documentElement.classList.toggle('light', !window.options.darkMode);
+    });
+
+    document.querySelector('#in_winningRank').addEventListener('change', (e) => {
+      const v = parseInt(e.target.value, 10);
+      winnerType = 'custom';
+      setWinnerRank(isNaN(v) ? 0 : v);
+    });
+
+    document.querySelector('.btn-last-winner').addEventListener('click', () => {
+      const total = window.roulette.getCount();
+      winnerType = 'last';
+      setWinnerRank(total);
+    });
+    document.querySelector('.btn-first-winner').addEventListener('click', () => {
+      winnerType = 'first';
+      setWinnerRank(1);
+    });
+
+    window.roulette.addEventListener('goal', (e) => {
+      ready = false;
+      const winner = e && e.detail ? e.detail.winner : null;
+      notifyHost('goal', {
+        winner,
+        candidates: getNames().slice(),
+        winnerType,
+        winningRank: window.options.winningRank + 1,
+      });
+      if (!isFromApp) {
+        setTimeout(() => {
+          const settings = document.querySelector('#settings');
+          const donate = document.querySelector('#donate');
+          if (settings) {
+            settings.classList.remove('hide');
+          }
+          if (donate) {
+            donate.classList.remove('hide');
+          }
+        }, 3000);
+      }
+    });
+
+    window.roulette.addEventListener('message', (e) => {
+      simpleToast(e.detail);
+    });
+
+    const toggleBtn = document.querySelector('#btnToggleSettings');
+    const collapsible = document.querySelector('.collapsible-rows');
+    toggleBtn.addEventListener('click', () => {
+      collapsible.classList.toggle('collapsed');
+      toggleBtn.querySelector('.toggle-arrow').textContent =
+        collapsible.classList.contains('collapsed') ? '▲' : '▼';
+    });
+
+    document.querySelector('#btnShuffle').click();
+
+    const maps = window.roulette.getMaps();
+    const mapSelector = document.querySelector('#sltMap');
+    maps.forEach((map) => {
+      const option = document.createElement('option');
+      option.value = map.index;
+      option.innerHTML = map.title;
+      option.setAttribute('data-trans', '');
+      window.translateElement(option);
+      mapSelector.append(option);
+    });
+    mapSelector.addEventListener('change', (e) => {
+      const index = parseInt(e.target.value, 10);
+      window.roulette.setMap(index);
+      notifyHost('mapChanged', { mapIndex: index });
+    });
+
+    // const checkDonateButtonLoaded = () => {
+    //   const btn = document.querySelector('span.bmc-btn-text');
+    //   if (!btn) {
+    //     setTimeout(checkDonateButtonLoaded, 100);
+    //   } else {
+    //     console.log('donation button has been loaded');
+    //     btn.setAttribute('data-trans', '');
+    //     window.translateElement(btn);
+    //   }
+    // };
+    // setTimeout(checkDonateButtonLoaded, 100);
+
+    const currentNotice = 5;
+    const noticeKey = 'lastViewedNotification';
+
+    const closeNotice = () => {
+      document.querySelector('#notice').style.display = 'none';
+      localStorage.setItem(noticeKey, currentNotice.toString());
+    };
+
+    const openNotice = () => {
+      console.log('openNotice');
+      document.querySelector('#notice').style.display = 'flex';
+    };
+
+    document.querySelector('#closeNotice').addEventListener('click', () => {
+      closeNotice();
+    });
+
+    document.querySelector('#btnNotice').addEventListener('click', () => {
+      openNotice();
+    });
+
+    const checkNotice = () => {
+      if (isFromApp) {
+        return;
+      }
+      const lastViewed = localStorage.getItem(noticeKey);
+      console.log('lastViewed', lastViewed);
+      if (lastViewed === null || Number(lastViewed) < currentNotice) {
+        openNotice();
+      }
+    };
+
+    checkNotice();
+
+    initialized = true;
+    if (bootPayload) {
+      applyBridgeSettings(bootPayload);
+    }
+
+    const hasInitialCandidates = getNames().length > 0;
+    const shouldAutoStart =
+      (isFromApp && hasInitialCandidates) ||
+      pendingBridgeAutoStart ||
+      (bootPayload && bootPayload.autoStart === true) ||
+      urlParams.get('autostart') === '1';
+
+    const autoStartPayload = pendingBridgePayload || bootPayload || {};
+    pendingBridgePayload = null;
+    pendingBridgeAutoStart = false;
+
+    notifyHost('ready', {
+      count: window.roulette.getCount(),
+      candidates: getNames().slice(),
+      winnerType,
+      winningRank: window.options.winningRank + 1,
+    });
+
+    if (shouldAutoStart) {
+      setTimeout(() => {
+        startFromBridge(autoStartPayload);
+      }, 120);
+    }
+  }
+</script>
+<div id="settings" class="settings">
+  <div class="right">
+    <button id="btnToggleSettings" class="btn-toggle-settings">
+      <span data-trans>Settings</span>
+      <i class="toggle-arrow">▲</i>
+    </button>
+    <div class="collapsible-rows collapsed">
+      <div class="row">
+        <label for='sltMap'>
+          <i class="icon map"></i>
+          <span data-trans>Map</span>
+        </label>
+        <select id="sltMap"></select>
+      </div>
+      <div class="row row-toggles">
+        <div class='toggle-item'>
+          <label for='chkAutoRecording'>
+            <i class="icon record"></i>
+            <span data-trans>Recording</span>
+          </label>
+          <input type="checkbox" id="chkAutoRecording" />
+        </div>
+        <div class='toggle-item'>
+          <label for='chkSkill'>
+            <i class="icon bomb"></i>
+            <span data-trans>Using skills</span>
+          </label>
+          <input type="checkbox" id="chkSkill" checked />
+        </div>
+      </div>
+      <div class="row">
+        <label>
+          <i class="icon trophy"></i>
+          <span data-trans>The winner is</span>
+        </label>
+        <div class="btn-group">
+          <button class="btn-winner btn-first-winner active" data-trans>First</button>
+          <button class="btn-winner btn-last-winner" data-trans>Last</button>
+          <input type="number" id="in_winningRank" value="1" min="1" />
+        </div>
+      </div>
+      <div class="row row-theme">
+        <div class='theme'>
+          <i class='icon sun'></i>
+          <input type='checkbox' id='chkDarkMode' checked />
+          <i class='icon moon'></i>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="left">
+    <h3 data-trans>Enter names below</h3>
+    <textarea id="in_names" placeholder="Input names separated by commas or line feed here" data-trans="placeholder">수박*2,키위*2,귤*2</textarea>
+    <div class="actions">
+      <button id="btnNotice">
+        <i class="icon megaphone"></i>
+      </button>
+      <a href='https://marblerouletteshop.com' target='_blank' id="btnShop" class='btn new' title='MarbleRoulette Shop'>
+        <img src='assets/images/marblerouletteshop.png' />
+      </a>
+      <div class="sep"></div>
+      <button id="btnShuffle">
+        <i class="icon shuffle"></i>
+        <span data-trans>Shuffle</span>
+      </button>
+      <button id="btnStart">
+        <i class="icon play"></i>
+        <span data-trans>Start</span>
+      </button>
+    </div>
+  </div>
+</div>
+<div id="notice">
+  <h1>Notice</h1>
+  <div class="notice-body">
+    <h2>커스텀 룰렛 기능 오픈!</h2>
+    <p>나만의 특별한 룰렛을 만들 수 있는 커스텀 룰렛 기능이 오픈했어요!</p>
+    <p>
+      <a href='https://marblerouletteshop.com/intro/roulette' target='_blank' class='shop-button holographic'><img
+        src='assets/images/marblerouletteshop.png' width='125' height='125' /> 룰렛 꾸미러 가기</a>
+    </p>
+  </div>
+  <div class="notice-action">
+    <button id="closeNotice" data-trans>Close</button>
+  </div>
+</div>
+<div class="copyright">&copy; 2022-2026.<a href="https://lazygyu.net" target="_blank">lazygyu</a> <span data-trans>This program is freeware and may be used freely anywhere, including in broadcasts and videos.</span>
+</div>
+</body>
+</html>

@@ -1,0 +1,1636 @@
+{
+  "schemaVersion": 1,
+  "id": "m7_PinBall",
+  "title": "m7_PinBall",
+  "stage": {
+    "goalY": 186.8,
+    "zoomY": 200,
+    "leftWallX": 2.5,
+    "rightWallX": 59.7,
+    "disableSkills": false,
+    "disableSkillsInSlowMotion": true,
+    "skillWarmupSec": 5,
+    "spawn": {
+      "x": 34.8,
+      "y": 15.1,
+      "columns": 10,
+      "spacingX": 0.6,
+      "visibleRows": 5
+    },
+    "skillWarmupMs": 5000,
+    "topWallY": 2,
+    "marbleSizeScale": 1,
+    "marbleRadius": 0.25
+  },
+  "objects": [
+    {
+      "oid": "wall-left",
+      "type": "wall_polyline",
+      "points": [
+        [
+          2.5,
+          2
+        ],
+        [
+          2.5,
+          188.8
+        ]
+      ],
+      "color": "#ff7cc8",
+      "restitution": 0,
+      "friction": 0.35
+    },
+    {
+      "oid": "wall-right",
+      "type": "wall_polyline",
+      "points": [
+        [
+          59.7,
+          2
+        ],
+        [
+          59.7,
+          188.8
+        ]
+      ],
+      "color": "#ff7cc8",
+      "restitution": 0,
+      "friction": 0.35
+    },
+    {
+      "oid": "hammer_1",
+      "type": "hammer",
+      "x": 9.5,
+      "y": 45.2,
+      "width": 7.8,
+      "height": 9.7,
+      "rotation": 0,
+      "dirDeg": 90,
+      "force": 2,
+      "intervalMs": 800,
+      "doubleHit": false,
+      "triggerRadius": 9.8,
+      "cooldownMs": 220,
+      "swingDeg": 26,
+      "swingDurationMs": 220,
+      "hitDistance": 7.3,
+      "color": "#ffa557",
+      "restitution": 0.12,
+      "friction": 0.2
+    },
+    {
+      "oid": "diamond_block_2",
+      "type": "diamond_block",
+      "x": 14.2,
+      "y": 96,
+      "width": 0.7,
+      "height": 0.7,
+      "rotation": 45,
+      "restitution": 1.5,
+      "color": "#6affea",
+      "friction": 0.2,
+      "rotateEnabled": true,
+      "radius": 0.6,
+      "pair": "",
+      "dirDeg": 90,
+      "force": 4.2,
+      "intervalMs": 1200,
+      "rotateSpeedDeg": 120,
+      "rotateSpeedAuto": true
+    },
+    {
+      "oid": "diamond_block_4",
+      "type": "diamond_block",
+      "x": 11.5,
+      "y": 60,
+      "width": 1.1,
+      "height": 1.1,
+      "rotation": 53.5,
+      "restitution": 1.5,
+      "color": "#ff4fa8",
+      "friction": 0.2,
+      "radius": 0.6,
+      "pair": "",
+      "dirDeg": 90,
+      "force": 4.2,
+      "intervalMs": 1200,
+      "rotateEnabled": false,
+      "rotateSpeedDeg": 120,
+      "rotateSpeedAuto": false
+    },
+    {
+      "oid": "black_hole_1",
+      "type": "black_hole",
+      "x": 45.2,
+      "y": 91.1,
+      "radius": 4.9,
+      "triggerRadius": 15.3,
+      "suctionForce": 0.8,
+      "cooldownMs": 900,
+      "launchImpulse": 3.6,
+      "color": "#7b55b8",
+      "restitution": 0.12,
+      "friction": 0.2
+    },
+    {
+      "oid": "white_hole_1",
+      "type": "white_hole",
+      "x": 8.2,
+      "y": 53.4,
+      "radius": 2.1,
+      "cooldownMs": 900,
+      "launchImpulse": 4.6,
+      "color": "#f4fbff",
+      "restitution": 0.12,
+      "friction": 0.2
+    },
+    {
+      "oid": "wall_5",
+      "type": "wall_polyline",
+      "points": [
+        [
+          2.4,
+          51.5
+        ],
+        [
+          4.6,
+          53.1
+        ],
+        [
+          3.4,
+          57.8
+        ],
+        [
+          2.5,
+          68.2
+        ]
+      ],
+      "color": "#ff7cc8",
+      "restitution": 0,
+      "friction": 0.35
+    },
+    {
+      "oid": "wall_7",
+      "type": "wall_polyline",
+      "points": [
+        [
+          2.6,
+          76.3
+        ],
+        [
+          5.5,
+          85.6
+        ],
+        [
+          10.6,
+          94.1
+        ],
+        [
+          16.8,
+          104.2
+        ]
+      ],
+      "color": "#ff7cc8",
+      "restitution": 0.5,
+      "friction": 0.35
+    },
+    {
+      "oid": "wall_4",
+      "type": "wall_polyline",
+      "points": [
+        [
+          28.7,
+          7.6
+        ],
+        [
+          27.9,
+          23.9
+        ],
+        [
+          30.8,
+          35.3
+        ],
+        [
+          26.3,
+          39.5
+        ],
+        [
+          24.3,
+          44.1
+        ],
+        [
+          23,
+          49
+        ],
+        [
+          23,
+          54.1
+        ],
+        [
+          23,
+          57.2
+        ]
+      ],
+      "color": "#ff7cc8",
+      "restitution": 0,
+      "friction": 0.35
+    },
+    {
+      "oid": "stopwatch_4",
+      "type": "stopwatch_bomb",
+      "x": 45.1,
+      "y": 64.8,
+      "radius": 0.6,
+      "triggerRadius": 2.2,
+      "force": 12,
+      "intervalMs": 800,
+      "restitution": 0.08,
+      "color": "#ff5c6f",
+      "friction": 0.2
+    },
+    {
+      "oid": "stopwatch_5",
+      "type": "stopwatch_bomb",
+      "x": 24.5,
+      "y": 83,
+      "radius": 0.6,
+      "triggerRadius": 2.2,
+      "force": 12,
+      "intervalMs": 800,
+      "restitution": 0.08,
+      "color": "#ff5c6f",
+      "friction": 0.2
+    },
+    {
+      "oid": "stopwatch_6",
+      "type": "stopwatch_bomb",
+      "x": 31.4,
+      "y": 97.7,
+      "radius": 0.6,
+      "triggerRadius": 2.2,
+      "force": 12,
+      "intervalMs": 800,
+      "restitution": 0.08,
+      "color": "#ff5c6f",
+      "friction": 0.2
+    },
+    {
+      "oid": "rotor_1",
+      "type": "rotor",
+      "x": 46.9,
+      "y": 75.8,
+      "width": 8.1,
+      "height": 0.1,
+      "angularVelocity": -2.2,
+      "color": "#ff66c8",
+      "rotation": 351.5,
+      "restitution": 3,
+      "friction": 0.2
+    },
+    {
+      "oid": "diamond_2",
+      "type": "diamond_block",
+      "x": 34.6,
+      "y": 56,
+      "width": 1,
+      "height": 1,
+      "rotation": 54.8,
+      "restitution": 3,
+      "color": "#6affea",
+      "friction": 0.2,
+      "radius": 0.6,
+      "pair": "",
+      "dirDeg": 90,
+      "force": 4.2,
+      "intervalMs": 1200,
+      "rotateEnabled": true,
+      "rotateSpeedDeg": 120,
+      "rotateSpeedAuto": false
+    },
+    {
+      "oid": "diamond_3",
+      "type": "diamond_block",
+      "x": 41,
+      "y": 61.5,
+      "width": 1.2,
+      "height": 1.2,
+      "rotation": 40.3,
+      "restitution": 3,
+      "color": "#6affea",
+      "friction": 0.2,
+      "radius": 0.6,
+      "pair": "",
+      "dirDeg": 90,
+      "force": 4.2,
+      "intervalMs": 1200,
+      "rotateEnabled": true,
+      "rotateSpeedDeg": -120,
+      "rotateSpeedAuto": false
+    },
+    {
+      "oid": "diamond_4",
+      "type": "diamond_block",
+      "x": 28.8,
+      "y": 66,
+      "width": 2.5,
+      "height": 2.5,
+      "rotation": 45,
+      "restitution": 3,
+      "color": "#6affea",
+      "friction": 0.2,
+      "rotateEnabled": true,
+      "radius": 0.6,
+      "pair": "",
+      "dirDeg": 90,
+      "force": 4.2,
+      "intervalMs": 1200,
+      "rotateSpeedDeg": 120,
+      "rotateSpeedAuto": false
+    },
+    {
+      "oid": "wall_9",
+      "type": "wall_polyline",
+      "points": [
+        [
+          28.7,
+          7.6
+        ],
+        [
+          43.4,
+          7.6
+        ],
+        [
+          45.8,
+          26.8
+        ],
+        [
+          48.5,
+          36.4
+        ],
+        [
+          52.2,
+          41.3
+        ],
+        [
+          55.6,
+          49.9
+        ],
+        [
+          59.2,
+          61.2
+        ],
+        [
+          59.6,
+          65.4
+        ]
+      ],
+      "color": "#ff7cc8",
+      "restitution": 2,
+      "friction": 0.35
+    },
+    {
+      "oid": "rotor_2",
+      "type": "rotor",
+      "x": 51.8,
+      "y": 128.2,
+      "width": 10.9,
+      "height": 0.1,
+      "angularVelocity": 4.2,
+      "color": "#ff66c8",
+      "rotation": 335.6,
+      "restitution": 2,
+      "friction": 0.2
+    },
+    {
+      "oid": "wall_10",
+      "type": "wall_polyline",
+      "points": [
+        [
+          59.6,
+          65.4
+        ],
+        [
+          56.2,
+          69.2
+        ]
+      ],
+      "color": "#ff7cc8",
+      "restitution": 0,
+      "friction": 0.35
+    },
+    {
+      "oid": "wall_11",
+      "type": "wall_polyline",
+      "points": [
+        [
+          56.1,
+          69.2
+        ],
+        [
+          59.8,
+          72.9
+        ]
+      ],
+      "color": "#ff7cc8",
+      "restitution": 0,
+      "friction": 0.35
+    },
+    {
+      "oid": "rotor_3",
+      "type": "rotor",
+      "x": 32.4,
+      "y": 34.8,
+      "width": 1.7,
+      "height": 0.1,
+      "angularVelocity": 4,
+      "color": "#ff66c8",
+      "rotation": 339.4,
+      "restitution": 0,
+      "friction": 0.2
+    },
+    {
+      "oid": "rotor_4",
+      "type": "rotor",
+      "x": 42.8,
+      "y": 27.5,
+      "width": 4.3,
+      "height": 0.1,
+      "angularVelocity": -5,
+      "color": "#ff66c8",
+      "rotation": 7.9,
+      "restitution": 0,
+      "friction": 0.2
+    },
+    {
+      "oid": "box_1",
+      "type": "box_block",
+      "x": 8.4,
+      "y": 47.3,
+      "width": 5.9,
+      "height": 2.7,
+      "rotation": 0,
+      "restitution": 0.08,
+      "color": "#ff4fa8",
+      "friction": 0.2
+    },
+    {
+      "oid": "box_2",
+      "type": "box_block",
+      "x": 14.6,
+      "y": 51.9,
+      "width": 2.4,
+      "height": 4.4,
+      "rotation": 0,
+      "restitution": 0.08,
+      "color": "#ff4fa8",
+      "friction": 0.2
+    },
+    {
+      "oid": "box_5",
+      "type": "box_block",
+      "x": 9.8,
+      "y": 37.5,
+      "width": 7.3,
+      "height": 10.5,
+      "rotation": 0,
+      "restitution": 0.08,
+      "color": "#ff4fa8",
+      "friction": 0.2
+    },
+    {
+      "oid": "wall_2",
+      "type": "wall_polyline",
+      "points": [
+        [
+          13.4,
+          66.3
+        ],
+        [
+          18.5,
+          59.9
+        ]
+      ],
+      "color": "#ff7cc8",
+      "restitution": 3,
+      "friction": 0.35
+    },
+    {
+      "oid": "burst_bumper_18",
+      "type": "burst_bumper",
+      "x": 47.6,
+      "y": 49.7,
+      "radius": 3.6,
+      "restitution": 3.2,
+      "life": -1,
+      "triggerRadius": 4.1,
+      "force": 6.2,
+      "intervalMs": 420,
+      "layers": 3,
+      "hpPerLayer": 1,
+      "color": "#5dff7a",
+      "damagePerHit": 1,
+      "friction": 0.2
+    },
+    {
+      "oid": "burst_bumper_19",
+      "type": "burst_bumper",
+      "x": 26.7,
+      "y": 50.9,
+      "radius": 3.8,
+      "restitution": 3.2,
+      "life": -1,
+      "triggerRadius": 4.3,
+      "force": 6.2,
+      "intervalMs": 420,
+      "layers": 3,
+      "hpPerLayer": 1,
+      "color": "#5dff7a",
+      "damagePerHit": 1,
+      "friction": 0.2
+    },
+    {
+      "oid": "burst_bumper_20",
+      "type": "burst_bumper",
+      "x": 20.5,
+      "y": 70.6,
+      "radius": 7.4,
+      "restitution": 3.2,
+      "life": -1,
+      "triggerRadius": 7.9,
+      "force": 6.2,
+      "intervalMs": 420,
+      "layers": 3,
+      "hpPerLayer": 1,
+      "color": "#5dff7a",
+      "damagePerHit": 1,
+      "friction": 0.2
+    },
+    {
+      "oid": "burst_bumper_21",
+      "type": "burst_bumper",
+      "x": 52.8,
+      "y": 65.3,
+      "radius": 3.4,
+      "restitution": 3.2,
+      "life": -1,
+      "triggerRadius": 3.9,
+      "force": 6.2,
+      "intervalMs": 420,
+      "layers": 3,
+      "hpPerLayer": 1,
+      "color": "#5dff7a",
+      "damagePerHit": 1,
+      "friction": 0.2
+    },
+    {
+      "oid": "burst_bumper_23",
+      "type": "burst_bumper",
+      "x": 47.6,
+      "y": 49.7,
+      "radius": 3.6,
+      "restitution": 3.2,
+      "life": -1,
+      "triggerRadius": 4.1,
+      "force": 6.2,
+      "intervalMs": 420,
+      "layers": 3,
+      "hpPerLayer": 1,
+      "color": "#5dff7a",
+      "damagePerHit": 1,
+      "friction": 0.2
+    },
+    {
+      "oid": "burst_bumper_24",
+      "type": "burst_bumper",
+      "x": 26.7,
+      "y": 50.9,
+      "radius": 3.8,
+      "restitution": 3.2,
+      "life": -1,
+      "triggerRadius": 4.3,
+      "force": 6.2,
+      "intervalMs": 420,
+      "layers": 3,
+      "hpPerLayer": 1,
+      "color": "#5dff7a",
+      "damagePerHit": 1,
+      "friction": 0.2
+    },
+    {
+      "oid": "burst_bumper_25",
+      "type": "burst_bumper",
+      "x": 20.5,
+      "y": 70.6,
+      "radius": 7.4,
+      "restitution": 3.2,
+      "life": -1,
+      "triggerRadius": 7.9,
+      "force": 6.2,
+      "intervalMs": 420,
+      "layers": 3,
+      "hpPerLayer": 1,
+      "color": "#5dff7a",
+      "damagePerHit": 1,
+      "friction": 0.2
+    },
+    {
+      "oid": "burst_bumper_26",
+      "type": "burst_bumper",
+      "x": 52.8,
+      "y": 65.3,
+      "radius": 3.4,
+      "restitution": 3.2,
+      "life": -1,
+      "triggerRadius": 3.9,
+      "force": 6.2,
+      "intervalMs": 420,
+      "layers": 3,
+      "hpPerLayer": 1,
+      "color": "#5dff7a",
+      "damagePerHit": 1,
+      "friction": 0.2
+    },
+    {
+      "oid": "diamond_1",
+      "type": "diamond_block",
+      "x": 59.8,
+      "y": 80.3,
+      "width": 2.3,
+      "height": 2.3,
+      "rotation": 45,
+      "restitution": 1.5,
+      "color": "#ff4fa8",
+      "friction": 0.2,
+      "radius": 0.6,
+      "pair": "",
+      "dirDeg": 90,
+      "force": 4.2,
+      "intervalMs": 1200,
+      "rotateEnabled": false,
+      "rotateSpeedDeg": 120,
+      "rotateSpeedAuto": false
+    },
+    {
+      "oid": "box_3",
+      "type": "box_block",
+      "x": 36.1,
+      "y": 8,
+      "width": 7.5,
+      "height": 1.6,
+      "rotation": 0,
+      "restitution": 4,
+      "color": "#ff4fa8",
+      "friction": 0.2,
+      "radius": 0.6,
+      "pair": "",
+      "dirDeg": 90,
+      "force": 4.2,
+      "intervalMs": 1200
+    },
+    {
+      "oid": "wall_3",
+      "type": "wall_polyline",
+      "points": [
+        [
+          16.8,
+          104.2
+        ],
+        [
+          13.6,
+          112.2
+        ],
+        [
+          8.6,
+          120.7
+        ],
+        [
+          5.5,
+          131
+        ],
+        [
+          5.2,
+          147
+        ],
+        [
+          7.8,
+          155.9
+        ],
+        [
+          11.7,
+          163.4
+        ],
+        [
+          18.1,
+          167
+        ],
+        [
+          24.2,
+          170.4
+        ],
+        [
+          24.2,
+          184.4
+        ]
+      ],
+      "color": "#ff7cc8",
+      "restitution": 0.5,
+      "friction": 0.35
+    },
+    {
+      "oid": "wall_8",
+      "type": "wall_polyline",
+      "points": [
+        [
+          37.9,
+          185.1
+        ],
+        [
+          37.9,
+          171
+        ],
+        [
+          44.6,
+          165.9
+        ],
+        [
+          53.1,
+          155.7
+        ],
+        [
+          58.2,
+          145
+        ],
+        [
+          59.8,
+          137.9
+        ]
+      ],
+      "color": "#ff7cc8",
+      "restitution": 0.5,
+      "friction": 0.35
+    },
+    {
+      "oid": "box_6",
+      "type": "box_block",
+      "x": 0,
+      "y": 93.8,
+      "width": 2.9,
+      "height": 93.4,
+      "rotation": 0,
+      "restitution": 0.08,
+      "color": "#ff4fa8",
+      "friction": 0.2
+    },
+    {
+      "oid": "box_7",
+      "type": "box_block",
+      "x": 62.5,
+      "y": 89.4,
+      "width": 2.9,
+      "height": 97.1,
+      "rotation": 0,
+      "restitution": 0.08,
+      "color": "#ff4fa8",
+      "friction": 0.2
+    },
+    {
+      "oid": "rotor_5",
+      "type": "rotor",
+      "x": 16.8,
+      "y": 104.1,
+      "width": 0.9,
+      "height": 0.1,
+      "angularVelocity": 2.2,
+      "color": "#ff66c8",
+      "rotation": 0,
+      "restitution": 1.5,
+      "friction": 0.2
+    },
+    {
+      "oid": "wall_12",
+      "type": "wall_filled_polyline",
+      "points": [
+        [
+          2.5,
+          76.4
+        ],
+        [
+          5.5,
+          85.6
+        ],
+        [
+          16.8,
+          104.2
+        ],
+        [
+          13.6,
+          112.2
+        ],
+        [
+          8.6,
+          120.7
+        ],
+        [
+          5.5,
+          131
+        ],
+        [
+          5.2,
+          147
+        ],
+        [
+          7.8,
+          155.9
+        ],
+        [
+          11.7,
+          163.4
+        ],
+        [
+          24.2,
+          170.4
+        ],
+        [
+          24.2,
+          186.8
+        ],
+        [
+          2.5,
+          186.8
+        ],
+        [
+          2.5,
+          76.4
+        ]
+      ],
+      "fillOpacity": 1,
+      "color": "#ff4fa8",
+      "restitution": 0,
+      "friction": 0.35
+    },
+    {
+      "oid": "wall_13",
+      "type": "wall_filled_polyline",
+      "points": [
+        [
+          37.9,
+          186.8
+        ],
+        [
+          37.9,
+          171
+        ],
+        [
+          44.7,
+          165.8
+        ],
+        [
+          53.1,
+          155.7
+        ],
+        [
+          58.2,
+          145
+        ],
+        [
+          59.8,
+          138
+        ],
+        [
+          59.9,
+          186.8
+        ],
+        [
+          37.9,
+          186.8
+        ]
+      ],
+      "fillOpacity": 1,
+      "color": "#ff4fa8",
+      "restitution": 0,
+      "friction": 0.35
+    },
+    {
+      "oid": "wall_14",
+      "type": "wall_filled_polyline",
+      "points": [
+        [
+          12.4,
+          55.1
+        ],
+        [
+          10.6,
+          59.6
+        ],
+        [
+          9.6,
+          67.8
+        ],
+        [
+          10.1,
+          76.7
+        ],
+        [
+          12.7,
+          84.2
+        ],
+        [
+          17.1,
+          89.8
+        ],
+        [
+          22,
+          91.4
+        ],
+        [
+          18,
+          88.3
+        ],
+        [
+          14.7,
+          83.5
+        ],
+        [
+          13.1,
+          76.1
+        ],
+        [
+          13.2,
+          67.6
+        ],
+        [
+          14.8,
+          59.9
+        ],
+        [
+          16.9,
+          56.6
+        ],
+        [
+          17,
+          56.2
+        ],
+        [
+          12.4,
+          55.1
+        ]
+      ],
+      "fillOpacity": 1,
+      "color": "#ff4fa8",
+      "restitution": 0,
+      "friction": 0.35
+    },
+    {
+      "oid": "wall_15",
+      "type": "wall_filled_polyline",
+      "points": [
+        [
+          13.5,
+          66.2
+        ],
+        [
+          18.5,
+          59.9
+        ],
+        [
+          23,
+          57.2
+        ],
+        [
+          23,
+          49
+        ],
+        [
+          24.3,
+          44.1
+        ],
+        [
+          26.3,
+          39.5
+        ],
+        [
+          30.8,
+          35.3
+        ],
+        [
+          27.9,
+          23.9
+        ],
+        [
+          28.7,
+          7.6
+        ],
+        [
+          38.8,
+          7.6
+        ],
+        [
+          38.3,
+          0
+        ],
+        [
+          1.5,
+          0
+        ],
+        [
+          1.8,
+          47.8
+        ],
+        [
+          13.9,
+          48
+        ],
+        [
+          14.2,
+          58.8
+        ],
+        [
+          13.5,
+          66.2
+        ]
+      ],
+      "fillOpacity": 1,
+      "color": "#ff4fa8",
+      "restitution": 3,
+      "friction": 0.35
+    },
+    {
+      "oid": "wall_17",
+      "type": "wall_filled_polyline",
+      "points": [
+        [
+          12.2,
+          55.9
+        ],
+        [
+          12.2,
+          53
+        ],
+        [
+          11.7,
+          51.1
+        ],
+        [
+          10.4,
+          49.9
+        ],
+        [
+          10.2,
+          48.1
+        ],
+        [
+          8.8,
+          47.1
+        ],
+        [
+          11.8,
+          46.6
+        ],
+        [
+          14.9,
+          46.8
+        ],
+        [
+          15.5,
+          57.4
+        ],
+        [
+          12.5,
+          56.7
+        ],
+        [
+          12.2,
+          55.9
+        ]
+      ],
+      "fillOpacity": 1,
+      "color": "#ff4fa8",
+      "restitution": 0,
+      "friction": 0.35
+    },
+    {
+      "oid": "wall_18",
+      "type": "wall_filled_polyline",
+      "points": [
+        [
+          59.7,
+          72.8
+        ],
+        [
+          56.1,
+          69.2
+        ],
+        [
+          59.6,
+          65.4
+        ],
+        [
+          59.2,
+          61.2
+        ],
+        [
+          55.6,
+          50.1
+        ],
+        [
+          52.2,
+          41.3
+        ],
+        [
+          48.4,
+          36.3
+        ],
+        [
+          45.8,
+          26.7
+        ],
+        [
+          43.6,
+          9.6
+        ],
+        [
+          43.4,
+          7.6
+        ],
+        [
+          38.1,
+          7.6
+        ],
+        [
+          37.6,
+          0
+        ],
+        [
+          60.5,
+          0
+        ],
+        [
+          60.5,
+          73.3
+        ],
+        [
+          59.7,
+          72.8
+        ]
+      ],
+      "fillOpacity": 1,
+      "color": "#ff4fa8",
+      "restitution": 0,
+      "friction": 0.35
+    },
+    {
+      "oid": "wall_19",
+      "type": "wall_filled_polyline",
+      "points": [
+        [
+          24.2,
+          44.4
+        ],
+        [
+          25.9,
+          46.1
+        ],
+        [
+          22.8,
+          49.2
+        ],
+        [
+          23.1,
+          44.8
+        ],
+        [
+          24.2,
+          44.4
+        ]
+      ],
+      "fillOpacity": 1,
+      "color": "#ff4fa8",
+      "restitution": 0,
+      "friction": 0.35
+    },
+    {
+      "oid": "bottom_bumper_1",
+      "type": "bottom_bumper",
+      "x": 36.2,
+      "y": 174.1,
+      "width": 4.1,
+      "height": 0.3,
+      "rotation": 159,
+      "dirDeg": 159,
+      "mirror": false,
+      "force": 3.8,
+      "intervalMs": 350,
+      "triggerRadius": 4.5,
+      "cooldownMs": 160,
+      "swingDeg": 34,
+      "swingDurationMs": 210,
+      "hitDistance": 5.5,
+      "restitution": 0.16,
+      "color": "#58b8ff",
+      "friction": 0,
+      "breakHitCount": 25
+    },
+    {
+      "oid": "bottom_bumper_2",
+      "type": "bottom_bumper",
+      "x": 26.1,
+      "y": 171.7,
+      "width": 3.8,
+      "height": 0.3,
+      "rotation": 209,
+      "dirDeg": 209,
+      "mirror": true,
+      "force": 3.8,
+      "intervalMs": 780,
+      "triggerRadius": 4.2,
+      "cooldownMs": 160,
+      "swingDeg": 34,
+      "swingDurationMs": 210,
+      "hitDistance": 5.1,
+      "restitution": 0.16,
+      "color": "#58b8ff",
+      "friction": 0,
+      "breakHitCount": 25
+    },
+    {
+      "oid": "wall_16",
+      "type": "wall_filled_polyline",
+      "points": [
+        [
+          2.8,
+          51.8
+        ],
+        [
+          4.6,
+          53.1
+        ],
+        [
+          3.4,
+          57.8
+        ],
+        [
+          2.9,
+          63.4
+        ],
+        [
+          2.8,
+          51.8
+        ]
+      ],
+      "fillOpacity": 1,
+      "color": "#ff4fa8",
+      "restitution": 0,
+      "friction": 0.35
+    },
+    {
+      "oid": "wall_20",
+      "type": "wall_filled_polyline",
+      "points": [
+        [
+          2.3,
+          57.5
+        ],
+        [
+          4.5,
+          53.3
+        ],
+        [
+          4.6,
+          53
+        ],
+        [
+          4.6,
+          51.8
+        ],
+        [
+          5.2,
+          50.7
+        ],
+        [
+          7.4,
+          49.4
+        ],
+        [
+          0.4,
+          49.4
+        ],
+        [
+          2.3,
+          57.5
+        ]
+      ],
+      "fillOpacity": 1,
+      "color": "#ff4fa8",
+      "restitution": 0,
+      "friction": 0.35
+    },
+    {
+      "oid": "burst_11",
+      "type": "burst_bumper",
+      "x": 15,
+      "y": 95.2,
+      "radius": 0.72,
+      "restitution": 3.2,
+      "life": -1,
+      "triggerRadius": 1.2,
+      "force": 6.2,
+      "intervalMs": 420,
+      "layers": 3,
+      "hpPerLayer": 1,
+      "color": "#5dff7a",
+      "damagePerHit": 1,
+      "friction": 0.2
+    },
+    {
+      "oid": "burst_12",
+      "type": "burst_bumper",
+      "x": 16.4,
+      "y": 93.5,
+      "radius": 0.72,
+      "restitution": 3.2,
+      "life": -1,
+      "triggerRadius": 1.2,
+      "force": 6.2,
+      "intervalMs": 420,
+      "layers": 3,
+      "hpPerLayer": 1,
+      "color": "#5dff7a",
+      "damagePerHit": 1,
+      "friction": 0.2
+    },
+    {
+      "oid": "burst_22",
+      "type": "burst_bumper",
+      "x": 17.8,
+      "y": 91.8,
+      "radius": 0.72,
+      "restitution": 3.2,
+      "life": -1,
+      "triggerRadius": 1.2,
+      "force": 6.2,
+      "intervalMs": 420,
+      "layers": 3,
+      "hpPerLayer": 1,
+      "color": "#5dff7a",
+      "damagePerHit": 1,
+      "friction": 0.2
+    },
+    {
+      "oid": "peg_1",
+      "type": "peg_circle",
+      "x": 20.3,
+      "y": 140.5,
+      "radius": 6,
+      "restitution": 2,
+      "life": -1,
+      "color": "#ff62bf",
+      "width": 1.2,
+      "height": 0.2,
+      "rotation": 0,
+      "pair": "",
+      "dirDeg": 90,
+      "force": 4.2,
+      "intervalMs": 1200,
+      "friction": 0.2
+    },
+    {
+      "oid": "peg_circle_1",
+      "type": "peg_circle",
+      "x": 31,
+      "y": 154,
+      "radius": 6,
+      "restitution": 2,
+      "life": -1,
+      "color": "#ff62bf",
+      "friction": 0.2,
+      "width": 1.2,
+      "height": 0.2,
+      "rotation": 0,
+      "pair": "",
+      "dirDeg": 90,
+      "force": 4.2,
+      "intervalMs": 1200
+    },
+    {
+      "oid": "burst_8",
+      "type": "burst_bumper",
+      "x": 20.3,
+      "y": 140.5,
+      "radius": 2.9,
+      "restitution": 3.2,
+      "life": -1,
+      "triggerRadius": 4.4,
+      "force": 6.2,
+      "intervalMs": 420,
+      "layers": 3,
+      "hpPerLayer": 1,
+      "color": "#5dff7a",
+      "damagePerHit": 1,
+      "friction": 0.2
+    },
+    {
+      "oid": "burst_bumper_27",
+      "type": "burst_bumper",
+      "x": 41.8,
+      "y": 140.7,
+      "radius": 2.9,
+      "restitution": 3,
+      "life": -1,
+      "triggerRadius": 4.4,
+      "force": 6.2,
+      "intervalMs": 420,
+      "layers": 3,
+      "hpPerLayer": 1,
+      "color": "#5dff7a",
+      "damagePerHit": 1,
+      "friction": 0.2
+    },
+    {
+      "oid": "peg_circle_3",
+      "type": "peg_circle",
+      "x": 41.8,
+      "y": 140.8,
+      "radius": 6,
+      "restitution": 2,
+      "life": -1,
+      "color": "#ff62bf",
+      "friction": 0.2,
+      "width": 1.2,
+      "height": 0.2,
+      "rotation": 0,
+      "pair": "",
+      "dirDeg": 90,
+      "force": 4.2,
+      "intervalMs": 1200
+    },
+    {
+      "oid": "burst_bumper_28",
+      "type": "burst_bumper",
+      "x": 31.1,
+      "y": 154.1,
+      "radius": 2.9,
+      "restitution": 3,
+      "life": -1,
+      "triggerRadius": 4.4,
+      "force": 6.2,
+      "intervalMs": 420,
+      "layers": 3,
+      "hpPerLayer": 1,
+      "color": "#5dff7a",
+      "damagePerHit": 1,
+      "friction": 0.2
+    },
+    {
+      "oid": "peg_2",
+      "type": "peg_circle",
+      "x": 47.6,
+      "y": 49.7,
+      "radius": 4.4,
+      "restitution": 2.2,
+      "life": -1,
+      "color": "#ff62bf",
+      "friction": 0.2
+    },
+    {
+      "oid": "peg_4",
+      "type": "peg_circle",
+      "x": 26.7,
+      "y": 50.9,
+      "radius": 4.6,
+      "restitution": 2.2,
+      "life": -1,
+      "color": "#ff62bf",
+      "friction": 0.2
+    },
+    {
+      "oid": "peg_5",
+      "type": "peg_circle",
+      "x": 52.8,
+      "y": 65.3,
+      "radius": 4,
+      "restitution": 2.2,
+      "life": -1,
+      "color": "#ff62bf",
+      "friction": 0.2
+    },
+    {
+      "oid": "peg_6",
+      "type": "peg_circle",
+      "x": 20.5,
+      "y": 70.6,
+      "radius": 8.3,
+      "restitution": 3.5,
+      "life": -1,
+      "color": "#ff62bf",
+      "friction": 0.2,
+      "width": 1.2,
+      "height": 0.2,
+      "rotation": 0,
+      "pair": "",
+      "dirDeg": 90,
+      "force": 4.2,
+      "intervalMs": 1200
+    },
+    {
+      "oid": "diamond_5",
+      "type": "diamond_block",
+      "x": 36.7,
+      "y": 21.6,
+      "width": 1.3,
+      "height": 1.3,
+      "rotation": 45,
+      "rotateEnabled": true,
+      "restitution": 0.3,
+      "color": "#6affea",
+      "friction": 0.2,
+      "radius": 0.6,
+      "pair": "",
+      "dirDeg": 90,
+      "force": 4.2,
+      "intervalMs": 1200,
+      "rotateSpeedDeg": 120,
+      "rotateSpeedAuto": true
+    },
+    {
+      "oid": "rotor_6",
+      "type": "rotor",
+      "x": 38.1,
+      "y": 171,
+      "width": 1.2,
+      "height": 0.1,
+      "angularVelocity": 2.2,
+      "color": "#ff66c8",
+      "rotation": 323.6,
+      "restitution": 0.3,
+      "friction": 0.2
+    },
+    {
+      "oid": "diamond_6",
+      "type": "diamond_block",
+      "x": 20.1,
+      "y": 168.5,
+      "width": 0.4,
+      "height": 0.4,
+      "rotation": 45,
+      "rotateEnabled": true,
+      "rotateSpeedDeg": 120,
+      "restitution": 1.5,
+      "color": "#ff7cc8",
+      "friction": 0.2,
+      "radius": 0.6,
+      "pair": "",
+      "dirDeg": 90,
+      "force": 4.2,
+      "intervalMs": 1200,
+      "rotateSpeedAuto": true
+    },
+    {
+      "oid": "fan_1",
+      "type": "fan",
+      "x": 26.3,
+      "y": 186.1,
+      "width": 0.8,
+      "height": 2.3,
+      "rotation": 270,
+      "dirDeg": 270,
+      "force": 0.2,
+      "triggerRadius": 2.7,
+      "hitDistance": 12.5,
+      "color": "#7fd9ff",
+      "restitution": 0.12,
+      "friction": 0.2
+    },
+    {
+      "oid": "fan_2",
+      "type": "fan",
+      "x": 26.3,
+      "y": 186.1,
+      "width": 0.8,
+      "height": 2.3,
+      "rotation": 270,
+      "dirDeg": 270,
+      "force": 0.2,
+      "triggerRadius": 2.7,
+      "hitDistance": 12.5,
+      "color": "#7fd9ff",
+      "restitution": 0.12,
+      "friction": 0.2
+    },
+    {
+      "oid": "fan_3",
+      "type": "fan",
+      "x": 35.8,
+      "y": 186.1,
+      "width": 0.8,
+      "height": 2.3,
+      "rotation": 270,
+      "dirDeg": 270,
+      "force": 0.2,
+      "triggerRadius": 2.7,
+      "hitDistance": 12.5,
+      "color": "#7fd9ff",
+      "restitution": 0.12,
+      "friction": 0.2
+    }
+  ]
+}

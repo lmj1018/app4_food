@@ -2,14 +2,6 @@
   "version": 1,
   "maps": [
     {
-      "id": "v2_default",
-      "title": "v2_default",
-      "engine": "v2",
-      "file": "v2_default.json",
-      "enabled": true,
-      "sort": 100
-    },
-    {
       "id": "m5_Cosmic_Odyssey",
       "title": "m5_Cosmic_Odyssey",
       "engine": "v2",
@@ -26,12 +18,20 @@
       "sort": 120
     },
     {
-      "id": "v6_Spacetime_Labyrinth",
-      "title": "v6_Spacetime_Labyrinth",
+      "id": "m6_Spacetime_Labyrinth",
+      "title": "m6_Spacetime_Labyrinth",
       "engine": "v2",
-      "file": "v6_Spacetime_Labyrinth.json",
+      "file": "m6_Spacetime_Labyrinth.json",
       "enabled": true,
       "sort": 130
+    },
+    {
+      "id": "m8_Sticky_Hell",
+      "title": "m8_Sticky_Hell",
+      "engine": "v2",
+      "file": "m8_Sticky_Hell.json",
+      "enabled": true,
+      "sort": 140
     }
   ]
 }

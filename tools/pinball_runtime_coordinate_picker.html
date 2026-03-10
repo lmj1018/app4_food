@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pinball Runtime Coordinate Picker</title>
+  <style>
+    :root {
+      --bg: #111317;
+      --panel: #1b2028;
+      --panel-border: #2d3644;
+      --text: #e9edf3;
+      --muted: #a9b4c5;
+      --accent: #58f0ff;
+      --ok: #6df0a7;
+      --warn: #ffcc66;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: radial-gradient(circle at 10% 10%, #1c2431 0%, var(--bg) 48%);
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 1520px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+    .top {
+      border: 1px solid var(--panel-border);
+      background: linear-gradient(180deg, #1d2430 0%, #161b23 100%);
+      border-radius: 12px;
+      padding: 12px 14px;
+      margin-bottom: 14px;
+    }
+    .top h1 {
+      margin: 0 0 8px;
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 0.2px;
+    }
+    .help {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .status {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--ok);
+      min-height: 18px;
+    }
+    .warning {
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--warn);
+      min-height: 18px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(460px, 1fr));
+      gap: 12px;
+    }
+    .card {
+      border: 1px solid var(--panel-border);
+      background: var(--panel);
+      border-radius: 12px;
+      overflow: hidden;
+      min-width: 0;
+    }
+    .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--panel-border);
+      background: #1a212b;
+    }
+    .card-title {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 800;
+      color: #f5f8ff;
+    }
+    .coord {
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 12px;
+      color: var(--accent);
+      white-space: nowrap;
+    }
+    .canvas-wrap {
+      padding: 10px;
+    }
+    canvas {
+      width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 10px;
+      border: 1px solid #344052;
+      background: #22272f;
+      cursor: crosshair;
+    }
+    .hint {
+      padding: 8px 12px 12px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    #engineFrame {
+      display: none;
+      width: 0;
+      height: 0;
+      border: 0;
+    }
+    @media (max-width: 1080px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="top">
+      <h1>Pinball Runtime Coordinate Picker (actual map titles)</h1>
+      <p class="help">Source: <code>assets/ui/pinball/index.html</code> runtime <code>roulette.getMaps()</code>. Hover for coordinate, click to copy.</p>
+      <p class="help">Controls: wheel zoom, left-drag pan, double click reset.</p>
+      <div id="globalSelection" class="help">Selected: none</div>
+      <div id="copyStatus" class="status"></div>
+      <div id="warn" class="warning"></div>
+    </section>
+    <section id="mapGrid" class="grid"></section>
+  </div>
+
+  <iframe id="engineFrame" title="pinball-engine"></iframe>
+
+  <script>
+    (() => {
+      const mapGrid = document.getElementById('mapGrid');
+      const globalSelectionEl = document.getElementById('globalSelection');
+      const copyStatusEl = document.getElementById('copyStatus');
+      const warnEl = document.getElementById('warn');
+      const runtime = new Map();
+
+      const fmt = (v) => Number(v).toFixed(2);
+      const fmtCode = (v) => String(Number(Number(v).toFixed(2)));
+
+      function postWarn(msg) {
+        warnEl.textContent = msg || '';
+      }
+
+      function deepClone(obj) {
+        try { return JSON.parse(JSON.stringify(obj)); } catch (_) { return null; }
+      }
+
+      function computeBounds(stage) {
+        let minX = 2.0;
+        let maxX = 21.0;
+        let minY = 14.0;
+        let maxY = Math.max(80, Number(stage.goalY) || 220) + 12;
+        const entities = Array.isArray(stage.entities) ? stage.entities : [];
+
+        const grow = (x, y) => {
+          if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+          minX = Math.min(minX, x);
+          maxX = Math.max(maxX, x);
+          minY = Math.min(minY, y);
+          maxY = Math.max(maxY, y);
+        };
+
+        for (let i = 0; i < entities.length; i += 1) {
+          const e = entities[i];
+          if (!e || !e.shape) continue;
+          const s = e.shape;
+          if (s.type === 'polyline' && Array.isArray(s.points)) {
+            for (let j = 0; j < s.points.length; j += 1) {
+              const p = s.points[j];
+              if (Array.isArray(p) && p.length >= 2) {
+                grow(Number(p[0]), Number(p[1]));
+              }
+            }
+            continue;
+          }
+          const x = Number(e.position && e.position.x);
+          const y = Number(e.position && e.position.y);
+          if (s.type === 'circle') {
+            const r = Math.abs(Number(s.radius) || 0);
+            grow(x - r, y - r);
+            grow(x + r, y + r);
+            continue;
+          }
+          if (s.type === 'box') {
+            const w = Math.abs(Number(s.width) || 0);
+            const h = Math.abs(Number(s.height) || 0);
+            grow(x - w, y - h);
+            grow(x + w, y + h);
+          }
+        }
+
+        minX -= 0.8;
+        maxX += 0.8;
+        minY -= 1.0;
+        maxY += 1.0;
+        return { xMin: minX, xMax: maxX, yMin: minY, yMax: maxY };
+      }
+
+      function getViewport(canvas, view) {
+        const pad = 18;
+        const worldW = Math.max(1e-6, view.xMax - view.xMin);
+        const worldH = Math.max(1e-6, view.yMax - view.yMin);
+        const sx = (canvas.width - pad * 2) / worldW;
+        const sy = (canvas.height - pad * 2) / worldH;
+        const scale = Math.max(0.0001, Math.min(sx, sy));
+        const drawW = worldW * scale;
+        const drawH = worldH * scale;
+        const ox = (canvas.width - drawW) / 2 - view.xMin * scale;
+        const oy = (canvas.height - drawH) / 2 - view.yMin * scale;
+        return { scale, ox, oy };
+      }
+
+      function worldToScreen(vp, x, y) {
+        return { x: vp.ox + x * vp.scale, y: vp.oy + y * vp.scale };
+      }
+
+      function screenToWorld(vp, sx, sy) {
+        return { x: (sx - vp.ox) / vp.scale, y: (sy - vp.oy) / vp.scale };
+      }
+
+      function drawEntity(ctx, entity) {
+        const shape = entity.shape;
+        const color = shape.color || '#9fb2cb';
+        if (shape.type === 'polyline' && Array.isArray(shape.points) && shape.points.length > 1) {
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 0.12;
+          ctx.beginPath();
+          ctx.moveTo(shape.points[0][0], shape.points[0][1]);
+          for (let i = 1; i < shape.points.length; i += 1) {
+            ctx.lineTo(shape.points[i][0], shape.points[i][1]);
+          }
+          ctx.stroke();
+          return;
+        }
+        const px = Number(entity.position && entity.position.x) || 0;
+        const py = Number(entity.position && entity.position.y) || 0;
+        if (shape.type === 'circle') {
+          ctx.strokeStyle = color;
+          ctx.fillStyle = color + '66';
+          ctx.lineWidth = 0.08;
+          ctx.beginPath();
+          ctx.arc(px, py, Math.max(0.01, Number(shape.radius) || 0.1), 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          return;
+        }
+        if (shape.type === 'box') {
+          const w = Math.max(0.01, Number(shape.width) || 0.1);
+          const h = Math.max(0.01, Number(shape.height) || 0.1);
+          const rot = Number(shape.rotation) || 0;
+          ctx.save();
+          ctx.translate(px, py);
+          ctx.rotate(rot);
+          ctx.strokeStyle = color;
+          ctx.fillStyle = color + '66';
+          ctx.lineWidth = 0.08;
+          ctx.fillRect(-w, -h, w * 2, h * 2);
+          ctx.strokeRect(-w, -h, w * 2, h * 2);
+          ctx.restore();
+        }
+      }
+
+      function drawGrid(ctx, vp, view) {
+        const xStep = 1;
+        const yStep = 5;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(180, 195, 220, 0.16)';
+        ctx.lineWidth = 1;
+        const sx0 = Math.floor(view.xMin / xStep) * xStep;
+        const sy0 = Math.floor(view.yMin / yStep) * yStep;
+        for (let x = sx0; x <= view.xMax; x += xStep) {
+          const p1 = worldToScreen(vp, x, view.yMin);
+          const p2 = worldToScreen(vp, x, view.yMax);
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.stroke();
+        }
+        for (let y = sy0; y <= view.yMax; y += yStep) {
+          const p1 = worldToScreen(vp, view.xMin, y);
+          const p2 = worldToScreen(vp, view.xMax, y);
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      function renderMap(entry) {
+        const { canvas, ctx, stage, view, hover, locked } = entry;
+        const vp = getViewport(canvas, view);
+        entry.viewport = vp;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#262d38';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        drawGrid(ctx, vp, view);
+
+        ctx.save();
+        ctx.setTransform(vp.scale, 0, 0, vp.scale, vp.ox, vp.oy);
+        for (let i = 0; i < stage.entities.length; i += 1) {
+          const e = stage.entities[i];
+          if (e && e.shape) drawEntity(ctx, e);
+        }
+        ctx.restore();
+
+        const marker = hover || locked;
+        if (marker) {
+          const p = worldToScreen(vp, marker.x, marker.y);
+          ctx.save();
+          ctx.strokeStyle = hover ? '#58f0ff' : '#ffd05b';
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(0, p.y);
+          ctx.lineTo(canvas.width, p.y);
+          ctx.moveTo(p.x, 0);
+          ctx.lineTo(p.x, canvas.height);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.fillStyle = hover ? '#58f0ff' : '#ffd05b';
+          ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+
+      function toCanvasPoint(canvas, event) {
+        const rect = canvas.getBoundingClientRect();
+        return {
+          sx: (event.clientX - rect.left) * (canvas.width / rect.width),
+          sy: (event.clientY - rect.top) * (canvas.height / rect.height),
+        };
+      }
+
+      function setGlobalSelection(label, point) {
+        if (!point) {
+          globalSelectionEl.textContent = 'Selected: none';
+          return;
+        }
+        globalSelectionEl.textContent =
+          `Selected: ${label}  x=${fmt(point.x)}  y=${fmt(point.y)}   ->   position: { x: ${fmtCode(point.x)}, y: ${fmtCode(point.y)} },`;
+      }
+
+      async function copyCoordinateText(text) {
+        try {
+          if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+            await navigator.clipboard.writeText(text);
+            copyStatusEl.textContent = `Copied: ${text}`;
+            return;
+          }
+        } catch (_) {}
+        copyStatusEl.textContent = `Copy failed (clipboard blocked): ${text}`;
+      }
+
+      function attachInteractions(entry) {
+        const { canvas, coordEl, label } = entry;
+        canvas.addEventListener('mousemove', (event) => {
+          const p = toCanvasPoint(canvas, event);
+          const world = screenToWorld(entry.viewport, p.sx, p.sy);
+          entry.hover = world;
+          coordEl.textContent = `x=${fmt(world.x)}  y=${fmt(world.y)}`;
+
+          if (entry.dragging) {
+            const dx = p.sx - entry.dragLast.sx;
+            const dy = p.sy - entry.dragLast.sy;
+            const wx = dx / entry.viewport.scale;
+            const wy = dy / entry.viewport.scale;
+            entry.view.xMin -= wx;
+            entry.view.xMax -= wx;
+            entry.view.yMin -= wy;
+            entry.view.yMax -= wy;
+            entry.dragLast = p;
+          }
+          renderMap(entry);
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+          entry.hover = null;
+          if (!entry.locked) coordEl.textContent = 'x=--.--  y=--.--';
+          renderMap(entry);
+        });
+
+        canvas.addEventListener('click', async (event) => {
+          const p = toCanvasPoint(canvas, event);
+          const world = screenToWorld(entry.viewport, p.sx, p.sy);
+          entry.locked = world;
+          const line = `position: { x: ${fmtCode(world.x)}, y: ${fmtCode(world.y)} },`;
+          coordEl.textContent = `x=${fmt(world.x)}  y=${fmt(world.y)}  [locked]`;
+          setGlobalSelection(label, world);
+          renderMap(entry);
+          await copyCoordinateText(line);
+        });
+
+        canvas.addEventListener('dblclick', () => {
+          entry.view = { ...entry.defaultView };
+          entry.hover = null;
+          entry.locked = null;
+          coordEl.textContent = 'x=--.--  y=--.--';
+          renderMap(entry);
+        });
+
+        canvas.addEventListener('wheel', (event) => {
+          event.preventDefault();
+          const p = toCanvasPoint(canvas, event);
+          const anchor = screenToWorld(entry.viewport, p.sx, p.sy);
+          const factor = event.deltaY < 0 ? 0.9 : 1.1;
+          const xSpan = entry.view.xMax - entry.view.xMin;
+          const ySpan = entry.view.yMax - entry.view.yMin;
+          const nextXSpan = Math.max(2.5, Math.min(90, xSpan * factor));
+          const nextYSpan = Math.max(6, Math.min(420, ySpan * factor));
+          const rx = (anchor.x - entry.view.xMin) / xSpan;
+          const ry = (anchor.y - entry.view.yMin) / ySpan;
+          entry.view.xMin = anchor.x - nextXSpan * rx;
+          entry.view.xMax = entry.view.xMin + nextXSpan;
+          entry.view.yMin = anchor.y - nextYSpan * ry;
+          entry.view.yMax = entry.view.yMin + nextYSpan;
+          renderMap(entry);
+        }, { passive: false });
+
+        canvas.addEventListener('mousedown', (event) => {
+          if (event.button !== 0) return;
+          entry.dragging = true;
+          entry.dragLast = toCanvasPoint(canvas, event);
+        });
+
+        window.addEventListener('mouseup', () => {
+          entry.dragging = false;
+        });
+      }
+
+      function buildCard(stage, idx) {
+        const label = `M${idx + 1} - ${stage.title}`;
+        const card = document.createElement('article');
+        card.className = 'card';
+        card.innerHTML = `
+          <div class="card-head">
+            <h2 class="card-title">${label}</h2>
+            <div class="coord">x=--.--  y=--.--</div>
+          </div>
+          <div class="canvas-wrap"><canvas width="460" height="930"></canvas></div>
+          <div class="hint">Map index: ${stage.mapIndex}. Click point to copy snippet.</div>
+        `;
+        mapGrid.appendChild(card);
+        const canvas = card.querySelector('canvas');
+        const coordEl = card.querySelector('.coord');
+        const ctx = canvas.getContext('2d');
+        const defaultView = computeBounds(stage);
+        const entry = {
+          label,
+          stage,
+          canvas,
+          coordEl,
+          ctx,
+          defaultView,
+          view: { ...defaultView },
+          viewport: null,
+          hover: null,
+          locked: null,
+          dragging: false,
+          dragLast: null,
+        };
+        runtime.set(label, entry);
+        attachInteractions(entry);
+        renderMap(entry);
+      }
+
+      async function loadRuntimeStages() {
+        const frame = document.getElementById('engineFrame');
+        const src = '../assets/ui/pinball/index.html?fromApp=1&disableSw=1&appCacheBust=' + Date.now();
+        frame.src = src;
+
+        const started = Date.now();
+        const timeoutMs = 20000;
+
+        while (Date.now() - started < timeoutMs) {
+          await new Promise((r) => setTimeout(r, 120));
+          let w;
+          try {
+            w = frame.contentWindow;
+          } catch (_) {
+            postWarn('iframe access blocked. Run this file with a local server (not restricted file origin).');
+            return null;
+          }
+          if (!w) continue;
+          const roulette = w.roulette;
+          if (!roulette || !roulette.isReady) continue;
+          try {
+            const maps = Array.isArray(roulette.getMaps()) ? roulette.getMaps() : [];
+            if (maps.length === 0) continue;
+            const picked = maps.slice(0, 4);
+            const stages = [];
+            for (let i = 0; i < picked.length; i += 1) {
+              const m = picked[i];
+              roulette.setMap(m.index);
+              const stageRaw = roulette._stage;
+              const stage = deepClone(stageRaw);
+              if (!stage || !Array.isArray(stage.entities)) continue;
+              stage.title = (m && m.title) || stage.title || ('MAP ' + (i + 1));
+              stage.mapIndex = Number(m && m.index);
+              stages.push(stage);
+            }
+            return stages;
+          } catch (_) {
+          }
+        }
+        postWarn('runtime map load timed out. Open this page after app assets are ready.');
+        return null;
+      }
+
+      async function init() {
+        postWarn('Loading runtime maps...');
+        const stages = await loadRuntimeStages();
+        if (!stages || stages.length === 0) {
+          if (!warnEl.textContent) {
+            postWarn('Could not load runtime maps.');
+          }
+          return;
+        }
+        postWarn('');
+        mapGrid.innerHTML = '';
+        for (let i = 0; i < stages.length; i += 1) {
+          buildCard(stages[i], i);
+        }
+      }
+
+      init();
+    })();
+  </script>
+</body>
+</html>
+
