@@ -61,7 +61,7 @@
   <div class="wrap">
     <div class="card">
       <h1>개인정보처리방침</h1>
-      <p class="sub">메추 (Mechu) / 최종 수정일: 2026-03-01</p>
+      <p class="sub">메추 (Mechu) / 최종 수정일: 2026-03-10</p>
       <p>
         메추(이하 "앱")는 이용자의 개인정보를 중요하게 생각하며, 관련 법령을 준수합니다.
         본 방침은 앱에서 수집·이용하는 정보와 처리 목적을 안내합니다.
@@ -74,6 +74,7 @@
         <li>위치정보(선택): 주변 음식점 검색 기능 제공을 위해 단말의 현재 위치(위도/경도)를 사용합니다.</li>
         <li>검색어: 통합검색/추천 기능 수행을 위해 사용자가 입력한 검색어를 처리합니다.</li>
         <li>기기/앱 동작 정보(비식별): 오류 대응 및 서비스 품질 개선을 위해 최소한의 로그가 생성될 수 있습니다.</li>
+        <li>광고/동의 처리 정보: Google Mobile Ads SDK 및 UMP(User Messaging Platform) 사용 시 광고 식별자, 기기 정보, 광고 동의 상태 등 일부 정보가 처리될 수 있습니다.</li>
       </ul>
       <p class="sub">앱은 회원가입 기능을 제공하지 않으며, 이름/주민등록번호 등 민감한 식별정보를 수집하지 않습니다.</p>
     </div>
@@ -83,31 +84,47 @@
       <ul>
         <li>주변 음식점 검색, 거리 기반 정렬, 룰렛/추천 결과 제공</li>
         <li>서비스 오류 분석 및 안정성 개선</li>
+        <li>광고 제공, 광고 성과 측정 및 이용자 동의 상태 관리</li>
       </ul>
     </div>
 
     <div class="card">
       <h2>3. 제3자 제공 및 외부 API 사용</h2>
-      <p>앱은 검색 기능 제공을 위해 외부 위치/장소 API를 호출할 수 있습니다.</p>
+      <p>앱은 서비스 제공을 위해 아래 외부 서비스 또는 API를 사용할 수 있습니다.</p>
       <ul>
-        <li>카카오 로컬 API (장소 검색/거리 기반 검색)</li>
-        <li>네이버 지도 연동 링크(사용자 선택 시 외부 지도 앱/웹으로 이동)</li>
+        <li>카카오 로컬 API: 장소 검색, 거리 기반 검색</li>
+        <li>네이버 지도 연동 링크: 사용자가 선택한 경우 외부 지도 앱 또는 웹으로 이동</li>
+        <li>Google Mobile Ads SDK / UMP: 광고 제공, 광고 동의 수집 및 관련 처리</li>
       </ul>
       <p class="sub">
         외부 서비스 이용 시 해당 서비스의 개인정보처리방침이 적용될 수 있습니다.
       </p>
-    </div>
-
-    <div class="card">
-      <h2>4. 보관 및 파기</h2>
       <ul>
-        <li>앱은 서비스 제공에 필요한 범위를 넘어 개인정보를 장기 보관하지 않습니다.</li>
-        <li>법령상 보관 의무가 없는 정보는 목적 달성 후 지체 없이 파기합니다.</li>
+        <li><a href="https://www.kakao.com/policy/privacy?lang=ko" target="_blank" rel="noopener noreferrer">카카오 개인정보처리방침</a></li>
+        <li><a href="https://policy.naver.com/policy/privacy.html" target="_blank" rel="noopener noreferrer">네이버 개인정보처리방침</a></li>
+        <li><a href="https://policies.google.com/privacy?hl=ko" target="_blank" rel="noopener noreferrer">Google 개인정보처리방침</a></li>
       </ul>
     </div>
 
     <div class="card">
-      <h2>5. 권한 안내</h2>
+      <h2>4. 기기 내 저장 정보</h2>
+      <ul>
+        <li>앱은 추천 결과 품질 개선과 중복 호출 방지를 위해 일부 캐시 데이터를 단말 내부에 저장할 수 있습니다.</li>
+        <li>이러한 데이터는 앱 삭제 또는 앱 데이터 삭제 시 함께 제거될 수 있습니다.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>5. 보관 및 파기</h2>
+      <ul>
+        <li>앱은 서비스 제공에 필요한 범위를 넘어 개인정보를 장기 보관하지 않습니다.</li>
+        <li>법령상 보관 의무가 없는 정보는 목적 달성 후 지체 없이 파기합니다.</li>
+        <li>이용자가 앱 삭제 또는 데이터 삭제를 수행하는 경우 단말 내 저장 정보는 함께 삭제될 수 있습니다.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>6. 권한 안내</h2>
       <ul>
         <li><code>위치 권한</code>: 주변 음식점 검색/추천 기능을 위해 사용됩니다.</li>
       </ul>
@@ -115,7 +132,8 @@
     </div>
 
     <div class="card">
-      <h2>6. 이용자 문의</h2>
+      <h2>7. 이용자 권리 및 문의</h2>
+      <p>이용자는 언제든지 권한 허용을 철회하거나 앱 데이터를 삭제할 수 있습니다.</p>
       <p>개인정보 관련 문의: <a href="mailto:lmj10182@naver.com">lmj10182@naver.com</a></p>
     </div>
   </div>
