@@ -17,6 +17,13 @@ keytool -genkeypair -v -keystore release-upload.jks -alias upload -keyalg RSA -k
 
 ## 2) Android 서명 정보 주입 방법
 
+기본 운영 방식:
+
+- 로컬 비밀파일: `secrets/mobile_release.local.psd1`
+- 예제 파일: `secrets/mobile_release.example.psd1`
+- AAB 빌드: `powershell -ExecutionPolicy Bypass -File .\scripts\build_aab.ps1`
+- APK 빌드: `powershell -ExecutionPolicy Bypass -File .\scripts\build_apk_via_temp.ps1 -Mode release`
+
 다음 키를 빌드 시점에 주입합니다.
 
 - `KEYSTORE_PATH`
@@ -30,6 +37,9 @@ keytool -genkeypair -v -keystore release-upload.jks -alias upload -keyalg RSA -k
 2. Gradle `-P` 속성
 3. OS 환경변수
 
+위 스크립트들은 `mobile_release.local.psd1`의 값을 프로세스 환경변수로 주입해서 빌드합니다.
+즉, 앞으로는 `flutter build ... --dart-define=...`를 길게 직접 치지 않아도 됩니다.
+
 주의: 릴리즈 빌드는 위 4개 서명값이 없으면 실패하도록 설정되어 있습니다.
 
 `android/key.properties` 예시(실파일은 커밋 금지):
@@ -41,6 +51,8 @@ KEY_ALIAS=upload
 KEY_PASSWORD=******
 ADMOB_APP_ID=ca-app-pub-xxxxxxxxxxxxxxxx~yyyyyyyyyy
 ```
+
+권장: 앞으로는 `android/key.properties`를 수동 편집하기보다 `secrets/mobile_release.local.psd1`만 관리합니다.
 
 ## 3) Dart API 키/광고 단위 ID 주입 (`--dart-define`)
 
@@ -76,13 +88,33 @@ ADMOB_APP_ID=ca-app-pub-xxxxxxxxxxxxxxxx~yyyyyyyyyy
 예시:
 
 ```powershell
-flutter build appbundle --release `
-  --dart-define=KAKAO_REST_API_KEY=a8c6ab6cd9c6d0dc45680c5d8866e69d `
-  --dart-define=GOOGLE_PLACES_API_KEY=<your_google_places_api_key> `
-  --dart-define=NAVER_CLIENT_ID=k6B8dXuL4q7NHtR8q0SA `
-  --dart-define=NAVER_CLIENT_SECRET=PhvUOZ04RV `
-  --dart-define=ADMOB_REWARDED_ANDROID_UNIT_ID=<your_rewarded_ad_unit_id> `
-  --dart-define=ENABLE_HYBRID_DEBUG_LOGS=false
+powershell -ExecutionPolicy Bypass -File .\scripts\build_aab.ps1
+```
+
+APK 예시:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build_apk_via_temp.ps1 -Mode release
+```
+
+`mobile_release.local.psd1` 예시:
+
+```powershell
+@{
+    KEYSTORE_PATH = '..\android\release-upload.jks'
+    KEYSTORE_PASSWORD = 'replace-me'
+    KEY_ALIAS = 'upload'
+    KEY_PASSWORD = 'replace-me'
+    ADMOB_APP_ID = 'ca-app-pub-xxxxxxxxxxxxxxxx~yyyyyyyyyy'
+
+    KAKAO_REST_API_KEY = 'replace-me'
+    GOOGLE_PLACES_API_KEY = ''
+    NAVER_CLIENT_ID = 'replace-me'
+    NAVER_CLIENT_SECRET = 'replace-me'
+    NAVER_DAILY_QUOTA = '25000'
+    ADMOB_REWARDED_ANDROID_UNIT_ID = ''
+    ENABLE_HYBRID_DEBUG_LOGS = 'false'
+}
 ```
 
 ## 4) 위치 권한 팝업/동의 관련

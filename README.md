@@ -32,6 +32,21 @@ flutter run `
 
 릴리스 AAB도 같은 방식으로 `--dart-define` 값을 주입해 빌드합니다.
 
+## 릴리스 빌드
+
+- 로컬 비밀파일: `secrets/mobile_release.local.psd1`
+- 예제 파일: `secrets/mobile_release.example.psd1`
+
+```powershell
+# AAB
+powershell -ExecutionPolicy Bypass -File .\scripts\build_aab.ps1
+
+# APK
+powershell -ExecutionPolicy Bypass -File .\scripts\build_apk_via_temp.ps1 -Mode release
+```
+
+앞으로는 릴리스 빌드 시 긴 `--dart-define` 명령을 직접 입력하지 않고 위 스크립트를 사용합니다.
+
 ## 무선 디버깅 스플래시 멈춤 대응
 
 무선 디버깅에서 앱이 스플래시에서 멈추면 아래 순서로 복구합니다.
