@@ -22,11 +22,7 @@ class MainBottomMenuBar extends StatelessWidget {
     const unifiedGradient = LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
-      colors: [
-        Color(0xFFFF70CC),
-        Color(0xFFFF55C2),
-        Color(0xFFEF6BE7),
-      ],
+      colors: [Color(0xFFFF70CC), Color(0xFFFF55C2), Color(0xFFEF6BE7)],
       stops: [0.0, 0.5, 1.0],
     );
 
@@ -82,7 +78,7 @@ class MainBottomMenuBar extends StatelessWidget {
                 Expanded(
                   child: _SideMenuButton(
                     icon: Icons.near_me_rounded,
-                    label: '통합검색',
+                    label: '주변 검색',
                     iconGradient: unifiedGradient,
                     selected: currentTab == MainMenuTab.nearby,
                     onTap: () => onTabSelected(MainMenuTab.nearby),
@@ -92,7 +88,7 @@ class MainBottomMenuBar extends StatelessWidget {
                 Expanded(
                   child: _SideMenuButton(
                     icon: Icons.auto_awesome_rounded,
-                    label: '테마추천',
+                    label: '무드 추천',
                     iconGradient: unifiedGradient,
                     selected: currentTab == MainMenuTab.theme,
                     onTap: () => onTabSelected(MainMenuTab.theme),
@@ -345,6 +341,12 @@ class _GlowingOrbButtonState extends State<_GlowingOrbButton>
 
   @override
   Widget build(BuildContext context) {
+    const labelStyle = TextStyle(
+      color: Colors.white,
+      fontSize: 12,
+      fontWeight: FontWeight.w700,
+    );
+
     return GestureDetector(
       onTap: () {
         if (_longPressTriggered) {
@@ -364,94 +366,101 @@ class _GlowingOrbButtonState extends State<_GlowingOrbButton>
           : _cancelLongPressTrigger,
       child: SizedBox(
         width: 104,
-        height: 104,
-        child: AnimatedBuilder(
-          animation: _controller,
-          builder: (context, child) {
-            // 심장 박동/숨 쉬는 듯한 스케일 조절
-            final scale = 0.98 + (_controller.value * 0.05);
-            // 구체 내부/외부 선형 애니메이션 각도
-            final rotation1 = _controller.value * math.pi * 0.4;
-            final rotation2 = -_controller.value * math.pi * 0.6;
-            final rotation3 = _controller.value * math.pi * 0.8;
+        height: 112,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 104,
+              height: 94,
+              child: AnimatedBuilder(
+                animation: _controller,
+                builder: (context, child) {
+                  // 심장 박동/숨 쉬는 듯한 스케일 조절
+                  final scale = 0.98 + (_controller.value * 0.05);
+                  // 구체 내부/외부 선형 애니메이션 각도
+                  final rotation1 = _controller.value * math.pi * 0.4;
+                  final rotation2 = -_controller.value * math.pi * 0.6;
+                  final rotation3 = _controller.value * math.pi * 0.8;
 
-            return Transform.scale(
-              scale: scale,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  // 1. 외곽 빛 번짐 효과 (Glow)
-                  Container(
-                    width: 80, // 90에서 10% 축소
-                    height: 80,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(
-                            0xFFC764D6,
-                          ).withValues(alpha: 0.3 + (_controller.value * 0.3)),
-                          blurRadius: 20 + (_controller.value * 15),
-                          spreadRadius: 2 + (_controller.value * 4),
+                  return Transform.scale(
+                    scale: scale,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Container(
+                          width: 80,
+                          height: 80,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFFC764D6).withValues(
+                                  alpha: 0.3 + (_controller.value * 0.3),
+                                ),
+                                blurRadius: 20 + (_controller.value * 15),
+                                spreadRadius: 2 + (_controller.value * 4),
+                              ),
+                              BoxShadow(
+                                color: const Color(
+                                  0xFF6328A0,
+                                ).withValues(alpha: 0.4),
+                                blurRadius: 30,
+                                spreadRadius: 8,
+                              ),
+                            ],
+                          ),
                         ),
-                        BoxShadow(
-                          color: const Color(0xFF6328A0).withValues(alpha: 0.4),
-                          blurRadius: 30,
-                          spreadRadius: 8,
+                        Container(
+                          width: 80,
+                          height: 80,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: const RadialGradient(
+                              colors: [
+                                Color(0xFFFF0055),
+                                Color(0xFFC2125D),
+                                Color(0xFF381060),
+                              ],
+                              stops: [0.3, 0.67, 1.0],
+                              center: Alignment(-0.5, -0.5),
+                              radius: 0.75,
+                            ),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.3),
+                              width: 1.0,
+                            ),
+                          ),
+                        ),
+                        Transform.rotate(
+                          angle: rotation1,
+                          child: _buildRing(77, 83, 0.7, 1.2),
+                        ),
+                        Transform.rotate(
+                          angle: rotation2,
+                          child: _buildRing(83, 72, 0.5, 1.0),
+                        ),
+                        Transform.rotate(
+                          angle: rotation3,
+                          child: _buildRing(74, 79, 0.4, 0.8),
+                        ),
+                        Transform.scale(
+                          scale: 0.95 + (_controller.value * 0.25),
+                          child: Image.asset(
+                            'assets/background/dice.gif',
+                            width: 40,
+                            height: 40,
+                            fit: BoxFit.contain,
+                          ),
                         ),
                       ],
                     ),
-                  ),
-                  // 2. 메인 오브젝트 (그라데이션 및 와이어프레임)
-                  Container(
-                    width: 80, // 90에서 10% 축소
-                    height: 80,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: const RadialGradient(
-                        colors: [
-                          Color(0xFFFF0055), // 보라빛이 살짝 섞인 매혹적인 붉은색 (Crimson)
-                          Color(0xFFC2125D), // 자줏빛이 더 감도는 중간 영역
-                          Color(0xFF381060), // 어두운 보라색 베이스
-                        ],
-                        stops: [0.3, 0.67, 1.0], // 전체 면적의 약 67% 가량을 붉은빛이 덮도록 수정
-                        center: Alignment(-0.5, -0.5),
-                        radius: 0.75, // 그라데이션 반경을 조금 줄여 비율에 맞춤
-                      ),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.3),
-                        width: 1.0,
-                      ),
-                    ),
-                  ),
-                  // 3. 내부 빛 굴절/와이어 링 (행성이나 음악 파동 느낌)
-                  Transform.rotate(
-                    angle: rotation1,
-                    child: _buildRing(77, 83, 0.7, 1.2),
-                  ),
-                  Transform.rotate(
-                    angle: rotation2,
-                    child: _buildRing(83, 72, 0.5, 1.0),
-                  ),
-                  Transform.rotate(
-                    angle: rotation3,
-                    child: _buildRing(74, 79, 0.4, 0.8),
-                  ),
-                  // 4. 아이콘 (GIF 이미지로 교체)
-                  Transform.scale(
-                    // 컨트롤러 값을 활용해 0.95 ~ 1.2 범위로 리드미컬하게 커졌다 작아지는 숨쉬기 효과 적용
-                    scale: 0.95 + (_controller.value * 0.25),
-                    child: Image.asset(
-                      'assets/background/dice.gif',
-                      width: 40,
-                      height: 40,
-                      fit: BoxFit.contain,
-                    ),
-                  ),
-                ],
+                  );
+                },
               ),
-            );
-          },
+            ),
+            const Text('룰렛', style: labelStyle),
+          ],
         ),
       ),
     );

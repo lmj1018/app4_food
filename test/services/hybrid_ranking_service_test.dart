@@ -180,6 +180,7 @@ void main() {
       ),
       googleClient: FakeGooglePlacesClient(throwTimeout: true),
       cache: GoogleMetaCache(store: InMemoryCacheStore()),
+      enableGoogleSignal: true,
     );
 
     final ranked = await service.searchHybrid(
@@ -195,54 +196,57 @@ void main() {
     expect(service.lastUsedGoogleData, isFalse);
   });
 
-  test('uses query-based Naver TOP list and maps matching Kakao places', () async {
-    final naver = FakeNaverLocalSearchClient(
-      itemsByQuery: {
-        '마라탕': const <NaverLocalItem>[
-          NaverLocalItem(
-            title: 'A식당',
-            address: '서울',
-            roadAddress: '서울 1',
-            category: '한식',
-            link: '',
-          ),
-          NaverLocalItem(
-            title: 'B식당',
-            address: '서울',
-            roadAddress: '서울 2',
-            category: '한식',
-            link: '',
-          ),
-        ],
-      },
-    );
+  test(
+    'uses query-based Naver TOP list and maps matching Kakao places',
+    () async {
+      final naver = FakeNaverLocalSearchClient(
+        itemsByQuery: {
+          '마라탕': const <NaverLocalItem>[
+            NaverLocalItem(
+              title: 'A식당',
+              address: '서울',
+              roadAddress: '서울 1',
+              category: '한식',
+              link: '',
+            ),
+            NaverLocalItem(
+              title: 'B식당',
+              address: '서울',
+              roadAddress: '서울 2',
+              category: '한식',
+              link: '',
+            ),
+          ],
+        },
+      );
 
-    service = HybridRankingService(
-      kakaoClient: KakaoPlaceSearchClient(
-        apiKey: 'kakao',
-        httpClient: _FakeKakaoHttpClient(kakaoPlaces),
-      ),
-      googleClient: FakeGooglePlacesClient(),
-      naverClient: naver,
-      cache: GoogleMetaCache(store: InMemoryCacheStore()),
-    );
+      service = HybridRankingService(
+        kakaoClient: KakaoPlaceSearchClient(
+          apiKey: 'kakao',
+          httpClient: _FakeKakaoHttpClient(kakaoPlaces),
+        ),
+        googleClient: FakeGooglePlacesClient(),
+        naverClient: naver,
+        cache: GoogleMetaCache(store: InMemoryCacheStore()),
+      );
 
-    final ranked = await service.searchHybrid(
-      query: '마라탕',
-      lat: 37.5,
-      lng: 127.0,
-      radius: 2000,
-      sort: PlaceSort.distance,
-    );
+      final ranked = await service.searchHybrid(
+        query: '마라탕',
+        lat: 37.5,
+        lng: 127.0,
+        radius: 2000,
+        sort: PlaceSort.distance,
+      );
 
-    expect(naver.calledQueries, ['마라탕']);
-    final rankById = <String, int?>{
-      for (final item in ranked) item.kakao.id: item.naverReviewRank,
-    };
-    expect(rankById['k1'], 1);
-    expect(rankById['k2'], 2);
-    expect(rankById['k3'], isNull);
-  });
+      expect(naver.calledQueries, ['마라탕']);
+      final rankById = <String, int?>{
+        for (final item in ranked) item.kakao.id: item.naverReviewRank,
+      };
+      expect(rankById['k1'], 1);
+      expect(rankById['k2'], 2);
+      expect(rankById['k3'], isNull);
+    },
+  );
 
   test('adds regional hint queries and matches from hinted results', () async {
     const hintPlace = <KakaoPlace>[
@@ -299,54 +303,60 @@ void main() {
     expect(ranked.single.naverReviewRank, 1);
   });
 
-  test('stops extra Naver queries when early-stop match ratio is reached', () async {
-    final naver = FakeNaverLocalSearchClient(
-      itemsByQuery: {
-        '마라탕': const <NaverLocalItem>[
-          NaverLocalItem(
-            title: 'A식당',
-            address: '서울',
-            roadAddress: '서울 1',
-            category: '한식',
-            link: '',
-          ),
-        ],
-        '마라탕 서울 1': const <NaverLocalItem>[
-          NaverLocalItem(
-            title: 'B식당',
-            address: '서울',
-            roadAddress: '서울 2',
-            category: '한식',
-            link: '',
-          ),
-        ],
-      },
-    );
+  test(
+    'stops extra Naver queries when early-stop match ratio is reached',
+    () async {
+      final naver = FakeNaverLocalSearchClient(
+        itemsByQuery: {
+          '마라탕': const <NaverLocalItem>[
+            NaverLocalItem(
+              title: 'A식당',
+              address: '서울',
+              roadAddress: '서울 1',
+              category: '한식',
+              link: '',
+            ),
+          ],
+          '마라탕 서울 1': const <NaverLocalItem>[
+            NaverLocalItem(
+              title: 'B식당',
+              address: '서울',
+              roadAddress: '서울 2',
+              category: '한식',
+              link: '',
+            ),
+          ],
+        },
+      );
 
-    service = HybridRankingService(
-      kakaoClient: KakaoPlaceSearchClient(
-        apiKey: 'kakao',
-        httpClient: _FakeKakaoHttpClient(kakaoPlaces),
-      ),
-      googleClient: FakeGooglePlacesClient(),
-      naverClient: naver,
-      cache: GoogleMetaCache(store: InMemoryCacheStore()),
-      maxNaverQueryFanout: 4,
-      naverEarlyStopMatchRatio: 0.10,
-    );
+      service = HybridRankingService(
+        kakaoClient: KakaoPlaceSearchClient(
+          apiKey: 'kakao',
+          httpClient: _FakeKakaoHttpClient(kakaoPlaces),
+        ),
+        googleClient: FakeGooglePlacesClient(),
+        naverClient: naver,
+        cache: GoogleMetaCache(store: InMemoryCacheStore()),
+        maxNaverQueryFanout: 4,
+        naverEarlyStopMatchRatio: 0.10,
+      );
 
-    final ranked = await service.searchHybrid(
-      query: '마라탕',
-      lat: 37.5,
-      lng: 127.0,
-      radius: 2000,
-      sort: PlaceSort.distance,
-    );
+      final ranked = await service.searchHybrid(
+        query: '마라탕',
+        lat: 37.5,
+        lng: 127.0,
+        radius: 2000,
+        sort: PlaceSort.distance,
+      );
 
-    expect(naver.calledQueries.length, 1);
-    expect(naver.calledQueries.single, '마라탕');
-    expect(ranked.firstWhere((item) => item.kakao.id == 'k1').naverReviewRank, 1);
-  });
+      expect(naver.calledQueries.length, 1);
+      expect(naver.calledQueries.single, '마라탕');
+      expect(
+        ranked.firstWhere((item) => item.kakao.id == 'k1').naverReviewRank,
+        1,
+      );
+    },
+  );
 }
 
 class _FakeKakaoHttpClient extends http.BaseClient {

@@ -51,11 +51,26 @@ class MoodRecommendationService {
       MoodOptionId.dietMode => _dietMode(context),
     };
     final scored = _applyCommonAdjustments(base, context);
+    scored.sort((a, b) => b.score.compareTo(a.score));
 
-    // Shuffle then pick top N for variety
-    scored.shuffle(_rng);
-    final picked = scored.take(limit).toList();
-    picked.sort((a, b) => b.score.compareTo(a.score));
+    final picked = <_ScoredMenu>[];
+    var index = 0;
+    while (index < scored.length && picked.length < limit) {
+      final currentScore = scored[index].score;
+      final bucket = <_ScoredMenu>[];
+      while (index < scored.length &&
+          (scored[index].score - currentScore).abs() < 0.000001) {
+        bucket.add(scored[index]);
+        index += 1;
+      }
+      bucket.shuffle(_rng);
+      for (final item in bucket) {
+        if (picked.length >= limit) {
+          break;
+        }
+        picked.add(item);
+      }
+    }
     return picked
         .map((item) => MoodRecommendation(menu: item.menu, reason: item.reason))
         .toList();

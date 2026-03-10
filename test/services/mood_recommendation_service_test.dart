@@ -35,7 +35,7 @@ void main() {
       limit: 3,
     );
 
-    expect(result.first.menu, '김밥');
+    expect(result.first.menu, '국밥');
   });
 
   test('quick meal preference boosts quick menus', () {

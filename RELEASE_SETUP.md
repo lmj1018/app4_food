@@ -53,11 +53,7 @@ ADMOB_APP_ID=ca-app-pub-xxxxxxxxxxxxxxxx~yyyyyyyyyy
 - `ADMOB_REWARDED_ANDROID_UNIT_ID`
 - `ENABLE_HYBRID_DEBUG_LOGS` (출시 권장: `false`)
 
-현재 사용값(요청 기준, 기존 하드코딩에서 분리):
-
-- `KAKAO_REST_API_KEY=a8c6ab6cd9c6d0dc45680c5d8866e69d`
-- `NAVER_CLIENT_ID=k6B8dXuL4q7NHtR8q0SA`
-- `NAVER_CLIENT_SECRET=PhvUOZ04RV`
+운영 API 값은 저장소 바깥의 안전한 저장소에만 보관하고, 빌드 시점에만 주입합니다.
 
 카카오 콘솔 참고:
 
@@ -70,15 +66,18 @@ ADMOB_APP_ID=ca-app-pub-xxxxxxxxxxxxxxxx~yyyyyyyyyy
 참고: 현재 앱은 구글 보강(`Google Places`)을 코드에서 비활성화(`enableGoogleSignal: false`)해 두었습니다.
 따라서 `GOOGLE_PLACES_API_KEY`는 미입력 상태여도 동작합니다.
 
+참고: 현재 룰렛의 광고 보너스 게이트는 코드에서 비활성화(`_enableAdSpinGate = false`)되어 있습니다.
+그래도 향후 활성화할 계획이라면 `ADMOB_REWARDED_ANDROID_UNIT_ID`에는 테스트 ID가 아닌 운영 광고 유닛 ID를 반드시 주입해야 합니다.
+
 예시:
 
 ```powershell
-flutter build apk --release `
-  --dart-define=KAKAO_REST_API_KEY=a8c6ab6cd9c6d0dc45680c5d8866e69d `
-  --dart-define=GOOGLE_PLACES_API_KEY=xxxx `
-  --dart-define=NAVER_CLIENT_ID=k6B8dXuL4q7NHtR8q0SA `
-  --dart-define=NAVER_CLIENT_SECRET=PhvUOZ04RV `
-  --dart-define=ADMOB_REWARDED_ANDROID_UNIT_ID=ca-app-pub-xxxx/xxxx `
+flutter build appbundle --release `
+  --dart-define=KAKAO_REST_API_KEY=<your_kakao_rest_api_key> `
+  --dart-define=GOOGLE_PLACES_API_KEY=<your_google_places_api_key> `
+  --dart-define=NAVER_CLIENT_ID=<your_naver_client_id> `
+  --dart-define=NAVER_CLIENT_SECRET=<your_naver_client_secret> `
+  --dart-define=ADMOB_REWARDED_ANDROID_UNIT_ID=<your_rewarded_ad_unit_id> `
   --dart-define=ENABLE_HYBRID_DEBUG_LOGS=false
 ```
 

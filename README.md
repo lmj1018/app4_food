@@ -17,18 +17,20 @@
 
 ```powershell
 flutter run `
-  --dart-define=KAKAO_REST_API_KEY=a8c6ab6cd9c6d0dc45680c5d8866e69d `
-  --dart-define=GOOGLE_PLACES_API_KEY=YOUR_GOOGLE_PLACES_KEY `
-  --dart-define=NAVER_CLIENT_ID=YOUR_NAVER_CLIENT_ID `
-  --dart-define=NAVER_CLIENT_SECRET=YOUR_NAVER_CLIENT_SECRET
+  --dart-define=KAKAO_REST_API_KEY=<your_kakao_rest_api_key> `
+  --dart-define=GOOGLE_PLACES_API_KEY=<your_google_places_api_key> `
+  --dart-define=NAVER_CLIENT_ID=<your_naver_client_id> `
+  --dart-define=NAVER_CLIENT_SECRET=<your_naver_client_secret>
 ```
 
 Google 키가 없어도 카카오 검색은 동작합니다.
 
 ```powershell
 flutter run `
-  --dart-define=KAKAO_REST_API_KEY=a8c6ab6cd9c6d0dc45680c5d8866e69d
+  --dart-define=KAKAO_REST_API_KEY=<your_kakao_rest_api_key>
 ```
+
+릴리스 AAB도 같은 방식으로 `--dart-define` 값을 주입해 빌드합니다.
 
 ## 무선 디버깅 스플래시 멈춤 대응
 
