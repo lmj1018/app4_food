@@ -208,7 +208,13 @@ SOFTWARE.
   final List<Timer> _ambientBannerTimers = <Timer>[];
   Timer? _countdownTimer;
   DateTime? _countdownStartedAt;
+  DateTime? _countdownLastTickAt;
   int _countdownRemainingMs = 0;
+  double _countdownRemainingMsExact = 0;
+  double _countdownSpeedMultiplier = 1;
+  double _countdownTimeScale = 1;
+  double _countdownRate = 1;
+  bool _showHoldFastForwardOverlay = false;
   bool _miniMapVisible = false;
 
   void _logPinballStatus(String value) {
@@ -298,6 +304,7 @@ SOFTWARE.
       _hasError = false;
       _mapLabel = '';
       _showMapLabelOverlay = false;
+      _showHoldFastForwardOverlay = false;
       _didShowMapLabelOverlayOnce = false;
       _pageLoaded = false;
       _didStart = false;
@@ -631,6 +638,11 @@ SOFTWARE.
   void _resetCountdown() {
     _clearCountdownTimer();
     _countdownStartedAt = null;
+    _countdownLastTickAt = null;
+    _countdownSpeedMultiplier = 1;
+    _countdownTimeScale = 1;
+    _countdownRate = 1;
+    _countdownRemainingMsExact = _countdownTotalMs.toDouble();
     _countdownRemainingMs = _countdownTotalMs;
   }
 
@@ -638,20 +650,36 @@ SOFTWARE.
     if (_countdownStartedAt != null) {
       return;
     }
-    _countdownStartedAt = DateTime.now();
+    final now = DateTime.now();
+    _countdownStartedAt = now;
+    _countdownLastTickAt = now;
+    _countdownRemainingMsExact = _countdownTotalMs.toDouble();
     _countdownRemainingMs = _countdownTotalMs;
     _countdownTimer = Timer.periodic(_countdownTickInterval, (_) {
       if (!mounted || _isFinishing) {
         _clearCountdownTimer();
         return;
       }
-      final startedAt = _countdownStartedAt;
-      if (startedAt == null) {
-        _clearCountdownTimer();
+      final lastTickAt = _countdownLastTickAt;
+      if (lastTickAt == null) {
+        _countdownLastTickAt = DateTime.now();
         return;
       }
-      final elapsedMs = DateTime.now().difference(startedAt).inMilliseconds;
-      final remainingMs = max(0, _countdownTotalMs - elapsedMs);
+      final tickNow = DateTime.now();
+      _countdownLastTickAt = tickNow;
+      final deltaMs = tickNow.difference(lastTickAt).inMicroseconds / 1000.0;
+      if (!deltaMs.isFinite || deltaMs <= 0) {
+        return;
+      }
+      final scaledDeltaMs = deltaMs * _countdownRate;
+      if (!scaledDeltaMs.isFinite || scaledDeltaMs <= 0) {
+        return;
+      }
+      _countdownRemainingMsExact = max(
+        0.0,
+        _countdownRemainingMsExact - scaledDeltaMs,
+      );
+      final remainingMs = max(0, _countdownRemainingMsExact.ceil());
       if (remainingMs == _countdownRemainingMs) {
         return;
       }
@@ -671,6 +699,65 @@ SOFTWARE.
         .toStringAsFixed(2)
         .padLeft(5, '0');
     return '${minutes.toString().padLeft(2, '0')}:$secondText';
+  }
+
+  double _toDouble(Object? value, {double fallback = double.nan}) {
+    if (value is num) {
+      return value.toDouble();
+    }
+    if (value is String) {
+      return double.tryParse(value.trim()) ?? fallback;
+    }
+    return fallback;
+  }
+
+  bool _toBool(Object? value, {bool fallback = false}) {
+    if (value is bool) {
+      return value;
+    }
+    if (value is num) {
+      return value != 0;
+    }
+    if (value is String) {
+      final normalized = value.trim().toLowerCase();
+      if (normalized == 'true' || normalized == '1') {
+        return true;
+      }
+      if (normalized == 'false' || normalized == '0' || normalized.isEmpty) {
+        return false;
+      }
+    }
+    return fallback;
+  }
+
+  double _normalizeCountdownRate(double value) {
+    if (!value.isFinite || value <= 0) {
+      return 1;
+    }
+    return value.clamp(0.1, 6).toDouble();
+  }
+
+  void _syncCountdownRate({Object? speedMultiplier, Object? timeScale}) {
+    final nextSpeed = _toDouble(speedMultiplier, fallback: double.nan);
+    if (nextSpeed.isFinite && nextSpeed > 0) {
+      _countdownSpeedMultiplier = nextSpeed;
+    }
+    final nextScale = _toDouble(timeScale, fallback: double.nan);
+    if (nextScale.isFinite && nextScale > 0) {
+      _countdownTimeScale = nextScale;
+    }
+    _countdownRate = _normalizeCountdownRate(
+      _countdownSpeedMultiplier * _countdownTimeScale,
+    );
+  }
+
+  void _setHoldFastForwardOverlay(bool active) {
+    if (!mounted || _showHoldFastForwardOverlay == active) {
+      return;
+    }
+    setState(() {
+      _showHoldFastForwardOverlay = active;
+    });
   }
 
   void _resetSlowMotionBannerState() {
@@ -1057,6 +1144,7 @@ SOFTWARE.
             setState(() {
               _logPinballStatus('핀볼 게임 페이지 로딩 중...');
               _mapLabel = '';
+              _showHoldFastForwardOverlay = false;
               _hasError = false;
               _pageLoaded = false;
               _didStart = false;
@@ -1406,6 +1494,9 @@ SOFTWARE.
   if (typeof control.map5RecoveryCount !== 'number') control.map5RecoveryCount = 0;
   if (typeof control.lastMap5RecoveryAt !== 'number') control.lastMap5RecoveryAt = 0;
   if (!control.trapScaleSummary || typeof control.trapScaleSummary !== 'object') control.trapScaleSummary = null;
+  if (typeof control.appHoldFastForwardActive !== 'boolean') control.appHoldFastForwardActive = false;
+  if (typeof control.appHoldFastForwardPrevSpeed !== 'number') control.appHoldFastForwardPrevSpeed = 1;
+  if (typeof control.fastForwarderNeutralized !== 'boolean') control.fastForwarderNeutralized = false;
   if (typeof control.layoutRevision !== 'string') control.layoutRevision = '';
   const layoutRevision = 'map5-layout-r20260225-19';
   if (control.layoutRevision !== layoutRevision) {
@@ -1420,6 +1511,9 @@ SOFTWARE.
   const diamondTrapScale = 1.3;
   const diagonalBarTrapScale = 1.3;
   const cameraMinZoom = 1.5;
+  const appTouchFastForwardSpeed = 2;
+  const appTouchHoldDelayMs = 360;
+  const appTouchTapMaxMovePx = 18;
   const goalLineImageSrc =
     goalLineImageDataUrl && goalLineImageDataUrl.startsWith('data:')
       ? goalLineImageDataUrl
@@ -1437,6 +1531,199 @@ SOFTWARE.
       }
     } catch (_) {
     }
+  };
+
+  const toFiniteNumber = (value, fallback) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : fallback;
+  };
+
+  const disableBuiltInFastForwarder = () => {
+    if (control.fastForwarderNeutralized === true) {
+      return true;
+    }
+    const roulette = window.roulette;
+    const fastForwarder =
+      roulette && roulette.fastForwarder && typeof roulette.fastForwarder === 'object'
+        ? roulette.fastForwarder
+        : null;
+    if (!fastForwarder) {
+      return false;
+    }
+    try {
+      fastForwarder.isEnabled = false;
+    } catch (_) {
+    }
+    fastForwarder.onMouseDown = () => {};
+    fastForwarder.onMouseUp = () => {};
+    fastForwarder.getBoundingBox = () => null;
+    control.fastForwarderNeutralized = true;
+    return true;
+  };
+
+  const setAppHoldFastForwardActive = (active) => {
+    disableBuiltInFastForwarder();
+    const roulette = window.roulette;
+    if (!roulette || typeof roulette.setSpeed !== 'function') {
+      return { ok: false, reason: 'roulette unavailable' };
+    }
+    const shouldEnable = active === true;
+    if (shouldEnable) {
+      if (roulette._isRunning !== true) {
+        return { ok: true, active: false };
+      }
+      if (control.appHoldFastForwardActive === true) {
+        return { ok: true, active: true };
+      }
+      const currentSpeed =
+        typeof roulette.getSpeed === 'function'
+          ? toFiniteNumber(roulette.getSpeed(), 1)
+          : toFiniteNumber(roulette._speed, 1);
+      control.appHoldFastForwardPrevSpeed = Math.max(0.1, currentSpeed);
+      roulette.setSpeed(appTouchFastForwardSpeed);
+      control.appHoldFastForwardActive = true;
+      postBridge('holdFastForwardChanged', {
+        active: true,
+        speedMultiplier: appTouchFastForwardSpeed,
+      });
+      return { ok: true, active: true, speed: appTouchFastForwardSpeed };
+    }
+    if (control.appHoldFastForwardActive !== true) {
+      return { ok: true, active: false };
+    }
+    const restoreSpeed = Math.max(
+      0.1,
+      toFiniteNumber(control.appHoldFastForwardPrevSpeed, 1),
+    );
+    roulette.setSpeed(restoreSpeed);
+    control.appHoldFastForwardActive = false;
+    postBridge('holdFastForwardChanged', {
+      active: false,
+      speedMultiplier: restoreSpeed,
+    });
+    return { ok: true, active: false, speed: restoreSpeed };
+  };
+
+  const installAppTouchControls = () => {
+    disableBuiltInFastForwarder();
+    const roulette = window.roulette;
+    const renderer =
+      roulette && roulette._renderer && typeof roulette._renderer === 'object'
+        ? roulette._renderer
+        : null;
+    const canvas =
+      renderer && renderer.canvas ? renderer.canvas : document.querySelector('canvas');
+    if (!canvas) {
+      return false;
+    }
+    if (canvas.__appHoldFastForwardControlsInstalled === true) {
+      return true;
+    }
+
+    const gesture = {
+      pointerId: null,
+      startX: 0,
+      startY: 0,
+      moved: false,
+      holdActive: false,
+      holdTimerId: 0,
+    };
+
+    const clearHoldTimer = () => {
+      if (gesture.holdTimerId) {
+        window.clearTimeout(gesture.holdTimerId);
+        gesture.holdTimerId = 0;
+      }
+    };
+
+    const resetGesture = () => {
+      clearHoldTimer();
+      gesture.pointerId = null;
+      gesture.startX = 0;
+      gesture.startY = 0;
+      gesture.moved = false;
+      gesture.holdActive = false;
+    };
+
+    const isSupportedPointer = (event) => {
+      if (!event || event.isPrimary === false) {
+        return false;
+      }
+      const pointerType =
+        typeof event.pointerType === 'string'
+          ? event.pointerType.toLowerCase()
+          : '';
+      if (pointerType === 'mouse') {
+        return Number(event.button) === 0;
+      }
+      return pointerType === '' || pointerType === 'touch' || pointerType === 'pen';
+    };
+
+    const handlePointerDown = (event) => {
+      if (!isSupportedPointer(event) || gesture.pointerId !== null) {
+        return;
+      }
+      gesture.pointerId = event.pointerId;
+      gesture.startX = toFiniteNumber(event.clientX, 0);
+      gesture.startY = toFiniteNumber(event.clientY, 0);
+      gesture.moved = false;
+      gesture.holdActive = false;
+      clearHoldTimer();
+      gesture.holdTimerId = window.setTimeout(() => {
+        if (gesture.pointerId !== event.pointerId || gesture.moved) {
+          return;
+        }
+        gesture.holdActive = true;
+        setAppHoldFastForwardActive(true);
+      }, appTouchHoldDelayMs);
+    };
+
+    const handlePointerMove = (event) => {
+      if (!event || gesture.pointerId !== event.pointerId || gesture.holdActive) {
+        return;
+      }
+      const dx = toFiniteNumber(event.clientX, 0) - gesture.startX;
+      const dy = toFiniteNumber(event.clientY, 0) - gesture.startY;
+      if (
+        Math.abs(dx) > appTouchTapMaxMovePx ||
+        Math.abs(dy) > appTouchTapMaxMovePx
+      ) {
+        gesture.moved = true;
+        clearHoldTimer();
+      }
+    };
+
+    const finishGesture = (event) => {
+      if (!event || gesture.pointerId !== event.pointerId) {
+        return;
+      }
+      const wasHolding = gesture.holdActive === true;
+      resetGesture();
+      if (wasHolding) {
+        setAppHoldFastForwardActive(false);
+        if (typeof event.preventDefault === 'function') {
+          event.preventDefault();
+        }
+      }
+    };
+
+    canvas.style.touchAction = 'none';
+    canvas.addEventListener('pointerdown', handlePointerDown, { passive: true });
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    window.addEventListener('pointerup', finishGesture, { passive: false });
+    window.addEventListener('pointercancel', finishGesture, { passive: false });
+    window.addEventListener(
+      'blur',
+      () => {
+        if (gesture.holdActive) {
+          setAppHoldFastForwardActive(false);
+        }
+        resetGesture();
+      },
+      { passive: true },
+    );
+    canvas.__appHoldFastForwardControlsInstalled = true;
+    return true;
   };
 
   const hideForApp = () => {
@@ -6678,6 +6965,7 @@ SOFTWARE.
   muteWinnerDomUi();
   disableRecording();
   clearAuxUiObjects();
+  installAppTouchControls();
   const foodImagesReadyNow = ensureFoodImages();
   patchRenderer();
   patchGoalFx();
@@ -6891,6 +7179,9 @@ SOFTWARE.
   control.lastSample = sample;
 
   const running = !!(window.roulette && window.roulette._isRunning === true);
+  if (!running && control.appHoldFastForwardActive === true) {
+    setAppHoldFastForwardActive(false);
+  }
 
   if (moved) {
     control.movedTicks = (control.movedTicks || 0) + 1;
@@ -6987,6 +7278,11 @@ SOFTWARE.
     ceremonyDone: !!control.ceremonyDone,
     skillFxPatched: !!control.skillFxPatched,
     skillFxColor: typeof control.skillFxColor === 'string' ? control.skillFxColor : '',
+    holdFastForwardActive: !!control.appHoldFastForwardActive,
+    speedMultiplier: window.roulette && typeof window.roulette.getSpeed === 'function'
+      ? window.roulette.getSpeed()
+      : Number(window.roulette && window.roulette._speed),
+    timeScale: Number(window.roulette && window.roulette._timeScale),
     slowMotionActive: !!control.skillBlockedBySlowMo,
   });
 })();
@@ -7398,6 +7694,11 @@ SOFTWARE.
 
       final tickState = await _runStartTick();
       final runtime = tickState ?? await _readRuntimeResult();
+      _setHoldFastForwardOverlay(_toBool(runtime?['holdFastForwardActive']));
+      _syncCountdownRate(
+        speedMultiplier: runtime?['speedMultiplier'],
+        timeScale: runtime?['timeScale'],
+      );
       _updateSlowMotionBanner(runtime);
       _syncMapLabel(runtime);
       _syncMiniMapVisible(runtime);
@@ -7531,6 +7832,11 @@ SOFTWARE.
     map5RecoveryCount: Number(control.map5RecoveryCount) || 0,
     ceremonyDone: !!control.ceremonyDone,
     ceremonyScheduled: !!control.ceremonyScheduled,
+    holdFastForwardActive: !!control.appHoldFastForwardActive,
+    speedMultiplier: window.roulette && typeof window.roulette.getSpeed === 'function'
+      ? window.roulette.getSpeed()
+      : Number(window.roulette && window.roulette._speed),
+    timeScale: Number(window.roulette && window.roulette._timeScale),
     slowMotionActive: !!control.skillBlockedBySlowMo,
   });
 })();
@@ -7684,6 +7990,17 @@ SOFTWARE.
       return;
     }
 
+    if (event == 'holdFastForwardChanged') {
+      final payload = parsed['payload'];
+      final active = payload is Map ? payload['active'] : null;
+      final speedMultiplier = payload is Map
+          ? payload['speedMultiplier']
+          : null;
+      _setHoldFastForwardOverlay(_toBool(active));
+      _syncCountdownRate(speedMultiplier: speedMultiplier);
+      return;
+    }
+
     if (event == 'winnerResolved' || event == 'ceremonyComplete') {
       final winner = _extractWinnerName(parsed['payload']);
       final rankingFromPayload = _extractStringList(parsed['payload']);
@@ -7776,6 +8093,7 @@ SOFTWARE.
     _clearSlowMotionBannerTimer();
     _clearAmbientBannerTimer();
     _winnerMonitorTicket += 1;
+    _showHoldFastForwardOverlay = false;
     final normalizedWinner = winner.trim();
     final normalizedRanking = _normalizeRankingForResult(
       ranking,
@@ -7803,6 +8121,7 @@ SOFTWARE.
       _logPinballStatus('핀볼 게임 페이지 로딩 중...');
       _mapLabel = '';
       _showMapLabelOverlay = false;
+      _showHoldFastForwardOverlay = false;
       _didShowMapLabelOverlayOnce = false;
       _pageLoaded = false;
       _didStart = false;
@@ -8047,6 +8366,35 @@ SOFTWARE.
     );
   }
 
+  Widget _buildHoldFastForwardOverlay() {
+    if (!_didStart || _hasError || _isFinishing) {
+      return const SizedBox.shrink();
+    }
+    return IgnorePointer(
+      child: Center(
+        child: AnimatedOpacity(
+          opacity: _showHoldFastForwardOverlay ? 1 : 0,
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+          child: Container(
+            width: 128,
+            height: 128,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.black.withValues(alpha: 0.18),
+            ),
+            alignment: Alignment.center,
+            child: Icon(
+              Icons.fast_forward_rounded,
+              size: 84,
+              color: Colors.white.withValues(alpha: 0.46),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bannerCacheWidth = max(
@@ -8273,6 +8621,7 @@ SOFTWARE.
                   ),
                 ),
               ),
+            _buildHoldFastForwardOverlay(),
             SafeArea(
               child: Align(
                 alignment: Alignment.bottomRight,
