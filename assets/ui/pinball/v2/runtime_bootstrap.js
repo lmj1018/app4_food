@@ -1270,6 +1270,23 @@ function patchRendererEntityVisuals() {
   return true;
 }
 
+function patchRendererWinnerOverlay() {
+  const roulette = getRoulette();
+  const renderer = roulette && roulette._renderer && typeof roulette._renderer === 'object'
+    ? roulette._renderer
+    : null;
+  if (!renderer || typeof renderer.renderWinner !== 'function') {
+    return false;
+  }
+  if (renderer.__v2WinnerOverlayMuted === true) {
+    return true;
+  }
+  renderer.__v2OriginalRenderWinner = renderer.renderWinner.bind(renderer);
+  renderer.renderWinner = () => {};
+  renderer.__v2WinnerOverlayMuted = true;
+  return true;
+}
+
 function getPhysics() {
   const roulette = getRoulette();
   return roulette && roulette.physics ? roulette.physics : null;
@@ -2408,6 +2425,7 @@ async function applyMapJson(rawMapJson) {
   patchPhysicsGetEntities();
   patchCameraZoomControls();
   patchRendererEntityVisuals();
+  patchRendererWinnerOverlay();
   wireGoalEvent();
   patchRouletteSlowMotionRange();
   patchMiniMapUiObject();
@@ -2472,6 +2490,7 @@ async function applyMapJsonLive(rawMapJson, options = {}) {
   patchPhysicsGetEntities();
   patchCameraZoomControls();
   patchRendererEntityVisuals();
+  patchRendererWinnerOverlay();
   wireGoalEvent();
   patchRouletteSlowMotionRange();
   patchMiniMapUiObject();

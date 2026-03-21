@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/food_image_catalog.dart';
+import '../widgets/pinball_ranking_ticker.dart';
 
 class PinballScreenArgs {
   const PinballScreenArgs({
@@ -214,6 +215,7 @@ SOFTWARE.
   bool _countdownExpiryInFlight = false;
   bool _showHoldFastForwardOverlay = false;
   bool _miniMapVisible = false;
+  List<String> _rankingTickerEntries = const <String>[];
 
   void _logPinballStatus(String value) {
     debugPrint('[Pinball][status] $value');
@@ -222,6 +224,38 @@ SOFTWARE.
   void _clearStartupTimeout() {
     _startupTimeoutTimer?.cancel();
     _startupTimeoutTimer = null;
+  }
+
+  bool _sameTickerEntries(List<String> left, List<String> right) {
+    if (identical(left, right)) {
+      return true;
+    }
+    if (left.length != right.length) {
+      return false;
+    }
+    for (var index = 0; index < left.length; index += 1) {
+      if (left[index] != right[index]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void _setRankingTickerEntries(List<String> entries) {
+    final normalized = entries
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toList(growable: false);
+    if (_sameTickerEntries(_rankingTickerEntries, normalized)) {
+      return;
+    }
+    if (!mounted) {
+      _rankingTickerEntries = normalized;
+      return;
+    }
+    setState(() {
+      _rankingTickerEntries = normalized;
+    });
   }
 
   void _clearMapLabelOverlayTimer() {
@@ -812,6 +846,20 @@ SOFTWARE.
     );
   }
 
+  List<String> _resolveTickerRankingSnapshot(
+    Map<String, dynamic>? runtime, {
+    String? winnerOverride,
+  }) {
+    final resolvedWinner =
+        (winnerOverride ?? _extractWinnerName(runtime?['winner'])).trim();
+    final finishedRanking = _extractStringList(runtime?['finishedRanking']);
+    final top3 = _extractStringList(runtime?['top3']);
+    return _normalizeRankingForResult(
+      finishedRanking.isNotEmpty ? finishedRanking : top3,
+      winner: resolvedWinner,
+    );
+  }
+
   Future<void> _handleCountdownExpired() async {
     try {
       if (!mounted || _isFinishing) {
@@ -1276,6 +1324,7 @@ SOFTWARE.
     if (mounted) {
       setState(() {
         _logPinballStatus('핀볼 엔진 초기화 중...');
+        _rankingTickerEntries = const <String>[];
       });
     }
 
@@ -7915,6 +7964,9 @@ SOFTWARE.
         ranking.isNotEmpty ? ranking : top3,
         winner: winner,
       );
+      _setRankingTickerEntries(
+        _resolveTickerRankingSnapshot(runtime, winnerOverride: winner),
+      );
       final running = runtime?['running'] == true;
       final count = _toInt(runtime?['count']);
       final movedTicks = _toInt(runtime?['movedTicks']);
@@ -8335,6 +8387,7 @@ SOFTWARE.
       _isStarting = false;
       _startGeneration += 1;
       _winnerMonitorTicket += 1;
+      _rankingTickerEntries = const <String>[];
     });
     _clearStartupTimeout();
     await _loadPinballPage(clearCache: true);
@@ -8830,49 +8883,49 @@ SOFTWARE.
               ),
             _buildHoldFastForwardOverlay(),
             SafeArea(
-              child: Align(
-                alignment: Alignment.bottomRight,
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 8, bottom: 2),
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(7),
-                      onTapDown: (_) => _startLicenseHoldTimer(),
-                      onTapUp: (_) => _clearLicenseHoldTimer(),
-                      onTapCancel: _clearLicenseHoldTimer,
-                      onTap: () {
-                        _clearLicenseHoldTimer();
-                        if (_licenseHoldTriggered) {
-                          _licenseHoldTriggered = false;
-                          return;
-                        }
-                        _showLicenseNotice();
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 7,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.68),
-                          borderRadius: BorderRadius.circular(7),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.16),
-                            width: 0.8,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 8, right: 8, bottom: 2),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    const Spacer(),
+                    if (_rankingTickerEntries.isNotEmpty)
+                      Flexible(
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: IgnorePointer(
+                            child: PinballRankingTicker(
+                              entries: _rankingTickerEntries,
+                            ),
                           ),
                         ),
-                        child: const Text(
-                          'Licensed',
-                          style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 8.5,
-                            fontWeight: FontWeight.w700,
+                      ),
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(7),
+                        onTapDown: (_) => _startLicenseHoldTimer(),
+                        onTapUp: (_) => _clearLicenseHoldTimer(),
+                        onTapCancel: _clearLicenseHoldTimer,
+                        onTap: () {
+                          _clearLicenseHoldTimer();
+                          if (_licenseHoldTriggered) {
+                            _licenseHoldTriggered = false;
+                            return;
+                          }
+                          _showLicenseNotice();
+                        },
+                        child: Container(
+                          padding: pinballOverlayBadgePadding,
+                          decoration: buildPinballOverlayBadgeDecoration(),
+                          child: const Text(
+                            'Licensed',
+                            style: pinballOverlayCaptionStyle,
                           ),
                         ),
                       ),
                     ),
-                  ),
+                  ],
                 ),
               ),
             ),
