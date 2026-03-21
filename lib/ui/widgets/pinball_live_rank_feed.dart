@@ -19,6 +19,8 @@ class PinballLiveRankFeed extends StatelessWidget {
 
   final List<PinballLiveRankFeedEntry> entries;
 
+  static const Color _neonPink = Color(0xFFFF4FD8);
+
   @override
   Widget build(BuildContext context) {
     if (entries.isEmpty) {
@@ -35,12 +37,27 @@ class PinballLiveRankFeed extends StatelessWidget {
               decoration: buildPinballOverlayBadgeDecoration(),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-                child: Text(
-                  '${entry.name} ${entry.rank}등',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(
+                        text: entry.name,
+                        style: const TextStyle(
+                          color: _neonPink,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          shadows: [Shadow(color: _neonPink, blurRadius: 8)],
+                        ),
+                      ),
+                      TextSpan(
+                        text: ' ${entry.rank}등',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),

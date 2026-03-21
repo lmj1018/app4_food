@@ -708,10 +708,11 @@ SOFTWARE.
       if (name.isEmpty || !_announcedLiveRankNames.add(name)) {
         continue;
       }
+      final rank = _announcedLiveRankNames.length;
       final entry = PinballLiveRankFeedEntry(
         id: ++_liveRankFeedSerial,
         name: name,
-        rank: index + 1,
+        rank: rank,
       );
       if (mounted) {
         setState(() {
