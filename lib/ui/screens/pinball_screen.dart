@@ -1276,7 +1276,8 @@ SOFTWARE.
         'candidates': _candidates,
         'autoStart': true,
         'winnerType': 'custom',
-        'winningRank': _waitForFullRanking ? _expectedRankingCount : 1,
+        'winningRank': 1,
+        'fullRankingMode': _waitForFullRanking,
         'countdownTotalMs': _countdownTotalMs,
         'imageDataUrls': imageDataUrls,
         'goalLineImageDataUrl': goalLineImageDataUrl,
@@ -1497,6 +1498,7 @@ SOFTWARE.
     payload && typeof payload.goalLineImageDataUrl === 'string'
       ? payload.goalLineImageDataUrl
       : '';
+  const fullRankingMode = payload && payload.fullRankingMode === true;
   const candidateKey = candidates.join('\\n');
   const targetWinningRank = Math.max(1, Number(payload && payload.winningRank) || 1);
   const ceremonyDisplayCount = Math.max(1, Math.min(3, targetWinningRank));
@@ -1506,6 +1508,8 @@ SOFTWARE.
   window.__appPinballControl = control;
 
   if (typeof control.prepared !== 'boolean') control.prepared = false;
+  if (typeof control.fullRankingMode !== 'boolean') control.fullRankingMode = false;
+  control.fullRankingMode = fullRankingMode;
   if (typeof control.candidateKey !== 'string') control.candidateKey = '';
   if (!Array.isArray(control.lastSample)) control.lastSample = null;
   if (typeof control.movedTicks !== 'number') control.movedTicks = 0;
@@ -1974,10 +1978,72 @@ SOFTWARE.
       window.roulette._uiObjects = [cachedMiniMap];
     }
     if (!control.uiObjectAddPatched && typeof window.roulette.addUiObject === 'function') {
-      window.roulette.addUiObject = () => {};
+      const originalAddUiObject = window.roulette.addUiObject.bind(window.roulette);
+      window.roulette.addUiObject = (uiObject) => {
+        originalAddUiObject(uiObject);
+        if (!Array.isArray(window.roulette._uiObjects)) {
+          return;
+        }
+        if (isMiniMapUiObject(uiObject)) {
+          window.roulette.__appMiniMapUiObject = uiObject;
+          if (control.miniMapVisible !== true) {
+            const miniMapIndex = window.roulette._uiObjects.findIndex((item) => item === uiObject);
+            if (miniMapIndex >= 0) {
+              window.roulette._uiObjects.splice(miniMapIndex, 1);
+            }
+          }
+          return;
+        }
+        const uiObjectIndex = window.roulette._uiObjects.findIndex((item) => item === uiObject);
+        if (uiObjectIndex >= 0) {
+          window.roulette._uiObjects.splice(uiObjectIndex, 1);
+        }
+      };
       control.uiObjectAddPatched = true;
     }
     control.uiObjectsCleared = true;
+  };
+
+  const syncFullRankingRace = () => {
+    if (control.fullRankingMode !== true || !window.roulette) {
+      return;
+    }
+    const roulette = window.roulette;
+    const winners = Array.isArray(roulette._winners) ? roulette._winners : [];
+    const marbles = Array.isArray(roulette._marbles) ? roulette._marbles : [];
+    const totalCount = Math.max(
+      winners.length + marbles.length,
+      Number(roulette._totalMarbleCount) || 0,
+      candidates.length,
+    );
+    if (winners.length <= 0 || winners.length >= totalCount || marbles.length <= 0) {
+      return;
+    }
+    const nextWinnerRank = Math.max(0, Math.min(totalCount - 1, winners.length));
+    if (window.options && typeof window.options === 'object') {
+      window.options.winningRank = nextWinnerRank;
+    }
+    if (typeof roulette.setWinningRank === 'function') {
+      roulette.setWinningRank(nextWinnerRank);
+    }
+    roulette._winnerRank = nextWinnerRank;
+    roulette._winner = null;
+    roulette._isRunning = true;
+    marbles.forEach((marble) => {
+      if (marble) {
+        marble.isActive = true;
+      }
+    });
+    try {
+      const camera = roulette._camera;
+      if (camera && typeof camera.lock === 'function') {
+        camera.lock(false);
+      }
+      if (camera && typeof camera.startFollowingMarbles === 'function') {
+        camera.startFollowingMarbles();
+      }
+    } catch (_) {
+    }
   };
 
   const imageForName = (name) => {
@@ -2584,6 +2650,7 @@ SOFTWARE.
           );
         }
       });
+      syncFullRankingRace();
       return result;
     };
     control.skillPulseFallbackPatched = true;

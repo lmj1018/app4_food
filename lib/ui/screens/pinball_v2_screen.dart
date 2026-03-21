@@ -268,7 +268,6 @@ SOFTWARE.
   int get _countdownTotalMs => widget.args.waitForFullRanking
       ? _fullRankingCountdownTotalMs
       : _normalCountdownTotalMs;
-  int get _fullRankingWinningRank => max(1, _candidates.length);
 
   String _normalizeCandidate(String value) {
     var out = value.trim();
@@ -1906,9 +1905,8 @@ SOFTWARE.
     final payload = <String, Object>{
       'mapId': _effectiveMapId,
       'candidates': _candidates,
-      'winningRank': widget.args.waitForFullRanking
-          ? _fullRankingWinningRank
-          : 1,
+      'winningRank': 1,
+      'fullRankingMode': widget.args.waitForFullRanking,
       'autoStart': widget.args.autoStart,
       'zoomPresetIndex': _v2ZoomPresetIndex,
       'fromApp': true,

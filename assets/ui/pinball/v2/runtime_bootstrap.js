@@ -91,6 +91,7 @@ const control = {
   marbleRadius: DEFAULT_MARBLE_RADIUS,
   candidates: [],
   winningRank: 1,
+  fullRankingMode: false,
   paused: true,
   goalReceived: false,
   behaviorRuntime: null,
@@ -1977,6 +1978,9 @@ function wireGoalEvent() {
       ranking.unshift(winner);
     }
     postBridge('goal', { winner, ranking });
+    window.setTimeout(() => {
+      resumeFullRankingRaceAfterGoal(roulette, ranking.length);
+    }, 0);
   });
   roulette.__v2GoalWired = true;
 }
@@ -1991,6 +1995,39 @@ function setWinningRank(rankOneBased) {
   }
   if (roulette && typeof roulette.setWinningRank === 'function') {
     roulette.setWinningRank(zeroBased);
+  }
+}
+
+function resumeFullRankingRaceAfterGoal(rouletteInput, rankingCountInput) {
+  if (control.fullRankingMode !== true) {
+    return;
+  }
+  const roulette = rouletteInput && typeof rouletteInput === 'object'
+    ? rouletteInput
+    : getRoulette();
+  if (!roulette) {
+    return;
+  }
+  const marbles = Array.isArray(roulette._marbles) ? roulette._marbles : [];
+  const rankingCount = Math.max(0, Math.floor(toFiniteNumber(rankingCountInput, 0)));
+  const totalCount = Math.max(
+    control.candidates.length,
+    rankingCount + marbles.length,
+    Math.floor(toFiniteNumber(roulette._totalMarbleCount, 0)),
+  );
+  if (rankingCount <= 0 || rankingCount >= totalCount || marbles.length <= 0) {
+    return;
+  }
+  setWinningRank(rankingCount + 1);
+  control.goalReceived = false;
+  roulette._winnerRank = rankingCount;
+  roulette._winner = null;
+  roulette._isRunning = true;
+  for (let index = 0; index < marbles.length; index += 1) {
+    const marble = marbles[index];
+    if (marble) {
+      marble.isActive = true;
+    }
   }
 }
 
@@ -3162,6 +3199,7 @@ async function init(payload = {}) {
     if (payloadCandidates.length > 0) {
       control.candidates = payloadCandidates;
     }
+    control.fullRankingMode = safePayload.fullRankingMode === true;
     if (Number.isFinite(Number(safePayload.winningRank))) {
       setWinningRank(Math.max(1, Math.floor(Number(safePayload.winningRank))));
     } else {
