@@ -1,9 +1,12 @@
 import 'dart:convert';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
 class CustomMarbleImageFactory {
-  static Map<String, String> buildDataUrls(Iterable<String> candidates) {
+  static Future<Map<String, String>> buildDataUrls(
+    Iterable<String> candidates,
+  ) async {
     final result = <String, String>{};
     var index = 0;
     for (final rawCandidate in candidates) {
@@ -11,13 +14,13 @@ class CustomMarbleImageFactory {
       if (candidate.isEmpty) {
         continue;
       }
-      result[candidate] = _buildSingleDataUrl(candidate, index);
+      result[candidate] = await _buildSingleDataUrl(candidate, index);
       index += 1;
     }
     return result;
   }
 
-  static String _buildSingleDataUrl(String candidate, int index) {
+  static Future<String> _buildSingleDataUrl(String candidate, int index) async {
     final hash = _stableHash(candidate);
     final hue = (hash + (index * 137.508)) % 360;
     final saturation = 0.72 + ((hash >> 4) % 10) / 100;
@@ -52,39 +55,106 @@ class CustomMarbleImageFactory {
       (saturation * 0.6).clamp(0.0, 1.0),
       0.94,
     ).toColor();
-    final svg =
-        '''
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">
-  <defs>
-    <radialGradient id="body" cx="33%" cy="27%" r="70%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.98"/>
-      <stop offset="16%" stop-color="${_colorToHex(highlightColor)}" stop-opacity="0.98"/>
-      <stop offset="58%" stop-color="${_colorToHex(baseColor)}"/>
-      <stop offset="100%" stop-color="${_colorToHex(shadowColor)}"/>
-    </radialGradient>
-    <radialGradient id="rim" cx="50%" cy="50%" r="56%">
-      <stop offset="68%" stop-color="#ffffff" stop-opacity="0"/>
-      <stop offset="100%" stop-color="#000000" stop-opacity="0.26"/>
-    </radialGradient>
-    <linearGradient id="streak" x1="20%" y1="14%" x2="82%" y2="88%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.78"/>
-      <stop offset="58%" stop-color="#ffffff" stop-opacity="0.18"/>
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
-    </linearGradient>
-  </defs>
-  <circle cx="80" cy="80" r="74" fill="url(#body)"/>
-  <circle cx="80" cy="80" r="74" fill="url(#rim)"/>
-  <ellipse cx="55" cy="48" rx="27" ry="18" fill="#ffffff" fill-opacity="0.36" transform="rotate(-18 55 48)"/>
-  <ellipse cx="98" cy="108" rx="44" ry="24" fill="${_colorToHex(shadowGlowColor)}" fill-opacity="0.16" transform="rotate(22 98 108)"/>
-  <path d="M45 56c15-18 39-26 62-22" fill="none" stroke="url(#streak)" stroke-width="12" stroke-linecap="round"/>
-  <circle cx="80" cy="80" r="73" fill="none" stroke="${_colorToHex(rimColor)}" stroke-opacity="0.3" stroke-width="2"/>
-</svg>
-''';
-    return Uri.dataFromString(
-      svg,
-      mimeType: 'image/svg+xml',
-      encoding: utf8,
-    ).toString();
+    const imageSize = 160.0;
+    const center = Offset(80, 80);
+    const radius = 74.0;
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+
+    final bodyPaint = Paint()
+      ..isAntiAlias = true
+      ..shader = ui.Gradient.radial(
+        center,
+        radius,
+        <Color>[
+          Colors.white.withValues(alpha: 0.98),
+          highlightColor.withValues(alpha: 0.98),
+          baseColor,
+          shadowColor,
+        ],
+        <double>[0.0, 0.16, 0.58, 1.0],
+      );
+    canvas.drawCircle(center, radius, bodyPaint);
+
+    final rimPaint = Paint()
+      ..isAntiAlias = true
+      ..shader = ui.Gradient.radial(
+        center,
+        radius,
+        <Color>[
+          Colors.white.withValues(alpha: 0.0),
+          Colors.white.withValues(alpha: 0.0),
+          Colors.black.withValues(alpha: 0.26),
+        ],
+        <double>[0.0, 0.68, 1.0],
+      );
+    canvas.drawCircle(center, radius, rimPaint);
+
+    canvas.save();
+    canvas.translate(55, 48);
+    canvas.rotate(-18 * 3.141592653589793 / 180);
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset.zero, width: 54, height: 36),
+      Paint()
+        ..isAntiAlias = true
+        ..color = Colors.white.withValues(alpha: 0.36),
+    );
+    canvas.restore();
+
+    canvas.save();
+    canvas.translate(98, 108);
+    canvas.rotate(22 * 3.141592653589793 / 180);
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset.zero, width: 88, height: 48),
+      Paint()
+        ..isAntiAlias = true
+        ..color = shadowGlowColor.withValues(alpha: 0.16),
+    );
+    canvas.restore();
+
+    final streakPath = Path()
+      ..moveTo(45, 56)
+      ..quadraticBezierTo(60, 38, 107, 34);
+    final streakPaint = Paint()
+      ..isAntiAlias = true
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 12
+      ..strokeCap = StrokeCap.round
+      ..shader = ui.Gradient.linear(
+        const Offset(32, 22),
+        const Offset(131, 118),
+        <Color>[
+          Colors.white.withValues(alpha: 0.78),
+          Colors.white.withValues(alpha: 0.18),
+          Colors.white.withValues(alpha: 0.0),
+        ],
+        const <double>[0.0, 0.58, 1.0],
+      );
+    canvas.drawPath(streakPath, streakPaint);
+
+    canvas.drawCircle(
+      center,
+      73,
+      Paint()
+        ..isAntiAlias = true
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..color = rimColor.withValues(alpha: 0.3),
+    );
+
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(imageSize.toInt(), imageSize.toInt());
+    try {
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) {
+        return '';
+      }
+      final pngBytes = byteData.buffer.asUint8List();
+      return 'data:image/png;base64,${base64Encode(pngBytes)}';
+    } finally {
+      image.dispose();
+    }
   }
 
   static double _wrapHue(double value) {
@@ -102,11 +172,5 @@ class CustomMarbleImageFactory {
       hash = (hash * 0x01000193) & 0x7fffffff;
     }
     return hash;
-  }
-
-  static String _colorToHex(Color color) {
-    final argb = color.toARGB32();
-    final rgb = argb & 0x00ffffff;
-    return '#${rgb.toRadixString(16).padLeft(6, '0')}';
   }
 }

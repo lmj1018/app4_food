@@ -1671,7 +1671,7 @@ SOFTWARE.
     }
 
     if (widget.args.isCustomMode) {
-      final result = CustomMarbleImageFactory.buildDataUrls(_candidates);
+      final result = await CustomMarbleImageFactory.buildDataUrls(_candidates);
       _candidateImageKey = key;
       _candidateImageDataUrls = result;
       return result;
