@@ -43,21 +43,15 @@ class CustomMarbleImageFactory {
       (saturation * 0.92).clamp(0.0, 1.0),
       0.28,
     ).toColor();
-    final shadowGlowColor = HSLColor.fromAHSL(
-      1,
-      hue,
-      (saturation * 0.7).clamp(0.0, 1.0),
-      0.18,
-    ).toColor();
     final rimColor = HSLColor.fromAHSL(
       1,
       hue,
       (saturation * 0.6).clamp(0.0, 1.0),
       0.94,
     ).toColor();
-    const imageSize = 160.0;
-    const center = Offset(80, 80);
-    const radius = 74.0;
+    const imageSize = 96.0;
+    const center = Offset(imageSize / 2, imageSize / 2);
+    const radius = 43.0;
 
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
@@ -67,81 +61,33 @@ class CustomMarbleImageFactory {
       ..shader = ui.Gradient.radial(
         center,
         radius,
-        <Color>[
-          Colors.white.withValues(alpha: 0.98),
-          highlightColor.withValues(alpha: 0.98),
-          baseColor,
-          shadowColor,
-        ],
-        <double>[0.0, 0.16, 0.58, 1.0],
+        <Color>[highlightColor.withValues(alpha: 0.92), baseColor, shadowColor],
+        <double>[0.0, 0.54, 1.0],
       );
     canvas.drawCircle(center, radius, bodyPaint);
 
-    final rimPaint = Paint()
-      ..isAntiAlias = true
-      ..shader = ui.Gradient.radial(
-        center,
-        radius,
-        <Color>[
-          Colors.white.withValues(alpha: 0.0),
-          Colors.white.withValues(alpha: 0.0),
-          Colors.black.withValues(alpha: 0.26),
-        ],
-        <double>[0.0, 0.68, 1.0],
-      );
-    canvas.drawCircle(center, radius, rimPaint);
-
-    canvas.save();
-    canvas.translate(55, 48);
-    canvas.rotate(-18 * 3.141592653589793 / 180);
-    canvas.drawOval(
-      Rect.fromCenter(center: Offset.zero, width: 54, height: 36),
-      Paint()
-        ..isAntiAlias = true
-        ..color = Colors.white.withValues(alpha: 0.36),
-    );
-    canvas.restore();
-
-    canvas.save();
-    canvas.translate(98, 108);
-    canvas.rotate(22 * 3.141592653589793 / 180);
-    canvas.drawOval(
-      Rect.fromCenter(center: Offset.zero, width: 88, height: 48),
-      Paint()
-        ..isAntiAlias = true
-        ..color = shadowGlowColor.withValues(alpha: 0.16),
-    );
-    canvas.restore();
-
-    final streakPath = Path()
-      ..moveTo(45, 56)
-      ..quadraticBezierTo(60, 38, 107, 34);
-    final streakPaint = Paint()
-      ..isAntiAlias = true
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 12
-      ..strokeCap = StrokeCap.round
-      ..shader = ui.Gradient.linear(
-        const Offset(32, 22),
-        const Offset(131, 118),
-        <Color>[
-          Colors.white.withValues(alpha: 0.78),
-          Colors.white.withValues(alpha: 0.18),
-          Colors.white.withValues(alpha: 0.0),
-        ],
-        const <double>[0.0, 0.58, 1.0],
-      );
-    canvas.drawPath(streakPath, streakPaint);
-
     canvas.drawCircle(
       center,
-      73,
+      radius,
       Paint()
         ..isAntiAlias = true
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 2
-        ..color = rimColor.withValues(alpha: 0.3),
+        ..strokeWidth = 1.5
+        ..color = rimColor.withValues(alpha: 0.24),
     );
+
+    final topHighlightPaint = Paint()
+      ..isAntiAlias = true
+      ..shader = ui.Gradient.radial(
+        const Offset(36, 32),
+        16,
+        <Color>[
+          Colors.white.withValues(alpha: 0.28),
+          Colors.white.withValues(alpha: 0.0),
+        ],
+        const <double>[0.0, 1.0],
+      );
+    canvas.drawCircle(const Offset(36, 32), 16, topHighlightPaint);
 
     final picture = recorder.endRecording();
     final image = await picture.toImage(imageSize.toInt(), imageSize.toInt());
