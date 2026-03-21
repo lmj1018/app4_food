@@ -139,6 +139,32 @@ function Get-DartDefineArguments {
     return $arguments.ToArray()
 }
 
+function Get-SafeFlutterCommandPreview {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments
+    )
+
+    $preview = foreach ($arg in $Arguments) {
+        if ($arg -like '--dart-define=*') {
+            $keyValue = $arg.Substring('--dart-define='.Length)
+            $separatorIndex = $keyValue.IndexOf('=')
+            if ($separatorIndex -ge 0) {
+                $key = $keyValue.Substring(0, $separatorIndex)
+                "--dart-define=$key=<redacted>"
+            }
+            else {
+                '--dart-define=<redacted>'
+            }
+        }
+        else {
+            $arg
+        }
+    }
+
+    return "flutter $($preview -join ' ')"
+}
+
 function Invoke-FlutterReleaseBuild {
     param(
         [Parameter(Mandatory = $true)]
@@ -202,7 +228,7 @@ function Invoke-FlutterReleaseBuild {
     Push-Location $resolvedProjectDir
     try {
         Write-Host "Using release config: $($config['__ConfigPath'])"
-        Write-Host "Running: flutter $($flutterArgs -join ' ')"
+        Write-Host "Running: $(Get-SafeFlutterCommandPreview -Arguments $flutterArgs.ToArray())"
         & flutter @flutterArgs
         if ($LASTEXITCODE -ne 0) {
             throw "Flutter build failed with exit code $LASTEXITCODE."

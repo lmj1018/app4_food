@@ -1,3 +1,8 @@
+#
+# Copy this file to `secrets/mobile_release.local.psd1`
+# and fill in the real values locally.
+# Do not commit real secrets to this example file.
+#
 @{
     KEYSTORE_PATH = '..\android\release-upload.jks'
     KEYSTORE_PASSWORD = 'replace-me'

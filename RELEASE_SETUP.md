@@ -24,6 +24,14 @@ keytool -genkeypair -v -keystore release-upload.jks -alias upload -keyalg RSA -k
 - AAB 빌드: `powershell -ExecutionPolicy Bypass -File .\scripts\build_aab.ps1`
 - APK 빌드: `powershell -ExecutionPolicy Bypass -File .\scripts\build_apk_via_temp.ps1 -Mode release`
 
+초기 설정:
+
+```powershell
+Copy-Item .\secrets\mobile_release.example.psd1 .\secrets\mobile_release.local.psd1
+```
+
+`mobile_release.local.psd1`는 `.gitignore` 대상입니다. 실제 API 키/광고 ID/서명 비밀번호는 이 파일에만 저장합니다.
+
 다음 키를 빌드 시점에 주입합니다.
 
 - `KEYSTORE_PATH`
@@ -65,19 +73,13 @@ ADMOB_APP_ID=ca-app-pub-xxxxxxxxxxxxxxxx~yyyyyyyyyy
 - `ADMOB_REWARDED_ANDROID_UNIT_ID`
 - `ENABLE_HYBRID_DEBUG_LOGS` (출시 권장: `false`)
 
-현재 사용값(요청 기준, 기존 하드코딩에서 분리):
-
-- `KAKAO_REST_API_KEY=a8c6ab6cd9c6d0dc45680c5d8866e69d`
-- `NAVER_CLIENT_ID=k6B8dXuL4q7NHtR8q0SA`
-- `NAVER_CLIENT_SECRET=PhvUOZ04RV`
-
 카카오 콘솔 참고:
 
 - 이 앱처럼 **Kakao Local REST API만 사용**하는 경우, 필수는 `REST API 키`입니다.
 - 콘솔에서 `내 애플리케이션 > 앱 키`(또는 유사 명칭) 메뉴만 확인되면 정상입니다.
 - `플랫폼 등록/추가기능 신청` 메뉴가 보이지 않아도 Local REST 호출에는 필수가 아닙니다.
 
-위 3개 값은 코드에 하드코딩하지 말고, 아래 빌드 시점 주입 방식으로만 사용합니다.
+위 값들은 코드나 문서에 하드코딩하지 말고, `secrets/mobile_release.local.psd1`에만 넣어서 빌드 시점에 주입합니다.
 
 참고: 현재 앱은 구글 보강(`Google Places`)을 코드에서 비활성화(`enableGoogleSignal: false`)해 두었습니다.
 따라서 `GOOGLE_PLACES_API_KEY`는 미입력 상태여도 동작합니다.
@@ -134,3 +136,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_apk_via_temp.ps1 -Mode 
 - 기본 cleartext는 금지(`false`)
 - `network_security_config`에서 로컬 루프백(`localhost`, `127.0.0.1`)만 허용
 - 핀볼 WebView 로컬 서버 통신 목적
+
+## 7) 기본 빌드 규칙
+
+- AAB 요청 시 기본 명령: `powershell -ExecutionPolicy Bypass -File .\scripts\build_aab.ps1`
+- APK 요청 시 기본 명령: `powershell -ExecutionPolicy Bypass -File .\scripts\build_apk_via_temp.ps1 -Mode release`
+- 수동 `flutter build appbundle` / `flutter build apk`는 예외 상황이 아니면 사용하지 않습니다.
+- 다른 비밀파일을 써야 하면 두 스크립트에 `-ConfigPath <path>`를 넘깁니다.

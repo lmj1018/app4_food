@@ -17,25 +17,29 @@
 
 ```powershell
 flutter run `
-  --dart-define=KAKAO_REST_API_KEY=a8c6ab6cd9c6d0dc45680c5d8866e69d `
+  --dart-define=KAKAO_REST_API_KEY=<your_kakao_rest_api_key> `
   --dart-define=GOOGLE_PLACES_API_KEY=<your_google_places_api_key> `
-  --dart-define=NAVER_CLIENT_ID=k6B8dXuL4q7NHtR8q0SA `
-  --dart-define=NAVER_CLIENT_SECRET=PhvUOZ04RV
+  --dart-define=NAVER_CLIENT_ID=<your_naver_client_id> `
+  --dart-define=NAVER_CLIENT_SECRET=<your_naver_client_secret>
 ```
 
 Google 키가 없어도 카카오 검색은 동작합니다.
 
 ```powershell
 flutter run `
-  --dart-define=KAKAO_REST_API_KEY=a8c6ab6cd9c6d0dc45680c5d8866e69d
+  --dart-define=KAKAO_REST_API_KEY=<your_kakao_rest_api_key>
 ```
 
-릴리스 AAB도 같은 방식으로 `--dart-define` 값을 주입해 빌드합니다.
+릴리스 AAB/APK는 수동 `flutter build` 대신 아래 스크립트로 빌드합니다.
 
 ## 릴리스 빌드
 
 - 로컬 비밀파일: `secrets/mobile_release.local.psd1`
 - 예제 파일: `secrets/mobile_release.example.psd1`
+
+```powershell
+Copy-Item .\secrets\mobile_release.example.psd1 .\secrets\mobile_release.local.psd1
+```
 
 ```powershell
 # AAB
@@ -45,6 +49,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_aab.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\build_apk_via_temp.ps1 -Mode release
 ```
 
+`secrets/mobile_release.local.psd1`는 `.gitignore` 대상이며, 실제 키/비밀번호는 이 파일에만 둡니다.
 앞으로는 릴리스 빌드 시 긴 `--dart-define` 명령을 직접 입력하지 않고 위 스크립트를 사용합니다.
 
 ## 무선 디버깅 스플래시 멈춤 대응
