@@ -76,8 +76,8 @@ class RouletteResultScreen extends StatelessWidget {
         args.mode == RouletteMode.food || args.showSearchButton;
     final rankingNames = _resolveRankingNames();
     final customRankingItems =
-        args.mode == RouletteMode.custom && rankingNames.length > 1
-        ? rankingNames.sublist(1)
+        args.mode == RouletteMode.custom && rankingNames.isNotEmpty
+        ? rankingNames
         : const <String>[];
 
     return Scaffold(
@@ -454,8 +454,8 @@ class _AnimatedRankingListState extends State<_AnimatedRankingList>
   void initState() {
     super.initState();
     final count = math.max(1, widget.items.length);
-    final totalMs =
-        ((count - 1) * _rankRevealStepMs + _rankRowMotionMs).round();
+    final totalMs = ((count - 1) * _rankRevealStepMs + _rankRowMotionMs)
+        .round();
     _controller = AnimationController(
       vsync: this,
       duration: Duration(milliseconds: totalMs),
@@ -471,7 +471,7 @@ class _AnimatedRankingListState extends State<_AnimatedRankingList>
   Color _nameColorForIndex(int index) {
     const baseColor = Color(0xFFE6006E);
     final hsl = HSLColor.fromColor(baseColor);
-    final rank = index + 2;
+    final rank = index + 1;
     final lightness = (hsl.lightness - 0.07 - (index * 0.022)).clamp(
       0.26,
       0.58,
@@ -496,12 +496,12 @@ class _AnimatedRankingListState extends State<_AnimatedRankingList>
         final rows = <Widget>[];
         for (var i = 0; i < widget.items.length; i++) {
           final rowStartMs = i * _rankRevealStepMs;
-          final localProgress =
-              ((nowMs - rowStartMs) / _rankRowMotionMs).clamp(0.0, 1.0)
-                  .toDouble();
+          final localProgress = ((nowMs - rowStartMs) / _rankRowMotionMs)
+              .clamp(0.0, 1.0)
+              .toDouble();
           final progress = Curves.easeOutCubic.transform(localProgress);
           final translateX = (1 - progress) * -42;
-          final rank = i + 2;
+          final rank = i + 1;
           rows.add(
             Opacity(
               opacity: progress.clamp(0.0, 1.0),
