@@ -1373,7 +1373,7 @@ function patchRouletteSlowMotionRange() {
       && targetY > zoomY - enterMarginY
     ) {
       const normalized = Math.max(0, Math.min(1, goalDist / slowRangeY));
-      return Math.max(0.2, Math.pow(normalized, 1.25));
+      return Math.max(0.3, Math.pow(normalized, 1.15));
     }
     return 1;
   };

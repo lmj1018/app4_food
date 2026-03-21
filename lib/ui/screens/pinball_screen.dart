@@ -758,9 +758,16 @@ SOFTWARE.
     if (!_waitForFullRanking || ranking.isEmpty) {
       return false;
     }
-    final finishedCount = _finishedRankingCount(runtime);
-    if (finishedCount != (_expectedRankingCount - 1)) {
-      return false;
+    final remainingCount = _remainingMarbleCount(runtime);
+    if (remainingCount >= 0) {
+      if (remainingCount != 1) {
+        return false;
+      }
+    } else {
+      final finishedCount = _finishedRankingCount(runtime);
+      if (finishedCount != (_expectedRankingCount - 1)) {
+        return false;
+      }
     }
     return ranking.length >= _expectedRankingCount;
   }
@@ -769,14 +776,26 @@ SOFTWARE.
     if (!_waitForFullRanking) {
       return false;
     }
+    final remainingCount = _remainingMarbleCount(runtime);
+    if (remainingCount >= 0) {
+      return remainingCount == 0;
+    }
     return _finishedRankingCount(runtime) >= _expectedRankingCount;
   }
 
   int _finishedRankingCount(Map<String, dynamic>? runtime) {
+    final remainingCount = _remainingMarbleCount(runtime);
+    if (remainingCount >= 0 && _expectedRankingCount > 0) {
+      return max(0, _expectedRankingCount - remainingCount);
+    }
     return _toInt(
       runtime?['finishedCount'],
       fallback: _countDistinctNames(runtime?['finishedRanking']),
     );
+  }
+
+  int _remainingMarbleCount(Map<String, dynamic>? runtime) {
+    return _toInt(runtime?['count'], fallback: -1);
   }
 
   List<String> _resolveRankingSnapshot(
@@ -2698,6 +2717,45 @@ SOFTWARE.
       }
     };
     control.marbleRenderPatched = true;
+  };
+
+  const patchRouletteSlowMotionRange = () => {
+    if (!window.roulette || typeof window.roulette._calcTimeScale !== 'function') {
+      return;
+    }
+    if (window.roulette.__appSlowMotionRangePatched === true) {
+      return;
+    }
+    window.roulette.__appOriginalCalcTimeScale =
+      window.roulette._calcTimeScale.bind(window.roulette);
+    window.roulette._calcTimeScale = function patchedCalcTimeScale() {
+      if (!this || !this._stage) {
+        return 1;
+      }
+      const winners = Array.isArray(this._winners) ? this._winners : [];
+      const marbles = Array.isArray(this._marbles) ? this._marbles : [];
+      const winnerRank = Math.max(0, Math.floor(Number(this._winnerRank) || 0));
+      const targetIndex = Math.max(0, Math.min(marbles.length - 1, winnerRank - winners.length));
+      const targetMarble = marbles[targetIndex];
+      const goalDist = Number(this._goalDist);
+      const targetY = Number(targetMarble && targetMarble.y);
+      const zoomY = Number(this._stage && this._stage.zoomY);
+      const hasNeighbor = marbles[targetIndex - 1] || marbles[targetIndex + 1];
+      if (
+        winners.length < winnerRank + 1 &&
+        Number.isFinite(goalDist) &&
+        goalDist < 5 &&
+        Number.isFinite(targetY) &&
+        Number.isFinite(zoomY) &&
+        targetY > zoomY - 6 &&
+        hasNeighbor
+      ) {
+        const normalized = Math.max(0, Math.min(1, goalDist / 5));
+        return Math.max(0.3, Math.pow(normalized, 1.15));
+      }
+      return 1;
+    };
+    window.roulette.__appSlowMotionRangePatched = true;
   };
 
   const ensureCameraZoom = () => {
@@ -7113,6 +7171,7 @@ SOFTWARE.
   patchRenderer();
   patchGoalFx();
   patchMarbleRender();
+  patchRouletteSlowMotionRange();
   ensureSkillFxColor();
   ensureSkillPulseFallback();
   applySkillUsageGate();

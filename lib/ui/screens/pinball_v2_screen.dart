@@ -530,9 +530,16 @@ SOFTWARE.
     if (!widget.args.waitForFullRanking || ranking.isEmpty) {
       return false;
     }
-    final finishedCount = _finishedRankingCount(snapshot);
-    if (finishedCount != (expectedCount - 1)) {
-      return false;
+    final remainingCount = _remainingMarbleCount(snapshot);
+    if (remainingCount >= 0) {
+      if (remainingCount != 1) {
+        return false;
+      }
+    } else {
+      final finishedCount = _finishedRankingCount(snapshot);
+      if (finishedCount != (expectedCount - 1)) {
+        return false;
+      }
     }
     return ranking.length >= expectedCount;
   }
@@ -544,11 +551,28 @@ SOFTWARE.
     if (!widget.args.waitForFullRanking) {
       return false;
     }
+    final remainingCount = _remainingMarbleCount(snapshot);
+    if (remainingCount >= 0) {
+      return remainingCount == 0;
+    }
     return _finishedRankingCount(snapshot) >= expectedCount;
   }
 
   int _finishedRankingCount(Map<String, dynamic>? snapshot) {
+    final remainingCount = _remainingMarbleCount(snapshot);
+    final expectedCount = max(2, _candidates.length);
+    if (remainingCount >= 0) {
+      return max(0, expectedCount - remainingCount);
+    }
     return _countDistinctNames(snapshot?['ranking']);
+  }
+
+  int _remainingMarbleCount(Map<String, dynamic>? snapshot) {
+    final stateMap = _coerceStringKeyMap(snapshot?['state']);
+    return _toInt(
+      snapshot?['marbleCount'],
+      fallback: _toInt(stateMap?['marbleCount'], fallback: -1),
+    );
   }
 
   Future<Map<String, dynamic>?> _readLiveRaceSnapshot() async {
