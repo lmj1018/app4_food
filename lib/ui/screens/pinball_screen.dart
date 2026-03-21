@@ -758,8 +758,11 @@ SOFTWARE.
     if (!_waitForFullRanking || ranking.isEmpty) {
       return false;
     }
-    final remainingCount = _toInt(runtime?['count'], fallback: -1);
-    if (remainingCount != 1) {
+    final finishedCount = _toInt(
+      runtime?['finishedCount'],
+      fallback: _countDistinctNames(runtime?['finishedRanking']),
+    );
+    if (finishedCount != (_expectedRankingCount - 1)) {
       return false;
     }
     return ranking.length >= _expectedRankingCount;
@@ -7404,6 +7407,10 @@ SOFTWARE.
     return const <String>[];
   }
 
+  int _countDistinctNames(Object? raw) {
+    return _extractStringList(raw).toSet().length;
+  }
+
   String _extractWinnerName(Object? raw) {
     if (raw is String) {
       final winner = raw.trim();
@@ -7857,6 +7864,8 @@ SOFTWARE.
       ));
   return JSON.stringify({
     winner,
+    finishedRanking: liveRanking,
+    finishedCount: liveRanking.length,
     top3,
     ranking,
     mapLabel: typeof control.mapLabel === 'string' ? control.mapLabel : '',

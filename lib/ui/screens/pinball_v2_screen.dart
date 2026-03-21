@@ -530,12 +530,8 @@ SOFTWARE.
     if (!widget.args.waitForFullRanking || ranking.isEmpty) {
       return false;
     }
-    final stateMap = _coerceStringKeyMap(snapshot?['state']);
-    final marbleCount = _toInt(
-      snapshot?['marbleCount'],
-      fallback: _toInt(stateMap?['marbleCount']),
-    );
-    if (marbleCount != 1) {
+    final finishedCount = _countDistinctNames(snapshot?['ranking']);
+    if (finishedCount != (expectedCount - 1)) {
       return false;
     }
     return ranking.length >= expectedCount;
@@ -2217,6 +2213,10 @@ SOFTWARE.
       return int.tryParse(value.trim()) ?? fallback;
     }
     return fallback;
+  }
+
+  int _countDistinctNames(Object? raw) {
+    return _extractStringList(raw).toSet().length;
   }
 
   bool _toBool(dynamic value, {bool fallback = false}) {
