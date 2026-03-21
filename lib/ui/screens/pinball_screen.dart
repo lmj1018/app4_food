@@ -211,9 +211,7 @@ SOFTWARE.
   DateTime? _countdownLastTickAt;
   int _countdownRemainingMs = 0;
   double _countdownRemainingMsExact = 0;
-  double _countdownSpeedMultiplier = 1;
-  double _countdownTimeScale = 1;
-  double _countdownRate = 1;
+  bool _countdownExpiryInFlight = false;
   bool _showHoldFastForwardOverlay = false;
   bool _miniMapVisible = false;
 
@@ -639,9 +637,7 @@ SOFTWARE.
     _clearCountdownTimer();
     _countdownStartedAt = null;
     _countdownLastTickAt = null;
-    _countdownSpeedMultiplier = 1;
-    _countdownTimeScale = 1;
-    _countdownRate = 1;
+    _countdownExpiryInFlight = false;
     _countdownRemainingMsExact = _countdownTotalMs.toDouble();
     _countdownRemainingMs = _countdownTotalMs;
   }
@@ -665,20 +661,18 @@ SOFTWARE.
         _countdownLastTickAt = DateTime.now();
         return;
       }
+      final startedAt = _countdownStartedAt;
+      if (startedAt == null) {
+        _clearCountdownTimer();
+        return;
+      }
       final tickNow = DateTime.now();
       _countdownLastTickAt = tickNow;
-      final deltaMs = tickNow.difference(lastTickAt).inMicroseconds / 1000.0;
-      if (!deltaMs.isFinite || deltaMs <= 0) {
-        return;
-      }
-      final scaledDeltaMs = deltaMs * _countdownRate;
-      if (!scaledDeltaMs.isFinite || scaledDeltaMs <= 0) {
-        return;
-      }
+      final elapsedMs = tickNow.difference(startedAt).inMilliseconds;
       _countdownRemainingMsExact = max(
         0.0,
-        _countdownRemainingMsExact - scaledDeltaMs,
-      );
+        _countdownTotalMs - elapsedMs,
+      ).toDouble();
       final remainingMs = max(0, _countdownRemainingMsExact.ceil());
       if (remainingMs == _countdownRemainingMs) {
         return;
@@ -688,6 +682,10 @@ SOFTWARE.
       });
       if (remainingMs == 0) {
         _clearCountdownTimer();
+        if (!_countdownExpiryInFlight) {
+          _countdownExpiryInFlight = true;
+          unawaited(_handleCountdownExpired());
+        }
       }
     });
   }
@@ -738,16 +736,9 @@ SOFTWARE.
   }
 
   void _syncCountdownRate({Object? speedMultiplier, Object? timeScale}) {
-    final nextSpeed = _toDouble(speedMultiplier, fallback: double.nan);
-    if (nextSpeed.isFinite && nextSpeed > 0) {
-      _countdownSpeedMultiplier = nextSpeed;
-    }
-    final nextScale = _toDouble(timeScale, fallback: double.nan);
-    if (nextScale.isFinite && nextScale > 0) {
-      _countdownTimeScale = nextScale;
-    }
-    _countdownRate = _normalizeCountdownRate(
-      _countdownSpeedMultiplier * _countdownTimeScale,
+    _normalizeCountdownRate(
+      _toDouble(speedMultiplier, fallback: 1) *
+          _toDouble(timeScale, fallback: 1),
     );
   }
 
@@ -758,6 +749,54 @@ SOFTWARE.
     setState(() {
       _showHoldFastForwardOverlay = active;
     });
+  }
+
+  bool _shouldEarlyFinishWithLastBall(
+    Map<String, dynamic>? runtime,
+    List<String> ranking,
+  ) {
+    if (!_waitForFullRanking || ranking.isEmpty) {
+      return false;
+    }
+    final remainingCount = _toInt(runtime?['count'], fallback: -1);
+    if (remainingCount != 1) {
+      return false;
+    }
+    return ranking.length >= _expectedRankingCount;
+  }
+
+  List<String> _resolveRankingSnapshot(
+    Map<String, dynamic>? runtime, {
+    String? winnerOverride,
+  }) {
+    final resolvedWinner =
+        (winnerOverride ?? _extractWinnerName(runtime?['winner'])).trim();
+    final ranking = _extractStringList(runtime?['ranking']);
+    final top3 = _extractStringList(runtime?['top3']);
+    return _normalizeRankingForResult(
+      ranking.isNotEmpty ? ranking : top3,
+      winner: resolvedWinner,
+    );
+  }
+
+  Future<void> _handleCountdownExpired() async {
+    try {
+      if (!mounted || _isFinishing) {
+        return;
+      }
+      final runtime = await _readRuntimeResult();
+      final winner = _extractWinnerName(runtime?['winner']);
+      final ranking = _resolveRankingSnapshot(runtime, winnerOverride: winner);
+      final resolvedWinner = winner.isNotEmpty
+          ? winner
+          : (ranking.isNotEmpty ? ranking.first : '');
+      if (resolvedWinner.isEmpty) {
+        return;
+      }
+      _finish(resolvedWinner, ranking: ranking);
+    } finally {
+      _countdownExpiryInFlight = false;
+    }
   }
 
   void _resetSlowMotionBannerState() {
@@ -1224,6 +1263,7 @@ SOFTWARE.
         'autoStart': true,
         'winnerType': 'custom',
         'winningRank': 1,
+        'countdownTotalMs': _countdownTotalMs,
         'imageDataUrls': imageDataUrls,
         'goalLineImageDataUrl': goalLineImageDataUrl,
         'selectedMapIndex': _selectedMapIndexOverride ?? -1,
@@ -1413,6 +1453,10 @@ SOFTWARE.
   const selectedMapIndex = Number.isFinite(selectedMapIndexRaw)
     ? Math.floor(selectedMapIndexRaw)
     : -1;
+  const countdownTotalMsRaw = Number(payload && payload.countdownTotalMs);
+  const countdownTotalMs = Number.isFinite(countdownTotalMsRaw)
+    ? Math.max(1000, Math.floor(countdownTotalMsRaw))
+    : 60000;
   const imageDataUrls =
     payload && payload.imageDataUrls && typeof payload.imageDataUrls === 'object'
       ? payload.imageDataUrls
@@ -6916,7 +6960,7 @@ SOFTWARE.
     }
     // timeout-based forced winner judgement enabled (extended)
     const runMs = now - (Number(control.runStartedAt) || now);
-    if (runMs < 150000) {
+    if (runMs < countdownTotalMs) {
       return;
     }
 
@@ -7683,7 +7727,7 @@ SOFTWARE.
   }
 
   Future<void> _monitorWinnerFallback(int generation, int ticket) async {
-    final maxTicks = _waitForFullRanking ? 1250 : 500;
+    final maxTicks = ((_countdownTotalMs / 120).ceil()) + 180;
     for (var i = 0; i < maxTicks; i++) {
       if (!mounted ||
           _isFinishing ||
@@ -7722,8 +7766,15 @@ SOFTWARE.
       }
 
       if (_waitForFullRanking) {
-        if (winner.isNotEmpty && !running) {
-          _finish(winner, ranking: finalRanking);
+        if (_shouldEarlyFinishWithLastBall(runtime, finalRanking)) {
+          _finish(finalRanking.first, ranking: finalRanking);
+          return;
+        }
+        if (!running && finalRanking.isNotEmpty) {
+          _finish(
+            winner.isNotEmpty ? winner : finalRanking.first,
+            ranking: finalRanking,
+          );
           return;
         }
         if (winner.isNotEmpty && i % 20 == 0 && mounted && !_isFinishing) {
@@ -7733,26 +7784,17 @@ SOFTWARE.
             );
           });
         }
-        if (i > 1000 && winner.isNotEmpty) {
-          _finish(winner, ranking: finalRanking);
-          return;
-        }
-        if (i > 1160 && finalRanking.isNotEmpty) {
-          _finish(finalRanking.first, ranking: finalRanking);
-          return;
-        }
       } else if (winner.isNotEmpty) {
         _finish(winner, ranking: finalRanking);
+        return;
+      } else if (!running && finalRanking.isNotEmpty) {
+        _finish(finalRanking.first, ranking: finalRanking);
         return;
       }
       if (top3.isNotEmpty && i % 10 == 0 && mounted && !_isFinishing) {
         setState(() {
           _logPinballStatus('결과 확정 처리 중...');
         });
-      }
-      if (!_waitForFullRanking && i > 250 && top3.isNotEmpty) {
-        _finish(top3.first, ranking: finalRanking);
-        return;
       }
 
       await Future<void>.delayed(const Duration(milliseconds: 120));

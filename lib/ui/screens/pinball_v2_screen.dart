@@ -53,7 +53,6 @@ class _PinballV2ScreenState extends State<PinballV2Screen> {
     milliseconds: 1500,
   );
   static const Duration _startupTimeout = Duration(seconds: 30);
-  static const int _fullRankingWaitTimeoutTicks = 180;
   static const int _normalCountdownTotalMs = 60000;
   static const int _fullRankingCountdownTotalMs = 150000;
   static const Duration _countdownTickInterval = Duration(milliseconds: 50);
@@ -192,7 +191,6 @@ SOFTWARE.
   Timer? _startupTimer;
   Timer? _winnerMonitorTimer;
   int _winnerMonitorTicks = 0;
-  int? _fullRankingWaitStartTick;
 
   bool _pageLoaded = false;
   bool _isStarting = false;
@@ -229,9 +227,7 @@ SOFTWARE.
   DateTime? _countdownLastTickAt;
   int _countdownRemainingMs = 0;
   double _countdownRemainingMsExact = 0;
-  double _countdownSpeedMultiplier = 1;
-  double _countdownTimeScale = 1;
-  double _countdownRate = 1;
+  bool _countdownExpiryInFlight = false;
   Future<void>? _viewPrefsLoadFuture;
   int _v2ZoomPresetIndex = _v2ZoomPresetDefault;
   int _zoomPresetOverlayIndex = _v2ZoomPresetDefault;
@@ -342,7 +338,6 @@ SOFTWARE.
     _winnerMonitorTimer?.cancel();
     _winnerMonitorTimer = null;
     _winnerMonitorTicks = 0;
-    _fullRankingWaitStartTick = null;
   }
 
   void _clearMapLabelOverlayTimer() {
@@ -359,9 +354,7 @@ SOFTWARE.
     _clearCountdownTimer();
     _countdownStartedAt = null;
     _countdownLastTickAt = null;
-    _countdownSpeedMultiplier = 1;
-    _countdownTimeScale = 1;
-    _countdownRate = 1;
+    _countdownExpiryInFlight = false;
     _countdownRemainingMsExact = _countdownTotalMs.toDouble();
     _countdownRemainingMs = _countdownTotalMs;
   }
@@ -385,20 +378,17 @@ SOFTWARE.
         _countdownLastTickAt = DateTime.now();
         return;
       }
+      final startedAt = _countdownStartedAt;
+      if (startedAt == null) {
+        _clearCountdownTimer();
+        return;
+      }
       final tickNow = DateTime.now();
       _countdownLastTickAt = tickNow;
-      final deltaMs = tickNow.difference(lastTickAt).inMicroseconds / 1000.0;
-      if (!deltaMs.isFinite || deltaMs <= 0) {
-        return;
-      }
-      final scaledDeltaMs = deltaMs * _countdownRate;
-      if (!scaledDeltaMs.isFinite || scaledDeltaMs <= 0) {
-        return;
-      }
       _countdownRemainingMsExact = max(
         0.0,
-        _countdownRemainingMsExact - scaledDeltaMs,
-      );
+        _countdownTotalMs - tickNow.difference(startedAt).inMilliseconds,
+      ).toDouble();
       final remainingMs = max(0, _countdownRemainingMsExact.ceil());
       if (remainingMs == _countdownRemainingMs) {
         return;
@@ -408,6 +398,10 @@ SOFTWARE.
       });
       if (remainingMs == 0) {
         _clearCountdownTimer();
+        if (!_countdownExpiryInFlight) {
+          _countdownExpiryInFlight = true;
+          unawaited(_handleCountdownExpired());
+        }
       }
     });
   }
@@ -439,16 +433,9 @@ SOFTWARE.
   }
 
   void _syncCountdownRate({dynamic speedMultiplier, dynamic timeScale}) {
-    final nextSpeed = _toDouble(speedMultiplier, fallback: double.nan);
-    if (nextSpeed.isFinite && nextSpeed > 0) {
-      _countdownSpeedMultiplier = nextSpeed;
-    }
-    final nextScale = _toDouble(timeScale, fallback: double.nan);
-    if (nextScale.isFinite && nextScale > 0) {
-      _countdownTimeScale = nextScale;
-    }
-    _countdownRate = _normalizeCountdownRate(
-      _countdownSpeedMultiplier * _countdownTimeScale,
+    _normalizeCountdownRate(
+      _toDouble(speedMultiplier, fallback: 1) *
+          _toDouble(timeScale, fallback: 1),
     );
   }
 
@@ -515,6 +502,130 @@ SOFTWARE.
     setState(() {
       _showHoldFastForwardOverlay = active;
     });
+  }
+
+  List<String> _resolveRankingSnapshot(
+    Map<String, dynamic>? snapshot, {
+    String? winnerOverride,
+  }) {
+    final resolvedWinner =
+        (winnerOverride ?? _extractWinnerName(snapshot?['winner'])).trim();
+    final positionRanking = _extractStringList(snapshot?['positionRanking']);
+    final ranking = _extractStringList(snapshot?['ranking']);
+    final stateMap = _coerceStringKeyMap(snapshot?['state']);
+    final stateRanking = _extractStringList(stateMap?['ranking']);
+    return _normalizeRankingForResult(
+      positionRanking.isNotEmpty
+          ? positionRanking
+          : (ranking.isNotEmpty ? ranking : stateRanking),
+      winner: resolvedWinner,
+    );
+  }
+
+  bool _shouldEarlyFinishWithLastBall(
+    Map<String, dynamic>? snapshot,
+    List<String> ranking, {
+    required int expectedCount,
+  }) {
+    if (!widget.args.waitForFullRanking || ranking.isEmpty) {
+      return false;
+    }
+    final stateMap = _coerceStringKeyMap(snapshot?['state']);
+    final marbleCount = _toInt(
+      snapshot?['marbleCount'],
+      fallback: _toInt(stateMap?['marbleCount']),
+    );
+    if (marbleCount != 1) {
+      return false;
+    }
+    return ranking.length >= expectedCount;
+  }
+
+  Future<Map<String, dynamic>?> _readLiveRaceSnapshot() async {
+    try {
+      final raw = await _controller.runJavaScriptReturningResult('''
+(() => {
+  const roulette = window.roulette;
+  const api = window.__appPinballV2;
+  const winner = roulette && roulette._winner && typeof roulette._winner.name === 'string'
+    ? roulette._winner.name
+    : '';
+  const finishedRanking = Array.isArray(roulette && roulette._winners)
+    ? roulette._winners
+        .map((item) => item && typeof item.name === 'string' ? item.name.trim() : '')
+        .filter((name) => !!name)
+    : [];
+  if (winner && !finishedRanking.includes(winner)) {
+    finishedRanking.unshift(winner);
+  }
+  const activeRanking = Array.isArray(roulette && roulette._marbles)
+    ? roulette._marbles
+        .slice()
+        .sort((left, right) => Number((right && right.y) || 0) - Number((left && left.y) || 0))
+        .map((item) => item && typeof item.name === 'string' ? item.name.trim() : '')
+        .filter((name) => !!name)
+    : [];
+  const positionRanking = [];
+  const seen = new Set();
+  for (const name of finishedRanking) {
+    if (name && !seen.has(name)) {
+      seen.add(name);
+      positionRanking.push(name);
+    }
+  }
+  for (const name of activeRanking) {
+    if (name && !seen.has(name)) {
+      seen.add(name);
+      positionRanking.push(name);
+    }
+  }
+  const state = api && typeof api.getState === 'function' ? api.getState() : null;
+  const running = !!(state && state.running === true);
+  const timeScale = Number(roulette && roulette._timeScale);
+  const goalDist = Number(roulette && roulette._goalDist);
+  const slowMotionActive = !!(
+    running &&
+    ((Number.isFinite(timeScale) && timeScale < 0.999) ||
+      (Number.isFinite(goalDist) && goalDist < 5))
+  );
+  return JSON.stringify({
+    winner,
+    ranking: finishedRanking,
+    positionRanking,
+    marbleCount: Array.isArray(roulette && roulette._marbles)
+      ? roulette._marbles.length
+      : Number(state && state.marbleCount),
+    state,
+    slowMotionActive,
+    timeScale,
+    goalDist,
+  });
+})()
+''');
+      return _decodeJsMap(raw);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _handleCountdownExpired() async {
+    try {
+      if (!mounted || _isFinishing) {
+        return;
+      }
+      final snapshot = await _readLiveRaceSnapshot();
+      final winner = _extractWinnerName(snapshot?['winner']);
+      final ranking = _resolveRankingSnapshot(snapshot, winnerOverride: winner);
+      final resolvedWinner = winner.isNotEmpty
+          ? winner
+          : (ranking.isNotEmpty ? ranking.first : '');
+      if (resolvedWinner.isEmpty) {
+        return;
+      }
+      _finish(resolvedWinner, ranking: ranking);
+    } finally {
+      _countdownExpiryInFlight = false;
+    }
   }
 
   void _clearLicenseHoldTimer() {
@@ -1964,41 +2075,13 @@ SOFTWARE.
         return;
       }
       try {
-        final raw = await _controller.runJavaScriptReturningResult('''
-(() => {
-  const roulette = window.roulette;
-  const api = window.__appPinballV2;
-  const winner = roulette && roulette._winner && typeof roulette._winner.name === 'string'
-    ? roulette._winner.name
-    : '';
-  const ranking = Array.isArray(roulette && roulette._winners)
-    ? roulette._winners
-        .map((item) => item && typeof item.name === 'string' ? item.name.trim() : '')
-        .filter((name) => !!name)
-    : [];
-  if (winner && !ranking.includes(winner)) {
-    ranking.unshift(winner);
-  }
-  const state = api && typeof api.getState === 'function' ? api.getState() : null;
-  const running = !!(state && state.running === true);
-  const timeScale = Number(roulette && roulette._timeScale);
-  const goalDist = Number(roulette && roulette._goalDist);
-  const slowMotionActive = !!(
-    running
-    && ((Number.isFinite(timeScale) && timeScale < 0.999) || (Number.isFinite(goalDist) && goalDist < 5))
-  );
-  return JSON.stringify({ winner, ranking, state, slowMotionActive, timeScale, goalDist });
-})()
-''');
-        final parsed = _decodeJsMap(raw);
+        final parsed = await _readLiveRaceSnapshot();
         _winnerMonitorTicks += 1;
         final winner = (parsed?['winner'] ?? '').toString().trim();
-        final ranking = _extractStringList(parsed?['ranking']);
         final stateMap = _coerceStringKeyMap(parsed?['state']);
-        final stateRanking = _extractStringList(stateMap?['ranking']);
-        final mergedRanking = _normalizeRankingForResult(
-          ranking.isNotEmpty ? ranking : stateRanking,
-          winner: winner,
+        final mergedRanking = _resolveRankingSnapshot(
+          parsed,
+          winnerOverride: winner,
         );
         _syncCountdownRate(
           speedMultiplier: stateMap?['speedMultiplier'],
@@ -2022,48 +2105,32 @@ SOFTWARE.
           2,
           _toInt(stateMap?['candidateCount'], fallback: _candidates.length),
         );
-        if (widget.args.waitForFullRanking &&
-            _fullRankingWaitStartTick == null &&
-            (winner.isNotEmpty || mergedRanking.isNotEmpty)) {
-          _fullRankingWaitStartTick = _winnerMonitorTicks;
+        if (widget.args.waitForFullRanking) {
+          if (_shouldEarlyFinishWithLastBall(
+            parsed,
+            mergedRanking,
+            expectedCount: expectedCount,
+          )) {
+            _finish(mergedRanking.first, ranking: mergedRanking);
+            return;
+          }
+          if (!running && mergedRanking.isNotEmpty) {
+            _finish(
+              winner.isNotEmpty ? winner : mergedRanking.first,
+              ranking: mergedRanking,
+            );
+            return;
+          }
+          if (winner.isNotEmpty && _winnerMonitorTicks % 20 == 0) {
+            _setStatus('1등 확정. 전체 순위 집계 중...');
+          }
+          return;
         }
         if (winner.isNotEmpty) {
-          if (widget.args.waitForFullRanking) {
-            final rankingComplete = mergedRanking.length >= expectedCount;
-            final waitStartTick =
-                _fullRankingWaitStartTick ?? _winnerMonitorTicks;
-            final timedOut =
-                (_winnerMonitorTicks - waitStartTick) >=
-                _fullRankingWaitTimeoutTicks;
-            if (!rankingComplete && !timedOut) {
-              if (_winnerMonitorTicks % 20 == 0) {
-                _setStatus('1등 확정. 전체 순위 집계 중...');
-              }
-              return;
-            }
-          }
           _finish(winner, ranking: mergedRanking);
           return;
         }
-        if (widget.args.waitForFullRanking && mergedRanking.isNotEmpty) {
-          final rankingComplete = mergedRanking.length >= expectedCount;
-          final waitStartTick =
-              _fullRankingWaitStartTick ?? _winnerMonitorTicks;
-          final timedOut =
-              (_winnerMonitorTicks - waitStartTick) >=
-              _fullRankingWaitTimeoutTicks;
-          if (!rankingComplete && !timedOut) {
-            if (_winnerMonitorTicks % 20 == 0) {
-              _setStatus('전체 순위 집계 중...');
-            }
-            return;
-          }
-          _finish(mergedRanking.first, ranking: mergedRanking);
-          return;
-        }
-        if (!widget.args.waitForFullRanking &&
-            !running &&
-            mergedRanking.isNotEmpty) {
+        if (!running && mergedRanking.isNotEmpty) {
           _finish(mergedRanking.first, ranking: mergedRanking);
           return;
         }
@@ -2238,19 +2305,15 @@ SOFTWARE.
         final rankingFromPayload = _extractStringList(
           parsed['payload'] is Map ? parsed['payload']['ranking'] : null,
         );
-        final ranking = _normalizeRankingForResult(
-          rankingFromPayload,
-          winner: winner,
-        );
-        if (widget.args.waitForFullRanking) {
-          final expectedCount = max(2, _candidates.length);
-          if (ranking.length < expectedCount) {
-            _fullRankingWaitStartTick ??= _winnerMonitorTicks;
-            _setStatus('1등 확정. 전체 순위 집계 중...');
-            return;
-          }
+        if (!widget.args.waitForFullRanking) {
+          final ranking = _normalizeRankingForResult(
+            rankingFromPayload,
+            winner: winner,
+          );
+          _finish(winner, ranking: ranking);
+          return;
         }
-        _finish(winner, ranking: ranking);
+        _setStatus('1등 확정. 전체 순위 집계 중...');
       }
       return;
     }
