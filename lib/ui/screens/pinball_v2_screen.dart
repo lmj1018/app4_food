@@ -696,11 +696,14 @@ SOFTWARE.
     });
   }
 
-  void _syncLiveRankFeed(List<String> ranking) {
+  void _syncLiveRankFeed(List<String> ranking, {int? confirmedCount}) {
     if (!widget.args.waitForFullRanking || ranking.isEmpty) {
       return;
     }
-    for (var index = 0; index < ranking.length; index += 1) {
+    final resolvedConfirmedCount = confirmedCount == null
+        ? ranking.length
+        : min(ranking.length, max(0, confirmedCount));
+    for (var index = 0; index < resolvedConfirmedCount; index += 1) {
       final name = ranking[index].trim();
       if (name.isEmpty || !_announcedLiveRankNames.add(name)) {
         continue;
@@ -2203,7 +2206,10 @@ SOFTWARE.
           parsed,
           winnerOverride: winner,
         );
-        _syncLiveRankFeed(mergedRanking);
+        _syncLiveRankFeed(
+          mergedRanking,
+          confirmedCount: _finishedRankingCount(parsed),
+        );
         _syncCountdownRate(
           speedMultiplier: stateMap?['speedMultiplier'],
           timeScale: parsed?['timeScale'],
@@ -2432,8 +2438,13 @@ SOFTWARE.
         final rankingFromPayload = _extractStringList(
           parsed['payload'] is Map ? parsed['payload']['ranking'] : null,
         );
+        final confirmedRanking = _normalizeRankingForResult(
+          rankingFromPayload,
+          winner: winner,
+        );
         _syncLiveRankFeed(
-          _normalizeRankingForResult(rankingFromPayload, winner: winner),
+          confirmedRanking,
+          confirmedCount: confirmedRanking.length,
         );
         if (!widget.args.waitForFullRanking) {
           final ranking = _normalizeRankingForResult(

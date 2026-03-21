@@ -263,11 +263,14 @@ SOFTWARE.
     });
   }
 
-  void _syncLiveRankFeed(List<String> ranking) {
+  void _syncLiveRankFeed(List<String> ranking, {int? confirmedCount}) {
     if (!_waitForFullRanking || ranking.isEmpty) {
       return;
     }
-    for (var index = 0; index < ranking.length; index += 1) {
+    final resolvedConfirmedCount = confirmedCount == null
+        ? ranking.length
+        : min(ranking.length, max(0, confirmedCount));
+    for (var index = 0; index < resolvedConfirmedCount; index += 1) {
       final name = ranking[index].trim();
       if (name.isEmpty || !_announcedLiveRankNames.add(name)) {
         continue;
@@ -8014,6 +8017,7 @@ SOFTWARE.
       );
       _syncLiveRankFeed(
         _resolveLiveRankFeedRanking(runtime, winnerOverride: winner),
+        confirmedCount: _finishedRankingCount(runtime),
       );
       final running = runtime?['running'] == true;
       final count = _toInt(runtime?['count']);
@@ -8251,11 +8255,13 @@ SOFTWARE.
       final rankingFromPayload = _extractStringList(
         parsed['payload'] is Map ? parsed['payload']['ranking'] : null,
       );
+      final confirmedRanking = _normalizeRankingForResult(
+        rankingFromPayload,
+        winner: winnerFromPayload,
+      );
       _syncLiveRankFeed(
-        _normalizeRankingForResult(
-          rankingFromPayload,
-          winner: winnerFromPayload,
-        ),
+        confirmedRanking,
+        confirmedCount: confirmedRanking.length,
       );
       if (winnerFromPayload.isNotEmpty) {
         _clearStartupTimeout();
