@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+import '../../core/custom_marble_image_factory.dart';
 import '../../core/food_image_catalog.dart';
 import '../../services/shared_preferences_cache_store.dart';
 import '../widgets/pinball_ranking_ticker.dart';
@@ -17,12 +18,14 @@ class PinballV2ScreenArgs {
     required this.mapId,
     this.autoStart = true,
     this.waitForFullRanking = false,
+    this.isCustomMode = false,
   });
 
   final List<String> candidates;
   final String mapId;
   final bool autoStart;
   final bool waitForFullRanking;
+  final bool isCustomMode;
 }
 
 class PinballV2Screen extends StatefulWidget {
@@ -1633,9 +1636,17 @@ SOFTWARE.
   }
 
   Future<Map<String, String>> _resolveCandidateImageDataUrls() async {
-    final key = _candidates.join('\n');
+    final key =
+        '${widget.args.isCustomMode ? 'custom' : 'catalog'}\n${_candidates.join('\n')}';
     if (_candidateImageDataUrls != null && _candidateImageKey == key) {
       return _candidateImageDataUrls!;
+    }
+
+    if (widget.args.isCustomMode) {
+      final result = CustomMarbleImageFactory.buildDataUrls(_candidates);
+      _candidateImageKey = key;
+      _candidateImageDataUrls = result;
+      return result;
     }
 
     final candidateToAsset = <String, String>{};

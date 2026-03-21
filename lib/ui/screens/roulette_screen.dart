@@ -2233,6 +2233,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
           mapId: launchConfig.v2MapId ?? 'v2_default',
           autoStart: true,
           waitForFullRanking: waitForFullRanking,
+          isCustomMode: args.mode == RouletteMode.custom,
         ),
       );
     } else {
@@ -2249,6 +2250,7 @@ class _RouletteScreenState extends State<RouletteScreen> {
           autoStart: true,
           selectedMapIndex: effectiveMapIndex,
           waitForFullRanking: waitForFullRanking,
+          isCustomMode: args.mode == RouletteMode.custom,
         ),
       );
     }
