@@ -1276,7 +1276,7 @@ SOFTWARE.
         'candidates': _candidates,
         'autoStart': true,
         'winnerType': 'custom',
-        'winningRank': 1,
+        'winningRank': _waitForFullRanking ? _expectedRankingCount : 1,
         'countdownTotalMs': _countdownTotalMs,
         'imageDataUrls': imageDataUrls,
         'goalLineImageDataUrl': goalLineImageDataUrl,
