@@ -218,7 +218,6 @@ SOFTWARE.
   bool _countdownExpiryInFlight = false;
   bool _showHoldFastForwardOverlay = false;
   bool _miniMapVisible = false;
-  List<String> _rankingTickerEntries = const <String>[];
 
   void _logPinballStatus(String value) {
     debugPrint('[Pinball][status] $value');
@@ -227,38 +226,6 @@ SOFTWARE.
   void _clearStartupTimeout() {
     _startupTimeoutTimer?.cancel();
     _startupTimeoutTimer = null;
-  }
-
-  bool _sameTickerEntries(List<String> left, List<String> right) {
-    if (identical(left, right)) {
-      return true;
-    }
-    if (left.length != right.length) {
-      return false;
-    }
-    for (var index = 0; index < left.length; index += 1) {
-      if (left[index] != right[index]) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  void _setRankingTickerEntries(List<String> entries) {
-    final normalized = entries
-        .map((value) => value.trim())
-        .where((value) => value.isNotEmpty)
-        .toList(growable: false);
-    if (_sameTickerEntries(_rankingTickerEntries, normalized)) {
-      return;
-    }
-    if (!mounted) {
-      _rankingTickerEntries = normalized;
-      return;
-    }
-    setState(() {
-      _rankingTickerEntries = normalized;
-    });
   }
 
   void _clearMapLabelOverlayTimer() {
@@ -849,20 +816,6 @@ SOFTWARE.
     );
   }
 
-  List<String> _resolveTickerRankingSnapshot(
-    Map<String, dynamic>? runtime, {
-    String? winnerOverride,
-  }) {
-    final resolvedWinner =
-        (winnerOverride ?? _extractWinnerName(runtime?['winner'])).trim();
-    final finishedRanking = _extractStringList(runtime?['finishedRanking']);
-    final top3 = _extractStringList(runtime?['top3']);
-    return _normalizeRankingForResult(
-      finishedRanking.isNotEmpty ? finishedRanking : top3,
-      winner: resolvedWinner,
-    );
-  }
-
   Future<void> _handleCountdownExpired() async {
     try {
       if (!mounted || _isFinishing) {
@@ -1327,7 +1280,6 @@ SOFTWARE.
     if (mounted) {
       setState(() {
         _logPinballStatus('핀볼 엔진 초기화 중...');
-        _rankingTickerEntries = const <String>[];
       });
     }
 
@@ -7975,9 +7927,6 @@ SOFTWARE.
         ranking.isNotEmpty ? ranking : top3,
         winner: winner,
       );
-      _setRankingTickerEntries(
-        _resolveTickerRankingSnapshot(runtime, winnerOverride: winner),
-      );
       final running = runtime?['running'] == true;
       final count = _toInt(runtime?['count']);
       final movedTicks = _toInt(runtime?['movedTicks']);
@@ -8398,7 +8347,6 @@ SOFTWARE.
       _isStarting = false;
       _startGeneration += 1;
       _winnerMonitorTicket += 1;
-      _rankingTickerEntries = const <String>[];
     });
     _clearStartupTimeout();
     await _loadPinballPage(clearCache: true);
@@ -8893,27 +8841,6 @@ SOFTWARE.
                 ),
               ),
             _buildHoldFastForwardOverlay(),
-            if (_rankingTickerEntries.isNotEmpty)
-              SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.only(
-                    left: pinballOverlayRightPadding,
-                    right:
-                        pinballOverlayRightPadding +
-                        pinballOverlayLicenseReservedWidth +
-                        pinballOverlayTickerGap,
-                    bottom: pinballOverlayBottomPadding,
-                  ),
-                  child: Align(
-                    alignment: Alignment.bottomRight,
-                    child: IgnorePointer(
-                      child: PinballRankingTicker(
-                        entries: _rankingTickerEntries,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
             SafeArea(
               child: Align(
                 alignment: Alignment.bottomRight,

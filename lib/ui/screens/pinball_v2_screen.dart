@@ -237,7 +237,6 @@ SOFTWARE.
   int _zoomPresetOverlayIndex = _v2ZoomPresetDefault;
   bool _showZoomPresetOverlay = false;
   bool _showHoldFastForwardOverlay = false;
-  List<String> _rankingTickerEntries = const <String>[];
 
   List<String>? _cachedCandidates;
   String? _candidateImageKey;
@@ -273,53 +272,6 @@ SOFTWARE.
   int get _countdownTotalMs => widget.args.waitForFullRanking
       ? _fullRankingCountdownTotalMs
       : _normalCountdownTotalMs;
-
-  bool _sameTickerEntries(List<String> left, List<String> right) {
-    if (identical(left, right)) {
-      return true;
-    }
-    if (left.length != right.length) {
-      return false;
-    }
-    for (var index = 0; index < left.length; index += 1) {
-      if (left[index] != right[index]) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  void _setRankingTickerEntries(List<String> entries) {
-    final normalized = entries
-        .map((value) => value.trim())
-        .where((value) => value.isNotEmpty)
-        .toList(growable: false);
-    if (_sameTickerEntries(_rankingTickerEntries, normalized)) {
-      return;
-    }
-    if (!mounted) {
-      _rankingTickerEntries = normalized;
-      return;
-    }
-    setState(() {
-      _rankingTickerEntries = normalized;
-    });
-  }
-
-  List<String> _resolveTickerRankingSnapshot(
-    Map<String, dynamic>? snapshot, {
-    String? winnerOverride,
-  }) {
-    final resolvedWinner =
-        (winnerOverride ?? _extractWinnerName(snapshot?['winner'])).trim();
-    final ranking = _extractStringList(snapshot?['ranking']);
-    final stateMap = _coerceStringKeyMap(snapshot?['state']);
-    final stateRanking = _extractStringList(stateMap?['ranking']);
-    return _normalizeRankingForResult(
-      ranking.isNotEmpty ? ranking : stateRanking,
-      winner: resolvedWinner,
-    );
-  }
 
   String _normalizeCandidate(String value) {
     var out = value.trim();
@@ -1976,7 +1928,6 @@ SOFTWARE.
     _resetSlowMotionBannerState();
     _startStartupTimer();
     _setStatus('V2 초기화 중...', clearError: true);
-    _setRankingTickerEntries(const <String>[]);
 
     final imageDataUrls = await _resolveCandidateImageDataUrls();
     final goalLineImageDataUrl = await _resolveGoalLineImageDataUrl();
@@ -2178,9 +2129,6 @@ SOFTWARE.
         final mergedRanking = _resolveRankingSnapshot(
           parsed,
           winnerOverride: winner,
-        );
-        _setRankingTickerEntries(
-          _resolveTickerRankingSnapshot(parsed, winnerOverride: winner),
         );
         _syncCountdownRate(
           speedMultiplier: stateMap?['speedMultiplier'],
@@ -2410,9 +2358,6 @@ SOFTWARE.
         final rankingFromPayload = _extractStringList(
           parsed['payload'] is Map ? parsed['payload']['ranking'] : null,
         );
-        _setRankingTickerEntries(
-          _normalizeRankingForResult(rankingFromPayload, winner: winner),
-        );
         if (!widget.args.waitForFullRanking) {
           final ranking = _normalizeRankingForResult(
             rankingFromPayload,
@@ -2460,7 +2405,6 @@ SOFTWARE.
       _didShowMapLabelOverlayOnce = false;
       _showZoomPresetOverlay = false;
       _showHoldFastForwardOverlay = false;
-      _rankingTickerEntries = const <String>[];
     });
     await _loadPage(clearCache: true);
   }
@@ -3047,25 +2991,6 @@ SOFTWARE.
             ),
           _buildHoldFastForwardOverlay(),
           _buildZoomPresetOverlay(context),
-          if (_rankingTickerEntries.isNotEmpty)
-            SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.only(
-                  left: pinballOverlayRightPadding,
-                  right:
-                      pinballOverlayRightPadding +
-                      pinballOverlayLicenseReservedWidth +
-                      pinballOverlayTickerGap,
-                  bottom: pinballOverlayBottomPadding,
-                ),
-                child: Align(
-                  alignment: Alignment.bottomRight,
-                  child: IgnorePointer(
-                    child: PinballRankingTicker(entries: _rankingTickerEntries),
-                  ),
-                ),
-              ),
-            ),
           SafeArea(
             child: Align(
               alignment: Alignment.bottomRight,
