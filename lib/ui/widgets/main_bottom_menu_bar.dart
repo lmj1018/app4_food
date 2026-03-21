@@ -341,12 +341,6 @@ class _GlowingOrbButtonState extends State<_GlowingOrbButton>
 
   @override
   Widget build(BuildContext context) {
-    const labelStyle = TextStyle(
-      color: Colors.white,
-      fontSize: 12,
-      fontWeight: FontWeight.w700,
-    );
-
     return GestureDetector(
       onTap: () {
         if (_longPressTriggered) {
@@ -459,7 +453,7 @@ class _GlowingOrbButtonState extends State<_GlowingOrbButton>
                 },
               ),
             ),
-            const Text('룰렛', style: labelStyle),
+            const SizedBox(height: 18),
           ],
         ),
       ),
