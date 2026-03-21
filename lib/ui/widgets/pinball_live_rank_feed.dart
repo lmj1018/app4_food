@@ -46,7 +46,6 @@ class PinballLiveRankFeed extends StatelessWidget {
                           color: _neonPink,
                           fontSize: 11,
                           fontWeight: FontWeight.w800,
-                          shadows: [Shadow(color: _neonPink, blurRadius: 8)],
                         ),
                       ),
                       TextSpan(
