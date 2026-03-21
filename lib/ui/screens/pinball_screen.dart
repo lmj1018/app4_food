@@ -758,14 +758,25 @@ SOFTWARE.
     if (!_waitForFullRanking || ranking.isEmpty) {
       return false;
     }
-    final finishedCount = _toInt(
-      runtime?['finishedCount'],
-      fallback: _countDistinctNames(runtime?['finishedRanking']),
-    );
+    final finishedCount = _finishedRankingCount(runtime);
     if (finishedCount != (_expectedRankingCount - 1)) {
       return false;
     }
     return ranking.length >= _expectedRankingCount;
+  }
+
+  bool _isFullRankingResolved(Map<String, dynamic>? runtime) {
+    if (!_waitForFullRanking) {
+      return false;
+    }
+    return _finishedRankingCount(runtime) >= _expectedRankingCount;
+  }
+
+  int _finishedRankingCount(Map<String, dynamic>? runtime) {
+    return _toInt(
+      runtime?['finishedCount'],
+      fallback: _countDistinctNames(runtime?['finishedRanking']),
+    );
   }
 
   List<String> _resolveRankingSnapshot(
@@ -1321,7 +1332,16 @@ SOFTWARE.
         if (winner.isNotEmpty) {
           _clearStartupTimeout();
           _didStart = true;
-          _finish(winner);
+          if (_waitForFullRanking) {
+            if (mounted) {
+              setState(() {
+                _logPinballStatus('1등 확정. 최종 순위 집계 중...');
+              });
+            }
+            _startWinnerMonitor(generation);
+          } else {
+            _finish(winner);
+          }
           return;
         }
 
@@ -1388,7 +1408,16 @@ SOFTWARE.
       final winnerAfterLoop = _extractWinnerName(lastState?['winner']);
       if (winnerAfterLoop.isNotEmpty) {
         _didStart = true;
-        _finish(winnerAfterLoop);
+        if (_waitForFullRanking) {
+          if (mounted && generation == _startGeneration) {
+            setState(() {
+              _logPinballStatus('1등 확정. 최종 순위 집계 중...');
+            });
+          }
+          _startWinnerMonitor(generation);
+        } else {
+          _finish(winnerAfterLoop);
+        }
         return;
       }
 
@@ -7773,11 +7802,12 @@ SOFTWARE.
       }
 
       if (_waitForFullRanking) {
+        final finishedCount = _finishedRankingCount(runtime);
         if (_shouldEarlyFinishWithLastBall(runtime, finalRanking)) {
           _finish(finalRanking.first, ranking: finalRanking);
           return;
         }
-        if (!running && finalRanking.isNotEmpty) {
+        if (_isFullRankingResolved(runtime) && finalRanking.isNotEmpty) {
           _finish(
             winner.isNotEmpty ? winner : finalRanking.first,
             ranking: finalRanking,
@@ -7787,7 +7817,7 @@ SOFTWARE.
         if (winner.isNotEmpty && i % 20 == 0 && mounted && !_isFinishing) {
           setState(() {
             _logPinballStatus(
-              '순위 집계 중... (${finalRanking.length}/$_expectedRankingCount)',
+              '순위 집계 중... ($finishedCount/$_expectedRankingCount)',
             );
           });
         }

@@ -530,11 +530,25 @@ SOFTWARE.
     if (!widget.args.waitForFullRanking || ranking.isEmpty) {
       return false;
     }
-    final finishedCount = _countDistinctNames(snapshot?['ranking']);
+    final finishedCount = _finishedRankingCount(snapshot);
     if (finishedCount != (expectedCount - 1)) {
       return false;
     }
     return ranking.length >= expectedCount;
+  }
+
+  bool _isFullRankingResolved(
+    Map<String, dynamic>? snapshot, {
+    required int expectedCount,
+  }) {
+    if (!widget.args.waitForFullRanking) {
+      return false;
+    }
+    return _finishedRankingCount(snapshot) >= expectedCount;
+  }
+
+  int _finishedRankingCount(Map<String, dynamic>? snapshot) {
+    return _countDistinctNames(snapshot?['ranking']);
   }
 
   Future<Map<String, dynamic>?> _readLiveRaceSnapshot() async {
@@ -2102,6 +2116,7 @@ SOFTWARE.
           _toInt(stateMap?['candidateCount'], fallback: _candidates.length),
         );
         if (widget.args.waitForFullRanking) {
+          final finishedCount = _finishedRankingCount(parsed);
           if (_shouldEarlyFinishWithLastBall(
             parsed,
             mergedRanking,
@@ -2110,7 +2125,8 @@ SOFTWARE.
             _finish(mergedRanking.first, ranking: mergedRanking);
             return;
           }
-          if (!running && mergedRanking.isNotEmpty) {
+          if (_isFullRankingResolved(parsed, expectedCount: expectedCount) &&
+              mergedRanking.isNotEmpty) {
             _finish(
               winner.isNotEmpty ? winner : mergedRanking.first,
               ranking: mergedRanking,
@@ -2118,7 +2134,7 @@ SOFTWARE.
             return;
           }
           if (winner.isNotEmpty && _winnerMonitorTicks % 20 == 0) {
-            _setStatus('1등 확정. 전체 순위 집계 중...');
+            _setStatus('1등 확정. 전체 순위 집계 중... ($finishedCount/$expectedCount)');
           }
           return;
         }
