@@ -3047,50 +3047,58 @@ SOFTWARE.
             ),
           _buildHoldFastForwardOverlay(),
           _buildZoomPresetOverlay(context),
+          if (_rankingTickerEntries.isNotEmpty)
+            SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.only(
+                  left: pinballOverlayRightPadding,
+                  right:
+                      pinballOverlayRightPadding +
+                      pinballOverlayLicenseReservedWidth +
+                      pinballOverlayTickerGap,
+                  bottom: pinballOverlayBottomPadding,
+                ),
+                child: Align(
+                  alignment: Alignment.bottomRight,
+                  child: IgnorePointer(
+                    child: PinballRankingTicker(entries: _rankingTickerEntries),
+                  ),
+                ),
+              ),
+            ),
           SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.only(left: 8, right: 8, bottom: 2),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  const Spacer(),
-                  if (_rankingTickerEntries.isNotEmpty)
-                    Flexible(
-                      child: Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: IgnorePointer(
-                          child: PinballRankingTicker(
-                            entries: _rankingTickerEntries,
-                          ),
-                        ),
-                      ),
-                    ),
-                  Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(7),
-                      onTapDown: (_) => _startLicenseHoldTimer(),
-                      onTapUp: (_) => _clearLicenseHoldTimer(),
-                      onTapCancel: _clearLicenseHoldTimer,
-                      onTap: () {
-                        _clearLicenseHoldTimer();
-                        if (_licenseHoldTriggered) {
-                          _licenseHoldTriggered = false;
-                          return;
-                        }
-                        _showLicenseNotice();
-                      },
-                      child: Container(
-                        padding: pinballOverlayBadgePadding,
-                        decoration: buildPinballOverlayBadgeDecoration(),
-                        child: const Text(
-                          'Licensed',
-                          style: pinballOverlayCaptionStyle,
-                        ),
+            child: Align(
+              alignment: Alignment.bottomRight,
+              child: Padding(
+                padding: const EdgeInsets.only(
+                  right: pinballOverlayRightPadding,
+                  bottom: pinballOverlayBottomPadding,
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(7),
+                    onTapDown: (_) => _startLicenseHoldTimer(),
+                    onTapUp: (_) => _clearLicenseHoldTimer(),
+                    onTapCancel: _clearLicenseHoldTimer,
+                    onTap: () {
+                      _clearLicenseHoldTimer();
+                      if (_licenseHoldTriggered) {
+                        _licenseHoldTriggered = false;
+                        return;
+                      }
+                      _showLicenseNotice();
+                    },
+                    child: Container(
+                      padding: pinballOverlayBadgePadding,
+                      decoration: buildPinballOverlayBadgeDecoration(),
+                      child: const Text(
+                        'Licensed',
+                        style: pinballOverlayCaptionStyle,
                       ),
                     ),
                   ),
-                ],
+                ),
               ),
             ),
           ),

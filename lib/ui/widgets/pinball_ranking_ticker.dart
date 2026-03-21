@@ -6,6 +6,10 @@ const EdgeInsets pinballOverlayBadgePadding = EdgeInsets.symmetric(
   horizontal: 7,
   vertical: 4,
 );
+const double pinballOverlayRightPadding = 8;
+const double pinballOverlayBottomPadding = 2;
+const double pinballOverlayTickerGap = 6;
+const double pinballOverlayLicenseReservedWidth = 66;
 
 const TextStyle pinballOverlayCaptionStyle = TextStyle(
   color: Colors.white70,
@@ -141,36 +145,55 @@ class _PinballRankingTickerState extends State<PinballRankingTicker>
       decoration: buildPinballOverlayBadgeDecoration(),
       child: Padding(
         padding: pinballOverlayBadgePadding,
-        child: ClipRect(
-          child: AnimatedBuilder(
-            animation: _controller,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  _tickerText,
-                  maxLines: 1,
-                  softWrap: false,
-                  overflow: TextOverflow.visible,
-                  style: textStyle,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final trackWidth = (_tickerTextWidth * 2) + _gapWidth;
+            final viewportWidth = constraints.hasBoundedWidth
+                ? constraints.maxWidth
+                : math.min(trackWidth, 220.0);
+            return SizedBox(
+              width: math.max(0, viewportWidth),
+              child: ClipRect(
+                child: AnimatedBuilder(
+                  animation: _controller,
+                  builder: (context, child) {
+                    return Transform.translate(
+                      offset: Offset(-_controller.value * travelDistance, 0),
+                      child: child,
+                    );
+                  },
+                  child: OverflowBox(
+                    alignment: Alignment.centerLeft,
+                    minWidth: trackWidth,
+                    maxWidth: trackWidth,
+                    child: SizedBox(
+                      width: trackWidth,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _tickerText,
+                            maxLines: 1,
+                            softWrap: false,
+                            overflow: TextOverflow.visible,
+                            style: textStyle,
+                          ),
+                          const SizedBox(width: _gapWidth),
+                          Text(
+                            _tickerText,
+                            maxLines: 1,
+                            softWrap: false,
+                            overflow: TextOverflow.visible,
+                            style: textStyle,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
-                const SizedBox(width: _gapWidth),
-                Text(
-                  _tickerText,
-                  maxLines: 1,
-                  softWrap: false,
-                  overflow: TextOverflow.visible,
-                  style: textStyle,
-                ),
-              ],
-            ),
-            builder: (context, child) {
-              return Transform.translate(
-                offset: Offset(-_controller.value * travelDistance, 0),
-                child: child,
-              );
-            },
-          ),
+              ),
+            );
+          },
         ),
       ),
     );
