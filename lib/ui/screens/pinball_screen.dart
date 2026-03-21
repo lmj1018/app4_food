@@ -888,6 +888,16 @@ SOFTWARE.
     );
   }
 
+  List<String> _resolveLiveRankFeedRanking(
+    Map<String, dynamic>? runtime, {
+    String? winnerOverride,
+  }) {
+    final resolvedWinner =
+        (winnerOverride ?? _extractWinnerName(runtime?['winner'])).trim();
+    final finishedRanking = _extractStringList(runtime?['finishedRanking']);
+    return _normalizeRankingForResult(finishedRanking, winner: resolvedWinner);
+  }
+
   Future<void> _handleCountdownExpired() async {
     try {
       if (!mounted || _isFinishing) {
@@ -8002,7 +8012,9 @@ SOFTWARE.
         ranking.isNotEmpty ? ranking : top3,
         winner: winner,
       );
-      _syncLiveRankFeed(finalRanking);
+      _syncLiveRankFeed(
+        _resolveLiveRankFeedRanking(runtime, winnerOverride: winner),
+      );
       final running = runtime?['running'] == true;
       final count = _toInt(runtime?['count']);
       final movedTicks = _toInt(runtime?['movedTicks']);
@@ -8236,7 +8248,9 @@ SOFTWARE.
     final event = parsed['event'];
     if (event == 'goal') {
       final winnerFromPayload = _extractWinnerName(parsed['payload']);
-      final rankingFromPayload = _extractStringList(parsed['payload']);
+      final rankingFromPayload = _extractStringList(
+        parsed['payload'] is Map ? parsed['payload']['ranking'] : null,
+      );
       _syncLiveRankFeed(
         _normalizeRankingForResult(
           rankingFromPayload,
