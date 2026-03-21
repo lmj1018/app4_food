@@ -10,6 +10,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import '../../core/custom_marble_image_factory.dart';
 import '../../core/food_image_catalog.dart';
 import '../../services/shared_preferences_cache_store.dart';
+import '../widgets/pinball_live_rank_feed.dart';
 import '../widgets/pinball_ranking_ticker.dart';
 
 class PinballV2ScreenArgs {
@@ -237,6 +238,11 @@ SOFTWARE.
   int _zoomPresetOverlayIndex = _v2ZoomPresetDefault;
   bool _showZoomPresetOverlay = false;
   bool _showHoldFastForwardOverlay = false;
+  final List<Timer> _liveRankFeedTimers = <Timer>[];
+  final Set<String> _announcedLiveRankNames = <String>{};
+  List<PinballLiveRankFeedEntry> _liveRankFeedEntries =
+      const <PinballLiveRankFeedEntry>[];
+  int _liveRankFeedSerial = 0;
 
   List<String>? _cachedCandidates;
   String? _candidateImageKey;
@@ -671,6 +677,71 @@ SOFTWARE.
     _licenseHoldTimer = null;
   }
 
+  void _clearLiveRankFeedTimers() {
+    for (final timer in _liveRankFeedTimers) {
+      timer.cancel();
+    }
+    _liveRankFeedTimers.clear();
+  }
+
+  void _resetLiveRankFeed() {
+    _clearLiveRankFeedTimers();
+    _announcedLiveRankNames.clear();
+    if (!mounted) {
+      _liveRankFeedEntries = const <PinballLiveRankFeedEntry>[];
+      return;
+    }
+    setState(() {
+      _liveRankFeedEntries = const <PinballLiveRankFeedEntry>[];
+    });
+  }
+
+  void _syncLiveRankFeed(List<String> ranking) {
+    if (!widget.args.waitForFullRanking || ranking.isEmpty) {
+      return;
+    }
+    for (var index = 0; index < ranking.length; index += 1) {
+      final name = ranking[index].trim();
+      if (name.isEmpty || !_announcedLiveRankNames.add(name)) {
+        continue;
+      }
+      final entry = PinballLiveRankFeedEntry(
+        id: ++_liveRankFeedSerial,
+        name: name,
+        rank: index + 1,
+      );
+      if (mounted) {
+        setState(() {
+          _liveRankFeedEntries = <PinballLiveRankFeedEntry>[
+            ..._liveRankFeedEntries,
+            entry,
+          ];
+        });
+      } else {
+        _liveRankFeedEntries = <PinballLiveRankFeedEntry>[
+          ..._liveRankFeedEntries,
+          entry,
+        ];
+      }
+      late final Timer timer;
+      timer = Timer(const Duration(seconds: 3), () {
+        _liveRankFeedTimers.remove(timer);
+        if (!mounted) {
+          _liveRankFeedEntries = _liveRankFeedEntries
+              .where((item) => item.id != entry.id)
+              .toList(growable: false);
+          return;
+        }
+        setState(() {
+          _liveRankFeedEntries = _liveRankFeedEntries
+              .where((item) => item.id != entry.id)
+              .toList(growable: false);
+        });
+      });
+      _liveRankFeedTimers.add(timer);
+    }
+  }
+
   void _startLicenseHoldTimer() {
     _clearLicenseHoldTimer();
     _licenseHoldTriggered = false;
@@ -824,6 +895,7 @@ SOFTWARE.
     _clearMapLabelOverlayTimer();
     _resetCountdown();
     _resetSlowMotionBannerState();
+    _resetLiveRankFeed();
     setState(() {
       _selectedMapIdOverride = nextMapId;
       _hasError = false;
@@ -1926,6 +1998,7 @@ SOFTWARE.
     });
     _isStarting = true;
     _resetSlowMotionBannerState();
+    _resetLiveRankFeed();
     _startStartupTimer();
     _setStatus('V2 초기화 중...', clearError: true);
 
@@ -2130,6 +2203,7 @@ SOFTWARE.
           parsed,
           winnerOverride: winner,
         );
+        _syncLiveRankFeed(mergedRanking);
         _syncCountdownRate(
           speedMultiplier: stateMap?['speedMultiplier'],
           timeScale: parsed?['timeScale'],
@@ -2358,6 +2432,9 @@ SOFTWARE.
         final rankingFromPayload = _extractStringList(
           parsed['payload'] is Map ? parsed['payload']['ranking'] : null,
         );
+        _syncLiveRankFeed(
+          _normalizeRankingForResult(rankingFromPayload, winner: winner),
+        );
         if (!widget.args.waitForFullRanking) {
           final ranking = _normalizeRankingForResult(
             rankingFromPayload,
@@ -2394,6 +2471,7 @@ SOFTWARE.
     _clearZoomPresetOverlayTimer();
     _resetCountdown();
     _resetSlowMotionBannerState();
+    _resetLiveRankFeed();
     setState(() {
       _hasError = false;
       _didStart = false;
@@ -2413,6 +2491,7 @@ SOFTWARE.
   void initState() {
     super.initState();
     _resetCountdown();
+    _resetLiveRankFeed();
     _viewPrefsLoadFuture = _loadPersistedV2ViewPrefs();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
@@ -2437,6 +2516,7 @@ SOFTWARE.
             _pushRuntimeDebug('page_started');
             _resetCountdown();
             _clearZoomPresetOverlayTimer();
+            _resetLiveRankFeed();
             setState(() {
               _pageLoaded = false;
               _didStart = false;
@@ -2494,6 +2574,7 @@ SOFTWARE.
     _clearWinnerMonitor();
     _clearMapLabelOverlayTimer();
     _clearLicenseHoldTimer();
+    _clearLiveRankFeedTimers();
     _clearSlowMotionBannerTimer();
     _clearSlowMotionDialogueTypingTimer();
     _clearAmbientBannerTimer();
@@ -2991,6 +3072,21 @@ SOFTWARE.
             ),
           _buildHoldFastForwardOverlay(),
           _buildZoomPresetOverlay(context),
+          if (_liveRankFeedEntries.isNotEmpty)
+            SafeArea(
+              child: Align(
+                alignment: Alignment.bottomLeft,
+                child: Padding(
+                  padding: const EdgeInsets.only(
+                    left: pinballOverlayRightPadding,
+                    bottom: pinballOverlayBottomPadding,
+                  ),
+                  child: IgnorePointer(
+                    child: PinballLiveRankFeed(entries: _liveRankFeedEntries),
+                  ),
+                ),
+              ),
+            ),
           SafeArea(
             child: Align(
               alignment: Alignment.bottomRight,
