@@ -21,8 +21,8 @@ keytool -genkeypair -v -keystore release-upload.jks -alias upload -keyalg RSA -k
 
 - 로컬 비밀파일: `secrets/mobile_release.local.psd1`
 - 예제 파일: `secrets/mobile_release.example.psd1`
-- AAB 빌드: `powershell -ExecutionPolicy Bypass -File .\scripts\build_aab.ps1`
-- APK 빌드: `powershell -ExecutionPolicy Bypass -File .\scripts\build_apk_via_temp.ps1 -Mode release`
+- AAB 원클릭 빌드: `powershell -ExecutionPolicy Bypass -File .\scripts\build_aab.ps1`
+- APK 원클릭 빌드: `powershell -ExecutionPolicy Bypass -File .\scripts\build_apk_via_temp.ps1 -Mode release`
 
 초기 설정:
 
@@ -31,6 +31,7 @@ Copy-Item .\secrets\mobile_release.example.psd1 .\secrets\mobile_release.local.p
 ```
 
 `mobile_release.local.psd1`는 `.gitignore` 대상입니다. 실제 API 키/광고 ID/서명 비밀번호는 이 파일에만 저장합니다.
+`mobile_release.example.psd1`는 자리표시자만 담는 공유용 템플릿입니다.
 
 다음 키를 빌드 시점에 주입합니다.
 
@@ -141,5 +142,6 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_apk_via_temp.ps1 -Mode 
 
 - AAB 요청 시 기본 명령: `powershell -ExecutionPolicy Bypass -File .\scripts\build_aab.ps1`
 - APK 요청 시 기본 명령: `powershell -ExecutionPolicy Bypass -File .\scripts\build_apk_via_temp.ps1 -Mode release`
+- 위 두 스크립트를 앞으로의 기본 원클릭 릴리스 진입점으로 사용합니다.
 - 수동 `flutter build appbundle` / `flutter build apk`는 예외 상황이 아니면 사용하지 않습니다.
 - 다른 비밀파일을 써야 하면 두 스크립트에 `-ConfigPath <path>`를 넘깁니다.

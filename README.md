@@ -30,7 +30,7 @@ flutter run `
   --dart-define=KAKAO_REST_API_KEY=<your_kakao_rest_api_key>
 ```
 
-릴리스 AAB/APK는 수동 `flutter build` 대신 아래 스크립트로 빌드합니다.
+릴리스 AAB/APK는 수동 `flutter build` 대신 아래 원클릭 스크립트로 빌드합니다.
 
 ## 릴리스 빌드
 
@@ -50,7 +50,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_apk_via_temp.ps1 -Mode 
 ```
 
 `secrets/mobile_release.local.psd1`는 `.gitignore` 대상이며, 실제 키/비밀번호는 이 파일에만 둡니다.
-앞으로는 릴리스 빌드 시 긴 `--dart-define` 명령을 직접 입력하지 않고 위 스크립트를 사용합니다.
+예제 파일은 커밋 가능하지만 실제 비밀값은 오직 로컬 파일에만 둡니다.
+앞으로 릴리스 빌드 요청은 위 스크립트를 기본으로 사용하고, 긴 `--dart-define` 명령이나 raw `flutter build`는 예외 상황에서만 사용합니다.
 
 ## 무선 디버깅 스플래시 멈춤 대응
 
